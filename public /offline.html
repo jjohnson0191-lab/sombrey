@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Offline — GOAT WALK</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, "Inter", BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #000000;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        letter-spacing: -0.01em;
+      }
+      .container {
+        text-align: center;
+        padding: 2rem;
+        max-width: 400px;
+      }
+      .logo {
+        font-size: 1.5rem;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        margin-bottom: 3rem;
+      }
+      h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+      }
+      p {
+        color: #888888;
+        line-height: 1.6;
+        margin-bottom: 2rem;
+      }
+      button {
+        background: #ffffff;
+        color: #000000;
+        border: none;
+        padding: 0.75rem 2rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      button:hover { background: #d9d9d9; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="logo">GOAT WALK</div>
+      <h1>You're offline</h1>
+      <p>Check your internet connection and try again. Your data will sync when you're back online.</p>
+      <button onclick="window.location.reload()">Try Again</button>
+    </div>
+  </body>
+</html>
