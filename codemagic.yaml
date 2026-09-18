@@ -22,7 +22,7 @@ workflows:
       # Referencing this exact profile removes that ambiguity.
       ios_signing:
         provisioning_profiles:
-          - sombrey_app_store_profile
+          - Sombrey_App_Store.mobileprovision
         certificates:
           - sombrey_distribution
 
