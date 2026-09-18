@@ -84,7 +84,7 @@ workflows:
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
-          xcode-project use-profiles
+          xcode-project use-profiles --project "apps/mobile/ios/App/App.xcodeproj"
 
       - name: Build the .ipa
         script: |
