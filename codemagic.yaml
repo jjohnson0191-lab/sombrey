@@ -84,7 +84,17 @@ workflows:
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
-          xcode-project use-profiles --project "apps/mobile/ios/App/App.xcodeproj"
+          xcode-project use-profiles \
+            --project "apps/mobile/ios/App/App.xcodeproj" \
+            --archive-method app-store
+
+      - name: Diagnose code signing assignment (no secrets printed)
+        script: |
+          xcodebuild -showBuildSettings \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            | grep -E "PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE"
 
       - name: Build the .ipa
         script: |
