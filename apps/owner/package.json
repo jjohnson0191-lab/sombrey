@@ -1,0 +1,6 @@
+{
+  "name": "@sombrey/owner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sombrey private owner/business dashboard. Not yet scaffolded — see README. This is a boundary marker for Phase 1 only."
+}

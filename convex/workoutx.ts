@@ -53,6 +53,23 @@ const MUSCLE_GROUP_TO_BODY_PART: Record<string, string> = {
   cardio: "cardio",
 };
 
+/**
+ * Security fix: every action in this file was previously callable by
+ * anyone with the public Convex URL, unauthenticated — a real cost/DoS
+ * exposure against the WorkoutX API quota. Require a logged-in Sombrey
+ * user for all of them. (searchExercises/importExercise/
+ * bulkImportExercises/getSimilarExercises/getFilterLists back the
+ * coach "Import Exercise" panel, which is coaching tooling excluded
+ * from the Sombrey product — kept here, secured, pending an explicit
+ * decision on removing them entirely.)
+ */
+async function requireAuth(ctx: ActionCtx): Promise<void> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    throw new ConvexError({ code: "UNAUTHENTICATED", message: "Not logged in" });
+  }
+}
+
 function getWxClient(): WorkoutX {
   const apiKey = process.env.WORKOUTX_API_KEY;
   if (!apiKey) {
@@ -187,9 +204,18 @@ export const syncAndSearch = action({
   },
 });
 
-// ── Remaining public actions (used by coach Import panel) ────────────────────
+// ── Legacy coach Import panel actions ─────────────────────────────────────────
+//
+// Sombrey has no human/online coaching, so nothing in the new customer-facing
+// exercise system calls these. They are retained ONLY because the legacy SPA's
+// coach Import panel (src/pages/exercises/page.tsx — WxImportPanel) still
+// calls them today, and the legacy SPA must keep working. Candidates for
+// removal once the legacy SPA is retired. Three sibling actions that were
+// exported for the same panel but had zero callers anywhere in the repo
+// (bulkImportExercises, getSimilarExercises, getFilterLists) were removed in
+// the Phase 2 cleanup pass — see git history.
 
-/** Search WorkoutX directly — used by the coach Import Exercise panel. */
+/** Search WorkoutX directly — used by the legacy SPA's coach Import Exercise panel. */
 export const searchExercises = action({
   args: {
     query: v.optional(v.string()),
@@ -198,7 +224,7 @@ export const searchExercises = action({
     equipment: v.optional(v.string()),
     limit: v.optional(v.number()),
   },
-  handler: async (_ctx, args): Promise<{
+  handler: async (ctx, args): Promise<{
     id: string;
     name: string;
     bodyPart: string;
@@ -208,6 +234,7 @@ export const searchExercises = action({
     gifUrl: string;
     instructions: string[];
   }[]> => {
+    await requireAuth(ctx);
     const wx = getWxClient();
     const limit = args.limit ?? 30;
 
@@ -246,11 +273,12 @@ export const searchExercises = action({
 
 /**
  * Import a single WorkoutX exercise into Convex (upsert).
- * Used by the coach Import Exercise panel.
+ * Used by the legacy SPA's coach Import Exercise panel — see note above.
  */
 export const importExercise = action({
   args: { workoutxId: v.string() },
   handler: async (ctx, args): Promise<Id<"exercises">> => {
+    await requireAuth(ctx);
     const wx = getWxClient();
 
     try {
@@ -290,82 +318,3 @@ export const importExercise = action({
   },
 });
 
-/** Bulk import — used by the coach Import panel after a search. */
-export const bulkImportExercises = action({
-  args: { workoutxIds: v.array(v.string()) },
-  handler: async (ctx, args): Promise<Record<string, string>> => {
-    const wx = getWxClient();
-    const result: Record<string, string> = {};
-    for (const wxId of args.workoutxIds) {
-      try {
-        const existing = await ctx.runQuery(internal.workoutxDb.getExerciseByWorkoutxId, { workoutxId: wxId });
-        if (existing) { result[wxId] = existing._id; continue; }
-        const e = await wx.exercises.get(wxId);
-        const convexId = await ctx.runMutation(internal.workoutxDb.upsertWxExercise, {
-          workoutxId: e.id,
-          name: e.name,
-          description: e.target ? `${e.bodyPart ?? ""} exercise targeting ${e.target}` : (e.bodyPart ?? ""),
-          muscleGroup: mapBodyPartToMuscleGroup(e.bodyPart ?? ""),
-          equipment: e.equipment ? [e.equipment] : [],
-          primaryMuscles: e.target ? [e.target] : [],
-          secondaryMuscles: e.secondaryMuscles ?? [],
-          instructions: e.instructions ?? [],
-          cues: [],
-          gifUrl: wx.gifUrl(e.id),
-          wxBodyPart: e.bodyPart ?? undefined,
-          wxTarget: e.target ?? undefined,
-        });
-        result[wxId] = convexId;
-      } catch {
-        console.warn(`[workoutx] Failed to import exercise ${wxId}`);
-      }
-    }
-    return result;
-  },
-});
-
-/** Get similar exercises — used on the exercise detail page. */
-export const getSimilarExercises = action({
-  args: { workoutxId: v.string(), limit: v.optional(v.number()) },
-  handler: async (_ctx, args): Promise<{
-    id: string; name: string; bodyPart: string; target: string; gifUrl: string;
-  }[]> => {
-    const wx = getWxClient();
-    try {
-      const raw = (await wx.exercises.similar(args.workoutxId)) as { data: { id: string; name: string; bodyPart: string; target: string }[] };
-      return (raw.data ?? []).slice(0, args.limit ?? 6).map((e) => ({
-        id: e.id,
-        name: e.name,
-        bodyPart: e.bodyPart ?? "",
-        target: e.target ?? "",
-        gifUrl: wx.gifUrl(e.id),
-      }));
-    } catch (err) {
-      if (err instanceof WorkoutXError) {
-        throw new ConvexError({ code: "EXTERNAL_SERVICE_ERROR", message: err.message });
-      }
-      throw err;
-    }
-  },
-});
-
-/** Get filter lists — used by coach tooling. */
-export const getFilterLists = action({
-  args: {},
-  handler: async (_ctx): Promise<{ bodyParts: string[]; targets: string[]; equipment: string[] }> => {
-    const wx = getWxClient();
-    try {
-      const [bodyParts, targets, equipment] = await Promise.all([
-        wx.exercises.bodyPartList(),
-        wx.exercises.targetList(),
-        wx.exercises.equipmentList(),
-      ]);
-      return { bodyParts: bodyParts ?? [], targets: targets ?? [], equipment: equipment ?? [] };
-    } catch (err) {
-      if (err instanceof WorkoutXError) {
-        throw new ConvexError({ code: "EXTERNAL_SERVICE_ERROR", message: err.message });
-      }
-      throw err;
-    }
-  },
-});

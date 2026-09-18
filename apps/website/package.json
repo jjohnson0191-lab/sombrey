@@ -1,0 +1,6 @@
+{
+  "name": "@sombrey/website",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sombrey public/commercial website. Not yet scaffolded — see README. This is a boundary marker for Phase 1 only."
+}

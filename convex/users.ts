@@ -1,7 +1,9 @@
 import { ConvexError } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { hasRole, getUserRoles, primaryRole } from "./lib/roles.js";
 
 const ROLE_VALIDATOR = v.union(
@@ -1016,8 +1018,76 @@ export const getById = query({
 });
 
 /**
- * Self-service account deletion — any authenticated user can delete their own account.
- * Removes the user record and, where possible, associated personal data.
+ * Delete every document returned by a query builder, and any storage
+ * blob a doc references via `storageId`/`imageStorageId` fields.
+ */
+async function purgeDocs(
+  ctx: MutationCtx,
+  docs: Array<{ _id: Id<any>; storageId?: Id<"_storage">; imageStorageId?: Id<"_storage">; frontPhotoStorageId?: Id<"_storage">; sidePhotoStorageId?: Id<"_storage">; backPhotoStorageId?: Id<"_storage"> }>,
+): Promise<void> {
+  for (const doc of docs) {
+    for (const field of ["storageId", "imageStorageId", "frontPhotoStorageId", "sidePhotoStorageId", "backPhotoStorageId"] as const) {
+      const storageId = doc[field];
+      if (storageId) await ctx.storage.delete(storageId);
+    }
+    await ctx.db.delete(doc._id);
+  }
+}
+
+/**
+ * Self-service account deletion — the backend foundation for the future
+ * mobile Account -> Settings -> Delete Account flow (Apple App Store
+ * requires an in-app path to delete an account; that UI is NOT built in
+ * this pass — this mutation is what it will call, with a confirmation
+ * step handled entirely client-side when the mobile app is built).
+ *
+ * Authorization: identity is derived solely from `ctx.auth.getUserIdentity()`
+ * (the authenticated Clerk session) — there is no user-id argument, so a
+ * caller can only ever delete the account tied to their own session. It is
+ * structurally impossible for this mutation to delete a different user's
+ * account.
+ *
+ * Atomicity: this is a single Convex mutation, so every delete below either
+ * all commits together or (on any thrown error) all rolls back together —
+ * Convex mutations are transactional by construction. That's the extent of
+ * "safe against partial failure" achievable here; there is no separate
+ * retry/cleanup job because none is needed.
+ *
+ * Deletes the user's personal fitness/nutrition/progress/AI/wearable-
+ * relevant data outright (no legal or business reason to retain it),
+ * including cleaning up any storage blobs (progress photos, meal photos,
+ * check-in photos) those rows reference. Deliberately does NOT touch
+ * financial/legal/audit-relevant records — offlinePayments, storeOrders,
+ * supportTickets, auditLogs, businessEmails, inventoryLogs — which are
+ * retained under the user's now-deleted account id for accounting/legal
+ * purposes. A formal anonymization scheme for those retained records
+ * (what counts as PII, how long to keep them) is a retention-policy
+ * decision, not made here — flagged for approval, not implemented.
+ *
+ * Subscription status: this mutation does NOT set subscriptionTier,
+ * paymentStatus, or any "cancelled" flag — it simply deletes the user row.
+ * Deleting a Sombrey account and cancelling an Apple subscription are two
+ * different operations: Apple continues to bill/renew an active StoreKit
+ * subscription until the customer cancels it themselves through Apple's
+ * own subscription-management surface, regardless of what happens to their
+ * Sombrey account. This mutation must never be extended to claim or imply
+ * the subscription was cancelled — it wasn't. The future mobile app must
+ * expose Apple's native "Manage Subscription" flow as a distinct action
+ * from "Delete Account", not fold one into the other. StoreKit integration
+ * itself is a separate, later phase — not implemented here.
+ *
+ * Coaching-only tables (coachClientNotes, coachNutritionAssignments,
+ * supplementProtocols, scheduledCardio, scheduledStepGoals,
+ * scheduledWorkouts, programPhases, coachingSubscriptions, coachInvites)
+ * are out of scope here — that whole feature set is excluded from Sombrey,
+ * but the legacy SPA's coach/admin screens still actively use it, so it
+ * cannot be removed yet. Its disposition (delete vs. retain vs. migrate)
+ * is a separate, undecided question, tracked for a dedicated cleanup pass
+ * once the legacy SPA is retired.
+ *
+ * Known gap: `postLikes` has no by-user index (only by_post/by_post_and_user),
+ * so it isn't purged here — low priority, since Community is excluded from
+ * Sombrey V1 and the table holds no data of consequence for a real customer.
  */
 export const deleteSelfAccount = mutation({
   args: {},
@@ -1036,12 +1106,45 @@ export const deleteSelfAccount = mutation({
       throw new ConvexError({ code: "FORBIDDEN", message: "Owner account cannot be deleted this way. Contact support." });
     }
 
+    const userId = user._id;
+
+    // Personal fitness/nutrition/progress/AI data — deleted outright.
+    await purgeDocs(ctx, await ctx.db.query("assignedPrograms").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("workoutLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("mealPlans").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("nutritionLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("progressPhotos").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("measurements").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("checkIns").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("communityPosts").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("postComments").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("cartItems").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("mealPhotoLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("workoutPerformanceLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("clientGoals").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("mealLogs").withIndex("by_user_and_date", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("cardioLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("stepLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("premiumOnboarding").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("aiGeneratedPlans").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("weeklyCheckIns").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("planModifications").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("aiWorkoutLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("exerciseProgressions").withIndex("by_user_and_plan", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("emailRateLimits").withIndex("by_user_and_date", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("aiChatMessages").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+
+    // Coach-client messaging — excluded feature, but purge this user's
+    // side of it regardless of role (sender or recipient).
+    await purgeDocs(ctx, await ctx.db.query("messages").withIndex("by_sender", (q) => q.eq("senderId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("messages").withIndex("by_recipient", (q) => q.eq("recipientId", userId)).collect());
+
     // Delete avatar from storage
     if (user.avatarStorageId) {
       await ctx.storage.delete(user.avatarStorageId);
     }
 
-    // Delete the user record — cascading deletes for personal data happen via scheduled cleanup
+    // Delete the user record itself last.
     await ctx.db.delete(user._id);
   },
 });

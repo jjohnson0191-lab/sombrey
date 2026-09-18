@@ -1,0 +1,13 @@
+{
+  "name": "@sombrey/wearable",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sombrey wearable domain boundary: types and the SombreyWearableService contract. No Swift, no QCBANDSDK, no Capacitor, no Bluetooth.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

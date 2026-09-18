@@ -5,10 +5,17 @@ import escapeHtml from "escape-html";
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
 
-const hercules = new Hercules({
-  apiKey: process.env.HERCULES_API_KEY!,
-  apiVersion: "2025-12-09",
-});
+// Remaining Hercules dependency — email transport for the coach invite
+// flow, which is itself excluded from Sombrey (coaching feature). Not
+// fixed here beyond making construction lazy, so a missing
+// HERCULES_API_KEY fails at call time, not at deployment analysis time.
+function getHerculesClient(): Hercules {
+  const apiKey = process.env.HERCULES_API_KEY;
+  if (!apiKey) {
+    throw new Error("HERCULES_API_KEY is not configured on this deployment.");
+  }
+  return new Hercules({ apiKey, apiVersion: "2025-12-09" });
+}
 
 const TIER_LABELS: Record<string, string> = {
   free: "Shopping Experience Only (Free)",
@@ -33,7 +40,7 @@ export const sendCoachInviteEmail = internalAction({
     const safeName = escapeHtml(args.ownerName);
     const safeUrl = escapeHtml(acceptUrl);
 
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: "noreply@goatwalk.onhercules.app",
       to: args.toEmail,
       subject: "You've been invited to join GOAT WALK as a Coach",
@@ -125,7 +132,7 @@ export const sendClientInviteEmail = internalAction({
     const safeUrl = escapeHtml(acceptUrl);
     const tierLabel = escapeHtml(TIER_LABELS[args.subscriptionTier] ?? args.subscriptionTier);
 
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: "noreply@goatwalk.onhercules.app",
       to: args.toEmail,
       subject: "You've been invited to join GOAT WALK",

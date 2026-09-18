@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/*
+ * Sombrey mobile design tokens.
+ *
+ * Direction: premium, minimal, dark/neutral foundation, muted blue-grey
+ * accents, restrained contrast, Apple-quality whitespace discipline.
+ * Written fresh for Sombrey — not copied from the legacy app's palette.
+ * Swap these values freely; nothing downstream should hardcode a color.
+ */
+@theme {
+  --color-background: #0b0d10;
+  --color-surface: #14171b;
+  --color-surface-elevated: #1b1f24;
+  --color-border: #262b31;
+  --color-border-subtle: #1c2025;
+
+  --color-foreground: #f2f3f5;
+  --color-foreground-muted: #9aa3ae;
+  --color-foreground-faint: #656d78;
+
+  --color-accent: #8fa3b8;
+  --color-accent-strong: #b7c6d6;
+
+  --color-success: #7fae8e;
+  --color-warning: #c9a86a;
+  --color-danger: #c07a7a;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

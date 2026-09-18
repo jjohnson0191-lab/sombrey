@@ -14,10 +14,17 @@ import {
   APP_URL,
 } from "./templates.js";
 
-const hercules = new Hercules({
-  apiKey: process.env.HERCULES_API_KEY!,
-  apiVersion: "2025-12-09",
-});
+// Remaining Hercules dependency — email transport only. Not fixed here
+// (out of Phase 2 scope: independent transactional email provider needs
+// to be chosen first). Made lazy so a missing HERCULES_API_KEY fails at
+// call time, not at Convex deployment analysis time.
+function getHerculesClient(): Hercules {
+  const apiKey = process.env.HERCULES_API_KEY;
+  if (!apiKey) {
+    throw new Error("HERCULES_API_KEY is not configured on this deployment.");
+  }
+  return new Hercules({ apiKey, apiVersion: "2025-12-09" });
+}
 
 // ─── Welcome Email ────────────────────────────────────────────────────────────
 
@@ -42,7 +49,7 @@ export const sendWelcomeEmail = internalAction({
       ${ctaButton("Open GOAT WALK", APP_URL)}
       ${para("Complete your onboarding to unlock your personalised plan.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: `Welcome to GOAT WALK, ${safeName} 🔥`,
@@ -89,7 +96,7 @@ export const sendSubscriptionConfirmationEmail = internalAction({
       ${ctaButton("Start Your Journey", APP_URL)}
       ${para("To manage or cancel your subscription, visit your Profile → My Subscription inside the app.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: "GOAT WALK Premium — Subscription Confirmed",
@@ -130,7 +137,7 @@ export const sendSubscriptionCancellationEmail = internalAction({
       ${ctaButton("Reactivate Premium", `${APP_URL}/subscription`)}
       ${para("If you have feedback about your experience, we'd love to hear it — reply to this email.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: "GOAT WALK Premium — Subscription Cancelled",
@@ -175,7 +182,7 @@ export const sendAiPlanReadyEmail = internalAction({
       </ul>
       ${ctaButton("View Your Plan", `${APP_URL}/ai-plan`)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: "Your GOAT WALK AI Plan is Ready 🎯",
@@ -213,7 +220,7 @@ export const sendAiPlanUpdatedEmail = internalAction({
       ${ctaButton("View Updated Plan", `${APP_URL}/ai-plan`)}
       ${para("Have questions about your plan? Chat with your AI Coach inside the app.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: `Your GOAT WALK Plan Has Been Updated — Week ${weekNumber}`,
@@ -251,7 +258,7 @@ export const sendCheckInReminderEmail = internalAction({
       ${ctaButton("Complete Check-In Now", `${APP_URL}/check-in`)}
       ${para("Don't skip — consistent check-ins are how your AI Coach keeps you on track.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: `⏰ Week ${weekNumber} Check-In Due — GOAT WALK`,
@@ -291,7 +298,7 @@ export const sendMissedCheckInEmail = internalAction({
       ${ctaButton("Complete Your Check-In", `${APP_URL}/check-in`)}
       ${para("Consistency is what separates the GOATs from the rest.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: toEmail,
       subject: `You Missed Your Week ${weekNumber} Check-In — GOAT WALK`,

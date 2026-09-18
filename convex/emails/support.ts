@@ -6,10 +6,17 @@ import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
 import { buildEmailHtml, ctaButton, infoBox, para, divider, SENDER, APP_URL } from "./templates.js";
 
-const hercules = new Hercules({
-  apiKey: process.env.HERCULES_API_KEY!,
-  apiVersion: "2025-12-09",
-});
+// Remaining Hercules dependency — email transport only. Not fixed here
+// (out of Phase 2 scope: independent transactional email provider needs
+// to be chosen first). Made lazy so a missing HERCULES_API_KEY fails at
+// call time, not at Convex deployment analysis time.
+function getHerculesClient(): Hercules {
+  const apiKey = process.env.HERCULES_API_KEY;
+  if (!apiKey) {
+    throw new Error("HERCULES_API_KEY is not configured on this deployment.");
+  }
+  return new Hercules({ apiKey, apiVersion: "2025-12-09" });
+}
 
 // ─── Support ticket confirmation to user ─────────────────────────────────────
 
@@ -41,7 +48,7 @@ export const sendSupportConfirmation = internalAction({
       ${divider()}
       ${para("You'll receive a reply to this email address. You can also view your ticket status in the app.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       reply_to: "Admin@app.agoatwalk.com",
       to: toEmail,
@@ -90,7 +97,7 @@ export const sendSupportReply = internalAction({
       ${divider()}
       ${para("To reply, simply respond to this email or contact us again via Contact Support in the app.", true)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       reply_to: "Admin@app.agoatwalk.com",
       to: toEmail,
@@ -142,7 +149,7 @@ export const sendAdminNewTicketNotification = internalAction({
       </div>
       ${ctaButton("View in Admin Dashboard", `${APP_URL}/owner`)}
     `;
-    await hercules.email.send({
+    await getHerculesClient().email.send({
       from: SENDER,
       to: args.adminEmail,
       subject: `[GOAT WALK Support] New Ticket — ${args.subject}`,

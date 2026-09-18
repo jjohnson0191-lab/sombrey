@@ -1,0 +1,16 @@
+{
+  "name": "@sombrey/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Framework-agnostic pure TypeScript shared across Sombrey apps and the Convex backend. No React, no Convex client, no Capacitor, no native code, no browser APIs, no Hercules.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}
