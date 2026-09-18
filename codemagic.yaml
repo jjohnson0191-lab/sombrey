@@ -40,10 +40,10 @@ workflows:
           source: true
 
     scripts:
-      - name: Enable pnpm (matches the committed lockfile version)
+      - name: Install pnpm (matches the committed lockfile version)
         script: |
-          corepack enable
-          corepack prepare pnpm@9 --activate
+          npm install -g pnpm@9
+          pnpm --version
 
       - name: Install workspace dependencies
         script: pnpm install --frozen-lockfile
