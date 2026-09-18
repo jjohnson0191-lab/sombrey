@@ -1,20 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
-import { Screen, Row, Card, Button } from "@/ui/index.ts";
+import { Screen, Card, Button } from "@/ui/index.ts";
 import { useAccountDeletion } from "@/features/account/accountDeletionService.ts";
 
 /**
- * Architectural foundation for Profile -> Settings -> Delete Account,
- * per the Phase 3 requirement. This is NOT the polished, final
- * production UI (no legal-reviewed copy, no App Store-review-ready
- * confirmation language) — it is a real, working confirmation step
- * wired to the actual Phase 2 Convex mutation, so the eventual real
- * screen is a copy/design pass, not a re-architecture.
- *
- * Deliberately does not mention "cancels your subscription" anywhere —
- * because it doesn't. See subscriptionService.ts's manageSubscription()
- * for the separate path this screen must eventually link to.
+ * Delete account — real, working confirmation wired to the actual
+ * Convex mutation (users.deleteSelfAccount). Deliberately does not
+ * mention "cancels your subscription" anywhere — because it doesn't.
+ * See subscriptionService.ts's manageSubscription() for the separate
+ * path this screen must eventually link to.
  */
 export function DeleteAccountScreen() {
   const navigate = useNavigate();
@@ -28,8 +22,6 @@ export function DeleteAccountScreen() {
     setError(null);
     try {
       await deleteAccount();
-      // Real navigation-to-signed-out-state happens once Clerk sign-out
-      // is wired here too — foundation only for now.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -38,28 +30,24 @@ export function DeleteAccountScreen() {
   };
 
   return (
-    <Screen className="gap-6 pt-4">
-      <Row gap={2}>
-        <button type="button" onClick={() => navigate(-1)} aria-label="Back">
-          <ChevronLeft className="h-5 w-5 text-foreground-muted" />
-        </button>
-        <h1 className="text-xl font-semibold text-danger">Delete Account</h1>
-      </Row>
+    <Screen scene="settings" className="pt-14 pb-8">
+      <button type="button" onClick={() => navigate(-1)} className="text-[13px] text-ink-soft">
+        Back
+      </button>
+      <h1 className="mt-4 text-[22px] font-semibold text-danger">Delete account</h1>
 
-      <Card className="flex flex-col gap-3">
-        <p className="text-sm text-foreground">
-          This permanently deletes your Sombrey workouts, nutrition logs,
-          progress photos, measurements, AI chat history, and wearable
-          data. This cannot be undone.
+      <Card className="mt-5 flex flex-col gap-3">
+        <p className="text-[13px] text-ink">
+          This permanently deletes your Sombrey workouts, nutrition logs, progress photos, measurements,
+          AI chat history, and wearable data. This cannot be undone.
         </p>
-        <p className="text-sm text-foreground-muted">
-          This does <span className="font-semibold text-foreground">not</span> cancel
-          an active Apple subscription — manage or cancel that separately
-          from Subscription settings.
+        <p className="text-[13px] text-ink-soft">
+          This does <span className="font-semibold text-ink">not</span> cancel an active Apple
+          subscription — manage or cancel that separately from Subscription settings.
         </p>
       </Card>
 
-      <label className="flex items-start gap-3 text-sm text-foreground-muted">
+      <label className="mt-5 flex items-start gap-3 text-[13px] text-ink-soft">
         <input
           type="checkbox"
           checked={confirmed}
@@ -69,11 +57,13 @@ export function DeleteAccountScreen() {
         I understand this cannot be undone.
       </label>
 
-      {error && <p className="text-sm text-danger">{error}</p>}
+      {error && <p className="mt-3 text-[13px] text-danger">{error}</p>}
 
-      <Button variant="danger" disabled={!confirmed || isDeleting} onClick={() => void handleDelete()}>
-        {isDeleting ? "Deleting…" : "Delete my account"}
-      </Button>
+      <div className="mt-6">
+        <Button variant="danger" disabled={!confirmed || isDeleting} onClick={() => void handleDelete()}>
+          {isDeleting ? "Deleting…" : "Delete my account"}
+        </Button>
+      </div>
     </Screen>
   );
 }

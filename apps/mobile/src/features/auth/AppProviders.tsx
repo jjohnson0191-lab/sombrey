@@ -17,7 +17,7 @@ const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string
 export function AppProviders({ children }: { children: ReactNode }) {
   if (!clerkPublishableKey) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-background px-6 text-center text-foreground-muted">
+      <div className="flex h-dvh items-center justify-center bg-env-5 px-6 text-center text-ink-soft">
         <p>
           VITE_CLERK_PUBLISHABLE_KEY is not set in apps/mobile/.env.local.
           Add it from the Clerk dashboard (Configure → API Keys) to run the

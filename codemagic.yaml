@@ -1,0 +1,90 @@
+workflows:
+  sombrey-mobile-ios:
+    name: Sombrey Mobile — iOS (TestFlight)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    # Create an App Store Connect API key integration in Codemagic
+    # (Team settings → Integrations → App Store Connect) named exactly
+    # "sombrey_app_store_connect", or change this reference to match
+    # whatever name you give it. This is what fetch-signing-files,
+    # use-profiles, and the app_store_connect publishing block below
+    # all authenticate with — none of those credentials live in this
+    # repo.
+    integrations:
+      app_store_connect: sombrey_app_store_connect
+
+    environment:
+      # Create this group in Codemagic (Team settings → Environment
+      # variable groups) with VITE_CONVEX_URL and VITE_CLERK_PUBLISHABLE_KEY
+      # as secure variables — the same two values apps/mobile/.env.local
+      # holds locally. Never commit that file; this group is its CI
+      # equivalent. Vite reads VITE_-prefixed vars straight from the
+      # process environment at build time, so no .env file is written
+      # here.
+      groups:
+        - sombrey_mobile
+      vars:
+        XCODE_WORKSPACE: "apps/mobile/ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.sombrey.app"
+      node: 20.18.0
+      xcode: latest
+      cocoapods: default
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
+    scripts:
+      - name: Enable pnpm (matches the committed lockfile version)
+        script: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+
+      - name: Install workspace dependencies
+        script: pnpm install --frozen-lockfile
+
+      - name: Build the Sombrey mobile web bundle
+        script: |
+          cd apps/mobile
+          pnpm build
+
+      - name: Capacitor sync (copies the web build into the iOS project)
+        script: |
+          cd apps/mobile
+          pnpm cap:sync
+
+      - name: CocoaPods install
+        script: |
+          cd apps/mobile/ios/App
+          pod install
+
+      - name: Set up iOS code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Build the .ipa
+        script: |
+          cd apps/mobile/ios/App
+          xcode-project build-ipa \
+            --workspace "App.xcworkspace" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - apps/mobile/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

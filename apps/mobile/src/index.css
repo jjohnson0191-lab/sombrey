@@ -1,48 +1,211 @@
 @import "tailwindcss";
 
 /*
- * Sombrey mobile design tokens.
+ * Sombrey "Studio Instrument" design tokens — V1, approved for
+ * implementation. Replaces the earlier placeholder dark/neutral
+ * foundation. See apps/mobile/README.md and the approved visual
+ * artifacts (Studio Instrument design system, illuminated glass CTA,
+ * Bricolage-hero typography) for the source of truth this codes up.
  *
- * Direction: premium, minimal, dark/neutral foundation, muted blue-grey
- * accents, restrained contrast, Apple-quality whitespace discipline.
- * Written fresh for Sombrey — not copied from the legacy app's palette.
- * Swap these values freely; nothing downstream should hardcode a color.
+ * Nothing downstream should hardcode a hex value — everything here is a
+ * token, and screens/components reference it by name.
  */
 @theme {
-  --color-background: #0b0d10;
-  --color-surface: #14171b;
-  --color-surface-elevated: #1b1f24;
-  --color-border: #262b31;
-  --color-border-subtle: #1c2025;
+  /* Environment — one continuous tonal field, deep graphite to warm
+     ivory. Screens don't get their own background color; they pick a
+     "crop" of this same six-stop family (see Environment.tsx). */
+  --color-env-0: #1e2731;
+  --color-env-1: #37434f;
+  --color-env-2: #667380;
+  --color-env-3: #a9aea6;
+  --color-env-4: #e7e2d4;
+  --color-env-5: #f7efe0;
 
-  --color-foreground: #f2f3f5;
-  --color-foreground-muted: #9aa3ae;
-  --color-foreground-faint: #656d78;
+  /* Text — luminance-aware pairs. Ink on light environment, paper on
+     dark; never a fixed foreground color. */
+  --color-ink: #1b2027;
+  --color-ink-soft: rgba(27, 32, 39, 0.62);
+  --color-ink-faint: rgba(27, 32, 39, 0.38);
+  --color-paper: #f2eee4;
+  --color-paper-soft: rgba(242, 238, 228, 0.62);
+  --color-paper-faint: rgba(242, 238, 228, 0.38);
 
-  --color-accent: #8fa3b8;
-  --color-accent-strong: #b7c6d6;
+  /* Accent — reserved for readiness/live state and the glass CTA's
+     internal glow. Never a decorative color, never a button fill by
+     itself. Two text-safe variants for the two grounds. */
+  --color-accent: #e1704a;
+  --color-accent-ink: #9c4a28;
+  --color-accent-ink-dark: #f0a379;
 
-  --color-success: #7fae8e;
-  --color-warning: #c9a86a;
-  --color-danger: #c07a7a;
+  /* Semantic domains — data-context only (chips, chart series), never
+     surfaces or chrome. */
+  --color-training: #4c7a9e;
+  --color-nutrition: #7c8f5f;
+  --color-danger: #9c4a3a;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-hero: "Bricolage Grotesque", "Instrument Sans", sans-serif;
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+  /* Safe-area padding lives on the root so every full-bleed environment
+     screen clears the notch/home-indicator without a wrapper div. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 html,
 body,
 #root {
   height: 100%;
-  background: var(--color-background);
-  color: var(--color-foreground);
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
+  color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numerals everywhere a metric or timer is shown, so digits
+   never jitter as they update live. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Motion language: trigger -> transition -> settle -> still. Every
+ * animation here plays ONCE (or, for a live tick, gently) and never
+ * loops as ambient decoration. See the approved motion artifact.
+ */
+@keyframes si-bloom-once {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes si-sweep-once {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+@keyframes si-tick {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes si-settle-once {
+  0% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+}
+
+.si-bloom-once {
+  animation: si-bloom-once 900ms cubic-bezier(0.2, 0.8, 0.2, 1) 1 both;
+}
+.si-sweep-once {
+  animation: si-sweep-once 2.4s cubic-bezier(0.3, 0, 0.2, 1) 1 both;
+}
+.si-tick {
+  animation: si-tick 1.3s ease-in-out infinite;
+}
+.si-settle-once {
+  animation: si-settle-once 1.6s cubic-bezier(0.2, 0.7, 0.3, 1) 1 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .si-bloom-once,
+  .si-sweep-once,
+  .si-tick,
+  .si-settle-once {
+    animation: none !important;
+  }
+}
+
+/*
+ * Primary CTA — a lit translucent glass pill. Genuinely translucent
+ * (low-opacity fill, light 7px blur) so the environment shows through
+ * it rather than a frosted-opaque button; the two radial layers are the
+ * "internal illumination" — one models a light source from above, the
+ * other sits behind the label and doubles as the readability floor so
+ * ink text stays legible even on the environment's darkest stop. See
+ * the approved illuminated-glass-CTA artifact.
+ */
+.si-pill-primary {
+  height: 52px;
+  padding: 0 30px;
+  border-radius: 26px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--color-ink);
+  background:
+    radial-gradient(ellipse 150% 140% at 50% -20%, rgba(255, 255, 255, 0.5), transparent 55%),
+    radial-gradient(ellipse 160% 200% at 50% 70%, rgba(255, 255, 255, 0.32), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.14) 100%);
+  -webkit-backdrop-filter: blur(7px) saturate(1.15);
+  backdrop-filter: blur(7px) saturate(1.15);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 14px 22px -12px rgba(20, 16, 10, 0.4);
+  transition: transform 90ms ease-out, box-shadow 90ms ease-out, background 90ms ease-out;
+}
+.si-pill-primary:active:not(:disabled) {
+  transform: scale(0.97);
+  background:
+    radial-gradient(ellipse 150% 140% at 50% -20%, rgba(255, 255, 255, 0.62), transparent 55%),
+    radial-gradient(ellipse 160% 200% at 50% 70%, rgba(255, 255, 255, 0.42), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.36) 0%, rgba(255, 255, 255, 0.18) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+    0 6px 10px -6px rgba(20, 16, 10, 0.35);
+}
+.si-pill-primary:disabled {
+  color: var(--color-ink-faint);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.08) 100%);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.si-pill-secondary {
+  height: 46px;
+  padding: 0 22px;
+  border-radius: 23px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: transparent;
+  border: 1.5px solid rgba(27, 32, 39, 0.28);
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+.si-pill-secondary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.si-pill-secondary:disabled {
+  opacity: 0.4;
 }

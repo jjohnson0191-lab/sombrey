@@ -14,7 +14,7 @@ import { Screen } from "@/ui/index.ts";
  */
 export function SignInScreen() {
   return (
-    <Screen className="items-center justify-center pt-16" scroll={false}>
+    <Screen scene="settings" nav={false} className="items-center justify-center pt-16" scroll={false}>
       <div className="flex w-full flex-col items-center gap-8">
         <h1 className="text-2xl font-semibold tracking-tight">Sombrey</h1>
         <SignIn routing="virtual" />

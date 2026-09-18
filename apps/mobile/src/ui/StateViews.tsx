@@ -2,14 +2,16 @@ import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
 
 /**
- * Reusable state patterns, per the Phase 3 foundation requirement — not
- * elaborate screens, just the shared shape every feature screen needs.
+ * Reusable state patterns. Loading/empty/error stay quiet on purpose —
+ * no red alert boxes, no spinners for "not enough data yet" (that's a
+ * calm, wordless placeholder; see ReadinessIndicator) — a plain
+ * sentence and, where relevant, a plain text retry action.
  */
 
 export function LoadingState({ label = "Loading…" }: { label?: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-foreground-muted">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-accent" />
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-ink-soft">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-ink/15 border-t-accent-ink" />
       <span className="text-sm">{label}</span>
     </div>
   );
@@ -26,8 +28,8 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      {description && <p className="max-w-xs text-sm text-foreground-muted">{description}</p>}
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      {description && <p className="max-w-xs text-sm text-ink-soft">{description}</p>}
       {action}
     </div>
   );
@@ -45,10 +47,10 @@ export function ErrorState({
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
       <p className="text-sm font-semibold text-danger">{title}</p>
-      {description && <p className="max-w-xs text-sm text-foreground-muted">{description}</p>}
+      {description && <p className="max-w-xs text-sm text-ink-soft">{description}</p>}
       {onRetry && (
-        <Button variant="secondary" onClick={onRetry}>
-          Retry
+        <Button variant="ghost" onClick={onRetry}>
+          Try again
         </Button>
       )}
     </div>
@@ -60,12 +62,7 @@ export function ErrorState({
  * screens that can be reached in edge cases (deep links, stale state)
  * need a graceful fallback rather than a blank/broken render. */
 export function UnauthenticatedState() {
-  return (
-    <EmptyState
-      title="Sign in required"
-      description="Please sign in to continue."
-    />
-  );
+  return <EmptyState title="Sign in required" description="Please sign in to continue." />;
 }
 
 export function InsufficientWearableDataState() {
@@ -96,8 +93,8 @@ export function WearableDisconnectedState({ onReconnect }: { onReconnect?: () =>
 export function AiUnavailableState({ onRetry }: { onRetry?: () => void }) {
   return (
     <ErrorState
-      title="AI Coach is unavailable"
-      description="Please try again in a moment."
+      title="Sombrey couldn't check your data just now"
+      description="Try again in a moment."
       onRetry={onRetry}
     />
   );

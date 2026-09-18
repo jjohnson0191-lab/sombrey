@@ -1,15 +1,11 @@
 import { Outlet } from "react-router-dom";
-import { TabBar } from "./TabBar.tsx";
 
-/** Wraps the five primary tabs with the bottom nav. Sits inside the
- * authenticated route group — see App.tsx. */
+/**
+ * Thin route-group wrapper for the authenticated tree. Renders no
+ * chrome of its own — navigation now lives inside each screen's own
+ * Environment (see ui/Screen.tsx and ui/NavTicks.tsx), not as a shared
+ * fixed bar with a separate background.
+ */
 export function AppShell() {
-  return (
-    <div className="flex h-dvh flex-col bg-background">
-      <div className="flex-1 overflow-hidden pb-16">
-        <Outlet />
-      </div>
-      <TabBar />
-    </div>
-  );
+  return <Outlet />;
 }

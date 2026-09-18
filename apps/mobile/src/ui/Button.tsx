@@ -3,11 +3,26 @@ import { cn } from "@sombrey/shared";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
+/**
+ * Sombrey's button system — approved V1:
+ *  - primary: the illuminated translucent glass pill (si-pill-primary,
+ *    index.css). Real physical response comes from CSS :active, not JS
+ *    state, so it's genuinely tactile on a real device.
+ *  - secondary: outline-only pill, no glass — hierarchy comes from
+ *    material, not just size/color.
+ *  - ghost: plain text action (Close, Skip rest, Sign out).
+ *  - danger: plain text action in the muted warm-red danger token
+ *    (Delete account) — never a filled button, so it can't be mistaken
+ *    for a primary action.
+ */
 const VARIANT_CLASSES: Record<Variant, string> = {
-  primary: "bg-accent text-background hover:bg-accent-strong",
-  secondary: "bg-surface-elevated text-foreground border border-border",
-  ghost: "bg-transparent text-foreground-muted hover:text-foreground",
-  danger: "bg-transparent text-danger border border-danger/40",
+  // primary/secondary have their own bespoke :disabled treatment in
+  // index.css (the glass loses its illumination) — no generic opacity
+  // fade layered on top of that.
+  primary: "si-pill-primary inline-flex items-center justify-center disabled:pointer-events-none",
+  secondary: "si-pill-secondary inline-flex items-center justify-center disabled:pointer-events-none",
+  ghost: "text-sm font-medium text-ink-soft disabled:pointer-events-none disabled:opacity-40",
+  danger: "text-sm font-medium text-danger disabled:pointer-events-none disabled:opacity-40",
 };
 
 export function Button({
@@ -17,16 +32,7 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode; variant?: Variant }) {
   return (
-    <button
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3",
-        "text-sm font-semibold transition-colors active:scale-[0.98]",
-        "disabled:opacity-40 disabled:pointer-events-none",
-        VARIANT_CLASSES[variant],
-        className,
-      )}
-      {...props}
-    >
+    <button className={cn(VARIANT_CLASSES[variant], className)} {...props}>
       {children}
     </button>
   );
@@ -42,9 +48,8 @@ export function IconButton({
     <button
       aria-label={label}
       className={cn(
-        "inline-flex h-10 w-10 items-center justify-center rounded-full",
-        "bg-surface-elevated text-foreground-muted hover:text-foreground",
-        "active:scale-95 transition-colors",
+        "inline-flex h-11 w-11 items-center justify-center rounded-full",
+        "text-ink-soft transition-transform active:scale-95",
         className,
       )}
       {...props}
