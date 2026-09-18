@@ -42,6 +42,7 @@ workflows:
     scripts:
       - name: Install pnpm (matches the committed lockfile version)
         script: |
+          corepack disable
           npm install -g pnpm@9
           pnpm --version
 
