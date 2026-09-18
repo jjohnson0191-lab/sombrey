@@ -4,15 +4,14 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
 
-    # Create an App Store Connect API key integration in Codemagic
-    # (Team settings → Integrations → App Store Connect) named exactly
-    # "sombrey_app_store_connect", or change this reference to match
-    # whatever name you give it. This is what fetch-signing-files,
+    # App Store Connect API key integration, configured in Codemagic
+    # under Team settings → Integrations → App Store Connect, named
+    # "Sombrey Codemagic". This is what fetch-signing-files,
     # use-profiles, and the app_store_connect publishing block below
     # all authenticate with — none of those credentials live in this
     # repo.
     integrations:
-      app_store_connect: sombrey_app_store_connect
+      app_store_connect: "Sombrey Codemagic"
 
     environment:
       # Create this group in Codemagic (Team settings → Environment
