@@ -49,6 +49,19 @@ workflows:
       - name: Install workspace dependencies
         script: pnpm install --frozen-lockfile
 
+      - name: Convex codegen
+        script: |
+          npx convex codegen --typecheck disable
+        # Generates convex/_generated/* from the current function/schema
+        # source so apps/mobile's @convex/_generated/api.js imports
+        # resolve. Not committed (see .gitignore) — regenerated on every
+        # build instead. --typecheck disable skips Convex's own strict
+        # check here; the mobile TypeScript build below still checks
+        # everything that actually consumes these types.
+        # Requires CONVEX_DEPLOY_KEY in the sombrey_mobile environment
+        # group (Convex dashboard → Settings → Deploy Keys) for
+        # non-interactive auth — this step fails without it.
+
       - name: Build the Sombrey mobile web bundle
         script: |
           cd apps/mobile
