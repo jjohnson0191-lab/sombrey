@@ -14,6 +14,18 @@ workflows:
       app_store_connect: "Sombrey Codemagic"
 
     environment:
+      # Explicit, manually-uploaded signing assets (Team settings →
+      # Code signing identities), referenced by name — not fetched via
+      # the App Store Connect API. This is deliberate: the bundle ID
+      # previously matched two different App Store profiles (one
+      # API-created, one manually uploaded), which was ambiguous.
+      # Referencing this exact profile removes that ambiguity.
+      ios_signing:
+        provisioning_profiles:
+          - sombrey_app_store_profile
+        certificates:
+          - sombrey_distribution
+
       # Create this group in Codemagic (Team settings → Environment
       # variable groups) with VITE_CONVEX_URL and VITE_CLERK_PUBLISHABLE_KEY
       # as secure variables — the same two values apps/mobile/.env.local
@@ -79,14 +91,7 @@ workflows:
 
       - name: Set up iOS code signing
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles \
-            --project "apps/mobile/ios/App/App.xcodeproj" \
-            --archive-method app-store
+          xcode-project use-profiles --project "apps/mobile/ios/App/App.xcodeproj"
 
       - name: Diagnose code signing assignment (no secrets printed)
         script: |
