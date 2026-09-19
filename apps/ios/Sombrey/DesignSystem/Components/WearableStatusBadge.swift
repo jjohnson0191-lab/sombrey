@@ -6,11 +6,19 @@ import SwiftUI
 /// cooled when disconnected), with a plain text label alongside — color
 /// is never the only signal. Ported from
 /// `apps/mobile/src/ui/WearableStatusBadge.tsx`.
+///
+/// Motion: the swatch crossfades between states (`StudioMotion.settleOnce`)
+/// instead of cutting instantly — a physical indicator changing state, not
+/// a UI element being swapped. `.connected` gets one restrained ambient
+/// breathe (`StudioMotion.tick`, low amplitude) since it's a genuinely
+/// live, ongoing state, not a loading stand-in — every other state holds
+/// still. Never implies biometric data; this is connection state only.
 struct WearableStatusBadge: View {
     let state: WearableConnectionState
     var batteryPct: Double?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sweep = false
+    @State private var breathe = false
 
     private var swatch: LinearGradient {
         switch state {
@@ -40,6 +48,8 @@ struct WearableStatusBadge: View {
         HStack(spacing: 8) {
             Capsule()
                 .fill(swatch)
+                .opacity(state == .connected && breathe ? 0.82 : 1)
+                .animation(StudioMotion.resolve(.settleOnce, reduceMotion: reduceMotion), value: state)
                 .frame(width: 32, height: 16)
                 .overlay {
                     // `si-sweep-once`: a single light sweep while syncing.
@@ -57,6 +67,18 @@ struct WearableStatusBadge: View {
                     }
                 }
                 .clipShape(Capsule())
+                .onChange(of: state) { _, newValue in
+                    guard !reduceMotion else { return }
+                    if newValue == .connected {
+                        withAnimation(StudioMotion.tick) { breathe = true }
+                    } else {
+                        breathe = false
+                    }
+                }
+                .onAppear {
+                    guard !reduceMotion, state == .connected else { return }
+                    withAnimation(StudioMotion.tick) { breathe = true }
+                }
             Group {
                 if let batteryPct, state != .disconnected, state != .error {
                     Text("\(label) · \(Int(batteryPct.rounded()))%")

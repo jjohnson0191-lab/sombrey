@@ -33,10 +33,12 @@ struct TrainCompleteView: View {
                     MetricView(label: "Exercises", value: "\(session.selectedExercises.count)")
                 }
                 .padding(.top, 8)
+                .studioReveal(index: 1)
 
                 Text("Not yet saved to your training history — that's coming in a later phase.")
                     .font(StudioFont.body(12))
                     .foregroundStyle(StudioColor.inkFaint)
+                    .studioReveal(index: 2)
 
                 Button("Return to Home") {
                     session.reset()
@@ -44,6 +46,7 @@ struct TrainCompleteView: View {
                 }
                 .buttonStyle(.illuminatedCTA)
                 .padding(.top, 16)
+                .studioReveal(index: 3)
             }
             .padding(.bottom, 24)
         }

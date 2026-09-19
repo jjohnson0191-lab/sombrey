@@ -22,6 +22,12 @@ enum StudioScene: String, CaseIterable, Identifiable {
     case progress
     case aiCoach
     case settings
+    /// Deep graphite / cool blue-grey only — deliberately never sweeps
+    /// into the warm-ivory end of the field. Sign-in is Sombrey powering
+    /// on in a dark space, not a bright SaaS login page. New scene, not
+    /// a reuse of `.settings` (light/warm) or `.home` (full sweep) —
+    /// neither reads as "premium dark-space feel."
+    case auth
 
     var id: String { rawValue }
 
@@ -120,6 +126,23 @@ enum StudioScene: String, CaseIterable, Identifiable {
                 ],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
+        case .auth:
+            ZStack {
+                LinearGradient(
+                    stops: [
+                        .init(color: StudioColor.env0, location: 0),
+                        .init(color: StudioColor.env1, location: 0.55),
+                        .init(color: StudioColor.env2, location: 1.0),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                // A single quiet highlight, as if one panel of the
+                // instrument were lit from within — not a spotlight.
+                RadialGradient(
+                    colors: [StudioColor.env2.opacity(0.55), .clear],
+                    center: UnitPoint(x: 0.5, y: 0.18), startRadius: 0, endRadius: 340
+                )
+            }
         }
     }
 }

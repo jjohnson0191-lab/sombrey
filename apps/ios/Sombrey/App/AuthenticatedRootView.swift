@@ -5,22 +5,34 @@ import SwiftUI
 /// nav ticks living inside each screen's own environment gradient, not a
 /// separate system tab bar) — this view just decides which one is on
 /// screen.
+///
+/// Motion: content crossfades on `StudioMotion.contentShift`, timed to
+/// settle just after `EnvironmentView`'s slower `sceneShift` starts — the
+/// backdrop leads, content follows, matching a physical instrument's
+/// backlight shifting before its readout updates. No push/slide — that
+/// reads as a system tab bar, not five instrument ticks.
 struct AuthenticatedRootView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var appState = appState
-        switch appState.selectedTab {
-        case .home:
-            HomeScreen()
-        case .train:
-            TrainScreen()
-        case .progress:
-            ProgressScreen()
-        case .aiCoach:
-            AICoachScreen()
-        case .settings:
-            SettingsScreen()
+        Group {
+            switch appState.selectedTab {
+            case .home:
+                HomeScreen()
+            case .train:
+                TrainScreen()
+            case .progress:
+                ProgressScreen()
+            case .aiCoach:
+                AICoachScreen()
+            case .settings:
+                SettingsScreen()
+            }
         }
+        .id(appState.selectedTab)
+        .transition(.opacity)
+        .animation(StudioMotion.resolve(.contentShift, reduceMotion: reduceMotion), value: appState.selectedTab)
     }
 }

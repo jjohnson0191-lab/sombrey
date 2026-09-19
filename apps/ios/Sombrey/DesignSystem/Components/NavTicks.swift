@@ -21,8 +21,12 @@ enum SombreyTab: String, CaseIterable, Identifiable {
 /// cost accessibility. Lives INSIDE each screen's own environment gradient
 /// (see `ScreenContainer`), not a separate fixed bar with its own
 /// background — ported from `apps/mobile/src/ui/NavTicks.tsx`.
+///
+/// Motion: the active mark's width/color/label weight settle on
+/// `StudioMotion.release` — a tick engaging, not a tab bar re-rendering.
 struct NavTicks: View {
     @Binding var selection: SombreyTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack {
@@ -41,6 +45,7 @@ struct NavTicks: View {
                     }
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
+                    .animation(StudioMotion.resolve(.release, reduceMotion: reduceMotion), value: isActive)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.label)

@@ -19,10 +19,12 @@ struct HomeScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                     .padding(.top, 20)
+                    .studioReveal(index: 0)
 
                 ReadinessIndicatorView(result: nil, tone: .paper)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.top, 24)
+                    .studioReveal(index: 1)
 
                 if let error = appState.userLoadError {
                     Text("Couldn't load your account: \(error)")
@@ -33,6 +35,7 @@ struct HomeScreen: View {
 
                 todaySection
                     .padding(.top, 40)
+                    .studioReveal(index: 2)
 
                 Divider()
                     .overlay(StudioColor.ink.opacity(0.10))
@@ -40,6 +43,7 @@ struct HomeScreen: View {
 
                 activityRow
                     .padding(.top, 16)
+                    .studioReveal(index: 3)
 
                 Button("Log your first meal") { showingNutrition = true }
                     .font(StudioFont.body(12, weight: .medium))
@@ -49,6 +53,7 @@ struct HomeScreen: View {
 
                 ctaRow
                     .padding(.top, 32)
+                    .studioReveal(index: 4)
             }
         }
         .fullScreenCover(isPresented: $showingNutrition) {

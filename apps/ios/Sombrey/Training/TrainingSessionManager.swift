@@ -24,7 +24,7 @@ struct CompletedSet: Identifiable {
 @Observable
 @MainActor
 final class TrainingSessionManager {
-    enum Phase {
+    enum Phase: Hashable {
         case overview
         case active
         case complete

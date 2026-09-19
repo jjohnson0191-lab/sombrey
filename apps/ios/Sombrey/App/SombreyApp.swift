@@ -49,23 +49,44 @@ private struct RootView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(AppState.self) private var appState
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum Stage: Hashable {
+        case loading, signIn, connecting, failed, home
+    }
+
+    private var stage: Stage {
+        if !clerk.isLoaded { return .loading }
+        if clerk.session == nil { return .signIn }
+        switch appState.authPhase {
+        case .signedIn: return .home
+        case .failed: return .failed
+        case .loading, .signedOut: return .connecting
+        }
+    }
+
     var body: some View {
         Group {
-            if !clerk.isLoaded {
+            switch stage {
+            case .loading:
                 RootLoadingView(label: "Loading…")
-            } else if clerk.session == nil {
+            case .signIn:
                 SignInView()
-            } else {
-                switch appState.authPhase {
-                case .signedIn:
-                    AuthenticatedRootView()
-                case .failed(let message):
+            case .home:
+                AuthenticatedRootView()
+            case .failed:
+                if case .failed(let message) = appState.authPhase {
                     RootErrorView(message: message) { appState.retry() }
-                case .loading, .signedOut:
-                    RootLoadingView(label: "Connecting…")
                 }
+            case .connecting:
+                RootLoadingView(label: "Connecting…")
             }
         }
+        .id(stage)
+        .transition(.opacity)
+        // Sombrey powering on: sign-in -> connecting -> Home is a single
+        // deliberate settle, not three independent page transitions.
+        .animation(StudioMotion.resolve(.settleOnce, reduceMotion: reduceMotion), value: stage)
         .task { appState.start() }
         .onChange(of: clerk.session?.id) { _, newSessionId in
             AuthDiagnostics.log("[1][2] Clerk session id changed: exists=\(newSessionId != nil)")
@@ -76,21 +97,24 @@ private struct RootView: View {
     }
 }
 
-/// Plain full-bleed loading state shared by the two root-level loading
-/// moments (Clerk restoring its session, Convex syncing the token) —
-/// deliberately quiet, matching the design system's restraint rather
-/// than a spinner-heavy generic loading screen.
+/// Plain full-bleed loading state shared by every root-level loading
+/// moment (cold launch, Clerk restoring its session, Convex syncing the
+/// token) — deliberately quiet, matching the design system's restraint
+/// rather than a spinner-heavy generic loading screen. Uses the same
+/// dark `.auth` environment as `SignInView` so the whole pre-Home
+/// sequence (Loading -> Sign In -> Connecting) reads as one continuous
+/// "powering on" moment rather than jumping between unrelated scenes.
 struct RootLoadingView: View {
     let label: String
 
     var body: some View {
-        EnvironmentView(scene: .settings) {
+        EnvironmentView(scene: .auth) {
             VStack(spacing: 12) {
                 ProgressView()
-                    .tint(StudioColor.ink)
+                    .tint(StudioColor.paper)
                 Text(label)
                     .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkSoft)
+                    .foregroundStyle(StudioColor.paperSoft)
             }
         }
     }
@@ -103,14 +127,14 @@ struct RootErrorView: View {
     let onRetry: () -> Void
 
     var body: some View {
-        EnvironmentView(scene: .settings) {
+        EnvironmentView(scene: .auth) {
             VStack(spacing: 16) {
                 Text("Couldn't connect")
                     .font(StudioFont.hero(24, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
+                    .foregroundStyle(StudioColor.paper)
                 Text(message)
                     .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkSoft)
+                    .foregroundStyle(StudioColor.paperSoft)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
                 Button("Try again", action: onRetry)
