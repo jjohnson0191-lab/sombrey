@@ -97,7 +97,7 @@ final class ClerkConvexAuthProvider: AuthProvider {
     /// with.
     private func currentToken() async throws -> String {
         AuthDiagnostics.log("currentToken(): checking Clerk.shared.session")
-        guard let session = Clerk.shared.session else {
+        guard let session = await Clerk.shared.session else {
             AuthDiagnostics.log("currentToken(): no active Clerk session")
             throw ClerkConvexAuthError.noActiveSession
         }
