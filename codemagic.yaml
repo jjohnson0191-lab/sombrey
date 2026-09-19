@@ -123,7 +123,7 @@ workflows:
         submit_to_testflight: true
 
   sombrey-native-ios:
-    name: Sombrey Native iOS — Phase 0.5 build validation
+    name: Sombrey Native iOS (TestFlight)
     max_build_duration: 60
     instance_type: mac_mini_m2
 
@@ -193,7 +193,7 @@ workflows:
             -configuration Release \
             | grep -E "PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|IPHONEOS_DEPLOYMENT_TARGET|SWIFT_VERSION"
 
-      - name: Build the .ipa (Phase 0.5 validation — archive only, no publish)
+      - name: Build the .ipa
         script: |
           xcode-project build-ipa \
             --project "$XCODE_PROJECT" \
@@ -203,6 +203,7 @@ workflows:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
-    # Deliberately no `publishing` block: Phase 0.5 is build/archive
-    # validation only, per explicit instruction not to upload to
-    # TestFlight at this stage.
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
