@@ -45,7 +45,7 @@ struct NavTicks: View {
                     }
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
-                    .animation(StudioMotion.resolve(.release, reduceMotion: reduceMotion), value: isActive)
+                    .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: isActive)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.label)

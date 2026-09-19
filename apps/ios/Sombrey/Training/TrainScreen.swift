@@ -27,6 +27,6 @@ struct TrainScreen: View {
         }
         .id(session.phase)
         .transition(.opacity)
-        .animation(StudioMotion.resolve(.settleOnce, reduceMotion: reduceMotion), value: session.phase)
+        .animation(StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion), value: session.phase)
     }
 }

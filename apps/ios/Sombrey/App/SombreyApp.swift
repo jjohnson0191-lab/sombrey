@@ -86,7 +86,7 @@ private struct RootView: View {
         .transition(.opacity)
         // Sombrey powering on: sign-in -> connecting -> Home is a single
         // deliberate settle, not three independent page transitions.
-        .animation(StudioMotion.resolve(.settleOnce, reduceMotion: reduceMotion), value: stage)
+        .animation(StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion), value: stage)
         .task { appState.start() }
         .onChange(of: clerk.session?.id) { _, newSessionId in
             AuthDiagnostics.log("[1][2] Clerk session id changed: exists=\(newSessionId != nil)")

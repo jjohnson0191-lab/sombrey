@@ -74,7 +74,7 @@ enum StudioMotion {
     // MARK: Resolution
 
     /// Resolves a Studio animation against the current Reduce Motion
-    /// setting. Use from a View: `.animation(StudioMotion.resolve(.bloomOnce, reduceMotion: reduceMotion), value: x)`.
+    /// setting. Use from a View: `.animation(StudioMotion.resolve(StudioMotion.bloomOnce, reduceMotion: reduceMotion), value: x)`.
     static func resolve(_ animation: Animation, reduceMotion: Bool) -> Animation? {
         reduceMotion ? reduced : animation
     }

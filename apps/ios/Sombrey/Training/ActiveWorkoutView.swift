@@ -50,7 +50,7 @@ struct ActiveWorkoutView: View {
                     }
                     .id(session.isResting)
                     .transition(.opacity)
-                    .animation(StudioMotion.resolve(.release, reduceMotion: reduceMotion), value: session.isResting)
+                    .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: session.isResting)
 
                     if let next = session.nextExercise {
                         Text("Next: \(next.name)")
@@ -87,7 +87,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func completeSet() {
-        let pulse = StudioMotion.resolve(.press, reduceMotion: reduceMotion)
+        let pulse = StudioMotion.resolve(StudioMotion.press, reduceMotion: reduceMotion)
         if let pulse {
             withAnimation(pulse) { setPulse = true }
         }

@@ -83,7 +83,7 @@ struct SignInView: View {
                 )
                 .frame(width: 220, height: 220)
                 .onAppear {
-                    let animation = StudioMotion.resolve(.settleOnce, reduceMotion: reduceMotion)
+                    let animation = StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion)
                     if let animation {
                         withAnimation(animation) { markIlluminated = true }
                     } else {

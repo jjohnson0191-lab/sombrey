@@ -49,7 +49,7 @@ struct WearableStatusBadge: View {
             Capsule()
                 .fill(swatch)
                 .opacity(state == .connected && breathe ? 0.82 : 1)
-                .animation(StudioMotion.resolve(.settleOnce, reduceMotion: reduceMotion), value: state)
+                .animation(StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion), value: state)
                 .frame(width: 32, height: 16)
                 .overlay {
                     // `si-sweep-once`: a single light sweep while syncing.

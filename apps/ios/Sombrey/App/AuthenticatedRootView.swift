@@ -33,6 +33,6 @@ struct AuthenticatedRootView: View {
         }
         .id(appState.selectedTab)
         .transition(.opacity)
-        .animation(StudioMotion.resolve(.contentShift, reduceMotion: reduceMotion), value: appState.selectedTab)
+        .animation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion), value: appState.selectedTab)
     }
 }

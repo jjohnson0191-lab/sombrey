@@ -53,7 +53,7 @@ struct ReadinessIndicatorView: View {
                         .rotationEffect(.degrees(-90))
                         .frame(width: 132, height: 132)
                         .onAppear {
-                            let animation = StudioMotion.resolve(.bloomOnce, reduceMotion: reduceMotion)
+                            let animation = StudioMotion.resolve(StudioMotion.bloomOnce, reduceMotion: reduceMotion)
                             if let animation {
                                 withAnimation(animation) { arcRevealed = true }
                             } else {

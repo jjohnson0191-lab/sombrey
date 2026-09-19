@@ -17,7 +17,7 @@ struct EnvironmentView<Content: View>: View {
                 .ignoresSafeArea()
                 .id(scene)
                 .transition(.opacity)
-                .animation(StudioMotion.resolve(.sceneShift, reduceMotion: reduceMotion), value: scene)
+                .animation(StudioMotion.resolve(StudioMotion.sceneShift, reduceMotion: reduceMotion), value: scene)
             content
         }
     }
