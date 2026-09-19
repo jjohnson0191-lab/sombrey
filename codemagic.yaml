@@ -141,7 +141,7 @@ workflows:
       # target requires. Same team/certificate, separate profile.
       ios_signing:
         provisioning_profiles:
-          - Sombrey_Native_App_Store.mobileprovision
+          - Sombrey_Native_App_Store
         certificates:
           - sombrey_distribution
 
