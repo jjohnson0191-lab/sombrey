@@ -98,9 +98,16 @@ struct AICoachScreen: View {
 
         Task {
             do {
+                // `convex-swift` declares exactly one conformance of `Array`
+                // to `ConvexEncodable` — `[ConvexEncodable?]` — and (per the
+                // real Codemagic error) rejects a second, app-declared
+                // conditional conformance for `[Element: Encodable]` even
+                // with non-overlapping bounds. Box each message explicitly
+                // to match the library's actual declared conformance.
+                let payload: [ConvexEncodable?] = messages.map { $0 as ConvexEncodable? }
                 let reply: ChatReply = try await ConvexClientProvider.client.action(
                     "ai/sombreyCoach:chat",
-                    with: ["messages": messages]
+                    with: ["messages": payload]
                 )
                 messages.append(ChatMessage(role: .assistant, content: reply.reply))
             } catch {
