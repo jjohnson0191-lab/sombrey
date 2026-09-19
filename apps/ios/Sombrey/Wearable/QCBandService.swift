@@ -18,7 +18,14 @@ import Foundation
 /// ready for them, but every conformer today throws
 /// `WearableUnsupportedError` for these — there is no real band
 /// integration yet, and nothing here may fabricate one.
-protocol QCBandService: AnyObject {
+///
+/// `Sendable`: `WearableManager` is `@MainActor`-isolated and awaits
+/// these methods directly, so the compiler needs to know a `QCBandService`
+/// instance is safe to use from that isolated context. Both conformers
+/// (`MockQCBandService`, `QCBandSDKService`) are `final` classes with no
+/// mutable stored state, so this is a real, checked conformance — not an
+/// `@unchecked` escape hatch.
+protocol QCBandService: AnyObject, Sendable {
     // MARK: Discovery & pairing
     func scanForDevices() async throws -> [SombreyDevice]
     func pairDevice(_ deviceId: DeviceID) async throws

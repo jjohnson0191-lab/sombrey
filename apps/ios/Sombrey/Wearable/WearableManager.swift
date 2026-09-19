@@ -5,7 +5,16 @@ import Observation
 /// conformer (injected — `MockQCBandService` today, `QCBandSDKService`
 /// once real, never both at once) and exposes state as plain published
 /// properties. No view should ever hold a `QCBandService` directly.
+///
+/// `@MainActor` on the whole type (not just individual methods): the
+/// previous per-method `@MainActor` annotations left `subscribeToMeasurements`
+/// or nonisolated, so the `Task { [weak self] in ... }` it creates wasn't
+/// guaranteed to inherit main-actor isolation, which the compiler flagged
+/// as a data-race risk on capturing `self`. Isolating the type as a whole
+/// is the minimal fix and matches how the type is actually used — every
+/// call site is already on the main actor (SwiftUI-driven).
 @Observable
+@MainActor
 final class WearableManager {
     private(set) var pairedDevice: SombreyDevice?
     private(set) var status: WearableDeviceStatus?
