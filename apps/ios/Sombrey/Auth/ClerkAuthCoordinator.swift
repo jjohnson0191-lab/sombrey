@@ -15,16 +15,16 @@ import ClerkKit
 /// once, in the Xcode target's URL Types and via ClerkKit's default
 /// `RedirectConfig` — see `SombreyApp.swift` and the project's Info.plist.
 ///
-/// VERIFICATION NOTE (Phase 0, written without a working local Xcode 15+
-/// toolchain — see the migration plan's known risk item): `Clerk.configure`,
-/// `Clerk.shared`, and `clerk.signOut()` are directly documented and used
-/// as written below. `startHostedAuth(mode:)` is the one sign-in entry
-/// point I could confirm from Clerk's current iOS quickstart; if
+/// `Clerk.configure` and `Clerk.shared` are directly documented.
+/// `startHostedAuth(mode:)` is the confirmed sign-in entry point from
+/// Clerk's iOS quickstart. Sign-out is verified against the actual
+/// resolved package source (clerk-ios @ 1.5.5): it lives on
+/// `Clerk.shared.auth` (an `Auth` struct), not directly on `Clerk` — the
+/// first Codemagic build caught this exact wrong guess. If
 /// `ClerkKitUI`'s `AuthView` prebuilt component (used in `SignInView`)
-/// exposes more granular provider-specific methods once this actually
-/// compiles on a modern toolchain, prefer wiring directly to those instead
-/// — this coordinator's job is just to be the one place that decision
-/// gets made, not to hide it.
+/// exposes more granular provider-specific methods later, prefer wiring
+/// directly to those instead — this coordinator's job is just to be the
+/// one place that decision gets made, not to hide it.
 @MainActor
 final class ClerkAuthCoordinator {
     static func configure() {
@@ -51,6 +51,6 @@ final class ClerkAuthCoordinator {
     }
 
     func signOut() async throws {
-        try await Clerk.shared.signOut()
+        try await Clerk.shared.auth.signOut()
     }
 }
