@@ -17,14 +17,15 @@ import ClerkKit
 ///
 /// `Clerk.configure` and `Clerk.shared` are directly documented.
 /// `startHostedAuth(mode:)` is the confirmed sign-in entry point from
-/// Clerk's iOS quickstart. Sign-out is verified against the actual
-/// resolved package source (clerk-ios @ 1.5.5): it lives on
-/// `Clerk.shared.auth` (an `Auth` struct), not directly on `Clerk` — the
-/// first Codemagic build caught this exact wrong guess. If
-/// `ClerkKitUI`'s `AuthView` prebuilt component (used in `SignInView`)
-/// exposes more granular provider-specific methods later, prefer wiring
-/// directly to those instead — this coordinator's job is just to be the
-/// one place that decision gets made, not to hide it.
+/// Clerk's iOS quickstart, kept here as a fallback trigger; `SignInView`
+/// itself now uses `ClerkKitUI`'s `AuthView` directly, per Phase 1.
+///
+/// `signOut()` routes through `ConvexClientProvider.client.logout()`
+/// rather than calling `Clerk.shared.auth.signOut()` directly:
+/// `ConvexClientWithAuth.logout()` is what actually clears Convex's
+/// cached auth callback/token in addition to ending the Clerk session
+/// (verified in `convex-swift`'s source) — calling Clerk's sign-out
+/// alone would leave Convex holding a stale, now-invalid auth bridge.
 @MainActor
 final class ClerkAuthCoordinator {
     static func configure() {
@@ -50,7 +51,7 @@ final class ClerkAuthCoordinator {
         try await Clerk.shared.auth.startHostedAuth(mode: .signUp)
     }
 
-    func signOut() async throws {
-        try await Clerk.shared.auth.signOut()
+    func signOut() async {
+        await ConvexClientProvider.client.logout()
     }
 }

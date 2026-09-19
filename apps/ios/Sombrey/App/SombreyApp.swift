@@ -33,50 +33,53 @@ struct SombreyApp: App {
     }
 }
 
-/// Phase 0 root: signed-out -> `SignInView`; signed-in -> a minimal
-/// placeholder shell proving the design-system primitives render for
-/// real. Real screens (Home, Train, etc.) start in Phase 4+.
+/// Root branching: Clerk's own `session` is the truth for "is anyone
+/// signed in" (drives Sign In vs. authenticated UI); `AppState.authPhase`
+/// (derived from Convex's own `authState`, see `AppState.swift`) is the
+/// truth for "is the Convex connection actually usable yet" — a session
+/// can exist in Clerk a moment before Convex has finished syncing the
+/// token, which is a real, distinct loading state, not an error.
 private struct RootView: View {
     @Environment(Clerk.self) private var clerk
+    @Environment(AppState.self) private var appState
 
     var body: some View {
-        if clerk.session != nil {
-            FoundationShellView()
-        } else {
-            SignInView()
+        Group {
+            if !clerk.isLoaded {
+                RootLoadingView(label: "Loading…")
+            } else if clerk.session == nil {
+                SignInView()
+            } else if appState.authPhase != .signedIn {
+                RootLoadingView(label: "Connecting…")
+            } else {
+                AuthenticatedRootView()
+            }
+        }
+        .task { appState.start() }
+        .onChange(of: clerk.session?.id) { _, newSessionId in
+            if newSessionId != nil {
+                appState.syncConvexAuthAfterInteractiveSignIn()
+            }
         }
     }
 }
 
-/// A minimal authenticated shell — NOT the real Home screen (that's
-/// Phase 4). Exists only so Phase 0 can prove the design-system
-/// primitives (`ScreenContainer`, `NavTicks`, `HeroNumberText`,
-/// `ReadinessIndicatorView`, `WearableStatusBadge`) compose correctly
-/// against a real signed-in session, without building product UI early.
-private struct FoundationShellView: View {
-    @Environment(AppState.self) private var appState
-    @Environment(Clerk.self) private var clerk
+/// Plain full-bleed loading state shared by the two root-level loading
+/// moments (Clerk restoring its session, Convex syncing the token) —
+/// deliberately quiet, matching the design system's restraint rather
+/// than a spinner-heavy generic loading screen.
+struct RootLoadingView: View {
+    let label: String
 
     var body: some View {
-        @Bindable var appState = appState
-        ScreenContainer(scene: .home, selection: $appState.selectedTab) {
-            VStack(alignment: .trailing, spacing: 16) {
-                HStack {
-                    Text("Sombrey")
-                        .font(StudioFont.hero(24, weight: .semibold))
-                        .foregroundStyle(StudioColor.ink)
-                    Spacer()
-                    WearableStatusBadge(state: .disconnected)
-                }
-                ReadinessIndicatorView(result: nil)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                Spacer(minLength: 40)
-                Button("Sign out") {
-                    Task { try? await ClerkAuthCoordinator().signOut() }
-                }
-                .buttonStyle(.outlineCTA)
+        EnvironmentView(scene: .settings) {
+            VStack(spacing: 12) {
+                ProgressView()
+                    .tint(StudioColor.ink)
+                Text(label)
+                    .font(StudioFont.body(13))
+                    .foregroundStyle(StudioColor.inkSoft)
             }
-            .padding(.top, 24)
         }
     }
 }
