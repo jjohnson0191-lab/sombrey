@@ -134,16 +134,14 @@ workflows:
       app_store_connect: "Sombrey Codemagic"
 
     environment:
-      # Reusing the same manually-uploaded profile/certificate as the
-      # Capacitor workflow, since bundle ID and team are unchanged.
-      # UNVERIFIED ASSUMPTION: this profile may not yet have the Sign in
-      # with Apple capability enabled (the native app adds that
-      # entitlement; the Capacitor app never used it) — if signing fails
-      # on that mismatch, that's a real, expected finding to report, not
-      # a bug in this config.
+      # Dedicated App Store profile for the native target: "Sombrey Native
+      # App Store" (App ID com.sombrey.app), created specifically because
+      # the shared "Sombrey App Store" profile the Capacitor workflow uses
+      # doesn't include the Sign in with Apple capability/entitlement this
+      # target requires. Same team/certificate, separate profile.
       ios_signing:
         provisioning_profiles:
-          - Sombrey_App_Store.mobileprovision
+          - Sombrey_Native_App_Store.mobileprovision
         certificates:
           - sombrey_distribution
 
