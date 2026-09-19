@@ -40,6 +40,26 @@ enum ConvexClientProvider {
 /// not a blanket safety bypass.
 extension ConvexClientWithAuth: @unchecked Sendable {}
 
+/// Thrown by `ClerkConvexAuthProvider` when there's genuinely no usable
+/// Convex token — this is what makes `ConvexClientWithAuth.login`/
+/// `loginFromCache` correctly report failure (`Result.failure`,
+/// `authState == .unauthenticated`) instead of silently "succeeding"
+/// with an empty string. See the auth-flow bug this fixed: an earlier
+/// version returned `token ?? ""` here, which let a cold-launch
+/// `loginFromCache()` call (made before any Clerk session exists) report
+/// itself as authenticated with an invalid empty token.
+enum ClerkConvexAuthError: Error, LocalizedError {
+    case noActiveSession
+    case noTokenReturned
+
+    var errorDescription: String? {
+        switch self {
+        case .noActiveSession: return "No active Clerk session."
+        case .noTokenReturned: return "Clerk did not return a Convex token (check the \"convex\" JWT template exists in the Clerk Dashboard)."
+        }
+    }
+}
+
 /// Bridges ClerkKit's session to Convex's `AuthProvider` protocol.
 ///
 /// Verified against the actual resolved package sources (clerk-ios @
@@ -55,13 +75,13 @@ final class ClerkConvexAuthProvider: AuthProvider {
         try await Clerk.shared.auth.startHostedAuth(mode: .signIn)
         let token = try await currentToken()
         onIdToken(token)
-        return token ?? ""
+        return token
     }
 
     func loginFromCache(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
         let token = try await currentToken()
         onIdToken(token)
-        return token ?? ""
+        return token
     }
 
     func logout() async throws {
@@ -72,7 +92,21 @@ final class ClerkConvexAuthProvider: AuthProvider {
         authResult
     }
 
-    private func currentToken() async throws -> String? {
-        try await Clerk.shared.session?.getToken(.init(template: "convex"))
+    /// Non-optional, throwing: no session or no token is a genuine
+    /// failure, never a silent "success" with nothing to authenticate
+    /// with.
+    private func currentToken() async throws -> String {
+        AuthDiagnostics.log("currentToken(): checking Clerk.shared.session")
+        guard let session = Clerk.shared.session else {
+            AuthDiagnostics.log("currentToken(): no active Clerk session")
+            throw ClerkConvexAuthError.noActiveSession
+        }
+        AuthDiagnostics.log("currentToken(): session found, requesting \"convex\" JWT template")
+        guard let token = try await session.getToken(.init(template: "convex")), !token.isEmpty else {
+            AuthDiagnostics.log("currentToken(): Clerk returned no token")
+            throw ClerkConvexAuthError.noTokenReturned
+        }
+        AuthDiagnostics.log("currentToken(): got a Convex token (length \(token.count), contents not logged)")
+        return token
     }
 }

@@ -39,6 +39,12 @@ struct SombreyApp: App {
 /// truth for "is the Convex connection actually usable yet" — a session
 /// can exist in Clerk a moment before Convex has finished syncing the
 /// token, which is a real, distinct loading state, not an error.
+///
+/// FIX: `authPhase` now has a distinct `.failed` case (see
+/// `AppState.swift`) rendered here as `RootErrorView` with a real retry
+/// button — previously every non-`.signedIn` phase rendered the same
+/// "Connecting…" spinner forever, which is what produced the reported
+/// indefinite stuck state when the post-sign-in Convex sync failed.
 private struct RootView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(AppState.self) private var appState
@@ -49,14 +55,20 @@ private struct RootView: View {
                 RootLoadingView(label: "Loading…")
             } else if clerk.session == nil {
                 SignInView()
-            } else if appState.authPhase != .signedIn {
-                RootLoadingView(label: "Connecting…")
             } else {
-                AuthenticatedRootView()
+                switch appState.authPhase {
+                case .signedIn:
+                    AuthenticatedRootView()
+                case .failed(let message):
+                    RootErrorView(message: message) { appState.retry() }
+                case .loading, .signedOut:
+                    RootLoadingView(label: "Connecting…")
+                }
             }
         }
         .task { appState.start() }
         .onChange(of: clerk.session?.id) { _, newSessionId in
+            AuthDiagnostics.log("[1][2] Clerk session id changed: exists=\(newSessionId != nil)")
             if newSessionId != nil {
                 appState.syncConvexAuthAfterInteractiveSignIn()
             }
@@ -79,6 +91,30 @@ struct RootLoadingView: View {
                 Text(label)
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.inkSoft)
+            }
+        }
+    }
+}
+
+/// Shown when Convex authentication genuinely fails (or times out after
+/// 20s) — a real, diagnosable state instead of an indefinite spinner.
+struct RootErrorView: View {
+    let message: String
+    let onRetry: () -> Void
+
+    var body: some View {
+        EnvironmentView(scene: .settings) {
+            VStack(spacing: 16) {
+                Text("Couldn't connect")
+                    .font(StudioFont.hero(24, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
+                Text(message)
+                    .font(StudioFont.body(13))
+                    .foregroundStyle(StudioColor.inkSoft)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button("Try again", action: onRetry)
+                    .buttonStyle(.illuminatedCTA)
             }
         }
     }
