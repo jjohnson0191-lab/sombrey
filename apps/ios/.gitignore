@@ -1,0 +1,7 @@
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Secrets — see Secrets.xcconfig.example
+Secrets.xcconfig

@@ -43,13 +43,18 @@ workflows:
       xcode: latest
       cocoapods: default
 
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
-          source: true
+    # TEMPORARILY DISABLED for the Phase 0.5 native-iOS build-validation
+    # push: this workflow's trigger isn't scoped to specific paths, so an
+    # unscoped push-to-main here would also auto-submit a redundant
+    # Capacitor build to TestFlight, which wasn't asked for. Re-enable by
+    # restoring the block below once the native validation push is done.
+    # triggering:
+    #   events:
+    #     - push
+    #   branch_patterns:
+    #     - pattern: main
+    #       include: true
+    #       source: true
 
     scripts:
       - name: Install pnpm (matches the committed lockfile version)
@@ -116,3 +121,90 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  sombrey-native-ios:
+    name: Sombrey Native iOS — Phase 0.5 build validation
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    # Same App Store Connect integration as sombrey-mobile-ios — one Apple
+    # Developer team (9H99MBY3C8), one bundle ID (com.sombrey.app), used by
+    # both the retired Capacitor app and this native rewrite.
+    integrations:
+      app_store_connect: "Sombrey Codemagic"
+
+    environment:
+      # Reusing the same manually-uploaded profile/certificate as the
+      # Capacitor workflow, since bundle ID and team are unchanged.
+      # UNVERIFIED ASSUMPTION: this profile may not yet have the Sign in
+      # with Apple capability enabled (the native app adds that
+      # entitlement; the Capacitor app never used it) — if signing fails
+      # on that mismatch, that's a real, expected finding to report, not
+      # a bug in this config.
+      ios_signing:
+        provisioning_profiles:
+          - Sombrey_App_Store.mobileprovision
+        certificates:
+          - sombrey_distribution
+
+      # Create this group in Codemagic (Team settings -> Environment
+      # variable groups) with CLERK_PUBLISHABLE_KEY as a secure variable —
+      # the same pk_test_... value already used by the sombrey_mobile
+      # group's VITE_CLERK_PUBLISHABLE_KEY (same Clerk dev instance, per
+      # explicit instruction not to create another Clerk application).
+      groups:
+        - sombrey_native_ios
+      vars:
+        XCODE_PROJECT: "apps/ios/SombreyApp.xcodeproj"
+        XCODE_SCHEME: "SombreyApp"
+        BUNDLE_ID: "com.sombrey.app"
+      xcode: latest
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
+    scripts:
+      - name: Write Clerk publishable key into Secrets.xcconfig (never committed)
+        script: |
+          echo "CLERK_PUBLISHABLE_KEY = $CLERK_PUBLISHABLE_KEY" > apps/ios/Secrets.xcconfig
+        # Mirrors how sombrey-mobile-ios never writes an .env file and
+        # instead lets Vite read process env directly — here the native
+        # build needs an actual xcconfig file on disk (see
+        # ConvexClientProvider.swift / Info.plist's $(CLERK_PUBLISHABLE_KEY)
+        # substitution), so this step recreates apps/ios/Secrets.xcconfig
+        # from the CI secret instead of committing it.
+
+      - name: Resolve Swift package dependencies
+        script: |
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
+
+      - name: Set up iOS code signing
+        script: |
+          xcode-project use-profiles --project "$XCODE_PROJECT"
+
+      - name: Diagnose code signing assignment (no secrets printed)
+        script: |
+          xcodebuild -showBuildSettings \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            | grep -E "PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|IPHONEOS_DEPLOYMENT_TARGET|SWIFT_VERSION"
+
+      - name: Build the .ipa (Phase 0.5 validation — archive only, no publish)
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    # Deliberately no `publishing` block: Phase 0.5 is build/archive
+    # validation only, per explicit instruction not to upload to
+    # TestFlight at this stage.
