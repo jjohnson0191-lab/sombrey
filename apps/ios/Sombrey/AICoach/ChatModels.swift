@@ -1,4 +1,5 @@
 import Foundation
+import ConvexMobile
 
 /// Mirrors `convex/ai/sombreyCoach.ts`'s `chat` action exactly: role is
 /// either "user" or "assistant", the action is stateless (no server-side

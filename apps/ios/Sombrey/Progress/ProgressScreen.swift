@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import ConvexMobile
 
 /// Real data only: `measurements:list` and `progressPhotos:list` are the
 /// same existing, unmodified Convex queries `apps/mobile`'s

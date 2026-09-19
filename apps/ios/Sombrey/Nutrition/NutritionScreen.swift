@@ -1,4 +1,5 @@
 import SwiftUI
+import ConvexMobile
 
 /// Reached from Home ("Log your first meal", matching
 /// `apps/mobile/src/screens/HomeScreen.tsx`'s `/home/nutrition` sub-route)

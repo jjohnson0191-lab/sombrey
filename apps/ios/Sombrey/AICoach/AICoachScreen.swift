@@ -1,4 +1,5 @@
 import SwiftUI
+import ConvexMobile
 
 /// Real conversation UI against the existing, working
 /// `ai.sombreyCoach:chat` Convex action — behaviorally ported from

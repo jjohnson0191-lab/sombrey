@@ -1,4 +1,5 @@
 import SwiftUI
+import ConvexMobile
 
 /// Overview: picks from the real, existing `exercises` Convex table (no
 /// fabricated "today's plan" — see `TrainingSessionManager`'s header) to

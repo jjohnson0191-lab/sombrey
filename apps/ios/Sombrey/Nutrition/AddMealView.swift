@@ -1,4 +1,5 @@
 import SwiftUI
+import ConvexMobile
 
 /// Logs a real entry via the existing `nutritionLogs:logFood` mutation,
 /// against the existing `foods` table (`foods:list`, searchable) — the
