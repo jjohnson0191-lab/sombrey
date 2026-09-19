@@ -11,6 +11,7 @@ import SwiftUI
 struct HomeScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
+    @State private var showingNutrition = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -40,9 +41,18 @@ struct HomeScreen: View {
                 activityRow
                     .padding(.top, 16)
 
+                Button("Log your first meal") { showingNutrition = true }
+                    .font(StudioFont.body(12, weight: .medium))
+                    .foregroundStyle(StudioColor.inkSoft)
+                    .underline()
+                    .padding(.top, 8)
+
                 ctaRow
                     .padding(.top, 32)
             }
+        }
+        .fullScreenCover(isPresented: $showingNutrition) {
+            NutritionScreen()
         }
     }
 

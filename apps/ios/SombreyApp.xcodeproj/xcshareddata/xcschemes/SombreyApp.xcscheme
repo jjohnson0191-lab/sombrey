@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "000000000000000000000094"
+               BlueprintIdentifier = "0000000000000000000000AA"
                BuildableName = "SombreyApp.app"
                BlueprintName = "SombreyApp"
                ReferencedContainer = "container:SombreyApp.xcodeproj">
@@ -32,7 +32,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "000000000000000000000095"
+               BlueprintIdentifier = "0000000000000000000000AB"
                BuildableName = "SombreyAppTests.xctest"
                BlueprintName = "SombreyAppTests"
                ReferencedContainer = "container:SombreyApp.xcodeproj">
@@ -42,7 +42,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "000000000000000000000096"
+               BlueprintIdentifier = "0000000000000000000000AC"
                BuildableName = "SombreyAppUITests.xctest"
                BlueprintName = "SombreyAppUITests"
                ReferencedContainer = "container:SombreyApp.xcodeproj">
@@ -64,7 +64,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "000000000000000000000094"
+            BlueprintIdentifier = "0000000000000000000000AA"
             BuildableName = "SombreyApp.app"
             BlueprintName = "SombreyApp"
             ReferencedContainer = "container:SombreyApp.xcodeproj">
@@ -81,7 +81,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "000000000000000000000094"
+            BlueprintIdentifier = "0000000000000000000000AA"
             BuildableName = "SombreyApp.app"
             BlueprintName = "SombreyApp"
             ReferencedContainer = "container:SombreyApp.xcodeproj">

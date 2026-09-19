@@ -7,70 +7,83 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		000000000000000000000038 /* SombreyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000001 /* SombreyApp.swift */; };
-		000000000000000000000039 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000002 /* AppState.swift */; };
-		00000000000000000000003A /* Color+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000003 /* Color+Studio.swift */; };
-		00000000000000000000003B /* Font+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000004 /* Font+Studio.swift */; };
-		00000000000000000000003C /* Motion+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000005 /* Motion+Studio.swift */; };
-		00000000000000000000003D /* StudioScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000006 /* StudioScene.swift */; };
-		00000000000000000000003E /* EnvironmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000007 /* EnvironmentView.swift */; };
-		00000000000000000000003F /* ScreenContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000008 /* ScreenContainer.swift */; };
-		000000000000000000000040 /* NavTicks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000009 /* NavTicks.swift */; };
-		000000000000000000000041 /* HeroNumberText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000A /* HeroNumberText.swift */; };
-		000000000000000000000042 /* MetricView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000B /* MetricView.swift */; };
-		000000000000000000000043 /* ReadinessIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000C /* ReadinessIndicatorView.swift */; };
-		000000000000000000000044 /* MetricCircleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000D /* MetricCircleView.swift */; };
-		000000000000000000000045 /* WearableStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000E /* WearableStatusBadge.swift */; };
-		000000000000000000000046 /* AiDisclosureBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000F /* AiDisclosureBadge.swift */; };
-		000000000000000000000047 /* IlluminatedCTAButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000010 /* IlluminatedCTAButtonStyle.swift */; };
-		000000000000000000000048 /* ConvexClientProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000011 /* ConvexClientProvider.swift */; };
-		000000000000000000000049 /* NetworkingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000012 /* NetworkingConfig.swift */; };
-		00000000000000000000004A /* ConvexIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000013 /* ConvexIdentity.swift */; };
-		00000000000000000000004B /* ReadinessModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000014 /* ReadinessModels.swift */; };
-		00000000000000000000004C /* ClerkAuthCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000015 /* ClerkAuthCoordinator.swift */; };
-		00000000000000000000004D /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000016 /* SignInView.swift */; };
-		00000000000000000000004E /* WearableManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000017 /* WearableManager.swift */; };
-		00000000000000000000004F /* QCBandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000018 /* QCBandService.swift */; };
-		000000000000000000000050 /* MockQCBandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000019 /* MockQCBandService.swift */; };
-		000000000000000000000051 /* QCBandSDKService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001A /* QCBandSDKService.swift */; };
-		000000000000000000000052 /* WearableModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001B /* WearableModels.swift */; };
-		000000000000000000000053 /* AuthenticatedRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001C /* AuthenticatedRootView.swift */; };
-		000000000000000000000054 /* ComingSoonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001D /* ComingSoonView.swift */; };
-		000000000000000000000055 /* HomeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001E /* HomeScreen.swift */; };
-		000000000000000000000056 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001F /* SettingsScreen.swift */; };
-		000000000000000000000057 /* TrainScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000020 /* TrainScreen.swift */; };
-		000000000000000000000058 /* ProgressScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000021 /* ProgressScreen.swift */; };
-		000000000000000000000059 /* AICoachScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000022 /* AICoachScreen.swift */; };
-		00000000000000000000005A /* BricolageGrotesque-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002A /* BricolageGrotesque-SemiBold.ttf */; };
-		00000000000000000000005B /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002B /* BricolageGrotesque-Bold.ttf */; };
-		00000000000000000000005C /* InstrumentSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002C /* InstrumentSans-Regular.ttf */; };
-		00000000000000000000005D /* InstrumentSans-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002D /* InstrumentSans-Medium.ttf */; };
-		00000000000000000000005E /* InstrumentSans-MediumItalic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002E /* InstrumentSans-MediumItalic.ttf */; };
-		00000000000000000000005F /* InstrumentSans-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002F /* InstrumentSans-SemiBold.ttf */; };
-		000000000000000000000060 /* InstrumentSans-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000030 /* InstrumentSans-Bold.ttf */; };
-		000000000000000000000061 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000031 /* Assets.xcassets */; };
-		000000000000000000000062 /* SombreyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000032 /* SombreyAppTests.swift */; };
-		000000000000000000000063 /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* AppStateTests.swift */; };
-		000000000000000000000064 /* ConvexClientProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000034 /* ConvexClientProviderTests.swift */; };
-		000000000000000000000065 /* SombreyAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000035 /* SombreyAppUITests.swift */; };
-		000000000000000000000088 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000085 /* ClerkKit */; };
-		000000000000000000000089 /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000086 /* ClerkKitUI */; };
-		00000000000000000000008A /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000087 /* ConvexMobile */; };
+		000000000000000000000041 /* SombreyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000001 /* SombreyApp.swift */; };
+		000000000000000000000042 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000002 /* AppState.swift */; };
+		000000000000000000000043 /* Color+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000003 /* Color+Studio.swift */; };
+		000000000000000000000044 /* Font+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000004 /* Font+Studio.swift */; };
+		000000000000000000000045 /* Motion+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000005 /* Motion+Studio.swift */; };
+		000000000000000000000046 /* StudioScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000006 /* StudioScene.swift */; };
+		000000000000000000000047 /* EnvironmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000007 /* EnvironmentView.swift */; };
+		000000000000000000000048 /* ScreenContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000008 /* ScreenContainer.swift */; };
+		000000000000000000000049 /* NavTicks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000009 /* NavTicks.swift */; };
+		00000000000000000000004A /* HeroNumberText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000A /* HeroNumberText.swift */; };
+		00000000000000000000004B /* MetricView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000B /* MetricView.swift */; };
+		00000000000000000000004C /* ReadinessIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000C /* ReadinessIndicatorView.swift */; };
+		00000000000000000000004D /* MetricCircleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000D /* MetricCircleView.swift */; };
+		00000000000000000000004E /* WearableStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000E /* WearableStatusBadge.swift */; };
+		00000000000000000000004F /* AiDisclosureBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000F /* AiDisclosureBadge.swift */; };
+		000000000000000000000050 /* IlluminatedCTAButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000010 /* IlluminatedCTAButtonStyle.swift */; };
+		000000000000000000000051 /* ConvexClientProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000011 /* ConvexClientProvider.swift */; };
+		000000000000000000000052 /* NetworkingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000012 /* NetworkingConfig.swift */; };
+		000000000000000000000053 /* ConvexIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000013 /* ConvexIdentity.swift */; };
+		000000000000000000000054 /* ReadinessModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000014 /* ReadinessModels.swift */; };
+		000000000000000000000055 /* ClerkAuthCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000015 /* ClerkAuthCoordinator.swift */; };
+		000000000000000000000056 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000016 /* SignInView.swift */; };
+		000000000000000000000057 /* WearableManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000017 /* WearableManager.swift */; };
+		000000000000000000000058 /* QCBandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000018 /* QCBandService.swift */; };
+		000000000000000000000059 /* MockQCBandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000019 /* MockQCBandService.swift */; };
+		00000000000000000000005A /* QCBandSDKService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001A /* QCBandSDKService.swift */; };
+		00000000000000000000005B /* WearableModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001B /* WearableModels.swift */; };
+		00000000000000000000005C /* AuthenticatedRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001C /* AuthenticatedRootView.swift */; };
+		00000000000000000000005D /* ComingSoonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001D /* ComingSoonView.swift */; };
+		00000000000000000000005E /* HomeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001E /* HomeScreen.swift */; };
+		00000000000000000000005F /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001F /* SettingsScreen.swift */; };
+		000000000000000000000060 /* TrainScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000020 /* TrainScreen.swift */; };
+		000000000000000000000061 /* ProgressScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000021 /* ProgressScreen.swift */; };
+		000000000000000000000062 /* AICoachScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000022 /* AICoachScreen.swift */; };
+		000000000000000000000063 /* ConvexEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000023 /* ConvexEncoding.swift */; };
+		000000000000000000000064 /* ConvexQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000024 /* ConvexQuery.swift */; };
+		000000000000000000000065 /* NutritionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000025 /* NutritionModels.swift */; };
+		000000000000000000000066 /* ExerciseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000026 /* ExerciseModels.swift */; };
+		000000000000000000000067 /* ProgressDataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000027 /* ProgressDataModels.swift */; };
+		000000000000000000000068 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000028 /* ChatModels.swift */; };
+		000000000000000000000069 /* TrainingSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000029 /* TrainingSessionManager.swift */; };
+		00000000000000000000006A /* TrainOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002A /* TrainOverviewView.swift */; };
+		00000000000000000000006B /* ActiveWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002B /* ActiveWorkoutView.swift */; };
+		00000000000000000000006C /* TrainCompleteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002C /* TrainCompleteView.swift */; };
+		00000000000000000000006D /* NutritionDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002D /* NutritionDate.swift */; };
+		00000000000000000000006E /* NutritionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002E /* NutritionScreen.swift */; };
+		00000000000000000000006F /* AddMealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002F /* AddMealView.swift */; };
+		000000000000000000000070 /* BricolageGrotesque-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* BricolageGrotesque-SemiBold.ttf */; };
+		000000000000000000000071 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000034 /* BricolageGrotesque-Bold.ttf */; };
+		000000000000000000000072 /* InstrumentSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000035 /* InstrumentSans-Regular.ttf */; };
+		000000000000000000000073 /* InstrumentSans-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000036 /* InstrumentSans-Medium.ttf */; };
+		000000000000000000000074 /* InstrumentSans-MediumItalic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000037 /* InstrumentSans-MediumItalic.ttf */; };
+		000000000000000000000075 /* InstrumentSans-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000038 /* InstrumentSans-SemiBold.ttf */; };
+		000000000000000000000076 /* InstrumentSans-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000039 /* InstrumentSans-Bold.ttf */; };
+		000000000000000000000077 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000003A /* Assets.xcassets */; };
+		000000000000000000000078 /* SombreyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000003B /* SombreyAppTests.swift */; };
+		000000000000000000000079 /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000003C /* AppStateTests.swift */; };
+		00000000000000000000007A /* ConvexClientProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000003D /* ConvexClientProviderTests.swift */; };
+		00000000000000000000007B /* SombreyAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000003E /* SombreyAppUITests.swift */; };
+		00000000000000000000009E /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000009B /* ClerkKit */; };
+		00000000000000000000009F /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000009C /* ClerkKitUI */; };
+		0000000000000000000000A0 /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000009D /* ConvexMobile */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		000000000000000000000098 /* PBXContainerItemProxy */ = {
+		0000000000000000000000AE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 00000000000000000000009B /* Project object */;
+			containerPortal = 0000000000000000000000B1 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 000000000000000000000094;
+			remoteGlobalIDString = 0000000000000000000000AA;
 			remoteInfo = "SombreyApp";
 		};
-		00000000000000000000009A /* PBXContainerItemProxy */ = {
+		0000000000000000000000B0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 00000000000000000000009B /* Project object */;
+			containerPortal = 0000000000000000000000B1 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 000000000000000000000094;
+			remoteGlobalIDString = 0000000000000000000000AA;
 			remoteInfo = "SombreyApp";
 		};
 /* End PBXContainerItemProxy section */
@@ -110,41 +123,50 @@
 		000000000000000000000020 /* TrainScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainScreen.swift"; sourceTree = "<group>"; };
 		000000000000000000000021 /* ProgressScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressScreen.swift"; sourceTree = "<group>"; };
 		000000000000000000000022 /* AICoachScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AICoachScreen.swift"; sourceTree = "<group>"; };
-		000000000000000000000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
-		000000000000000000000024 /* SombreyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SombreyApp.entitlements"; sourceTree = "<group>"; };
-		000000000000000000000025 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
-		000000000000000000000026 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
-		000000000000000000000027 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
-		000000000000000000000028 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
-		000000000000000000000029 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
-		00000000000000000000002A /* BricolageGrotesque-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BricolageGrotesque-SemiBold.ttf"; sourceTree = "<group>"; };
-		00000000000000000000002B /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BricolageGrotesque-Bold.ttf"; sourceTree = "<group>"; };
-		00000000000000000000002C /* InstrumentSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-Regular.ttf"; sourceTree = "<group>"; };
-		00000000000000000000002D /* InstrumentSans-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-Medium.ttf"; sourceTree = "<group>"; };
-		00000000000000000000002E /* InstrumentSans-MediumItalic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-MediumItalic.ttf"; sourceTree = "<group>"; };
-		00000000000000000000002F /* InstrumentSans-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-SemiBold.ttf"; sourceTree = "<group>"; };
-		000000000000000000000030 /* InstrumentSans-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-Bold.ttf"; sourceTree = "<group>"; };
-		000000000000000000000031 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
-		000000000000000000000032 /* SombreyAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyAppTests.swift"; sourceTree = "<group>"; };
-		000000000000000000000033 /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStateTests.swift"; sourceTree = "<group>"; };
-		000000000000000000000034 /* ConvexClientProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConvexClientProviderTests.swift"; sourceTree = "<group>"; };
-		000000000000000000000035 /* SombreyAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyAppUITests.swift"; sourceTree = "<group>"; };
-		000000000000000000000036 /* Secrets.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Secrets.xcconfig.example"; sourceTree = "<group>"; };
-		000000000000000000000037 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Secrets.xcconfig"; sourceTree = "<group>"; };
+		000000000000000000000023 /* ConvexEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConvexEncoding.swift"; sourceTree = "<group>"; };
+		000000000000000000000024 /* ConvexQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConvexQuery.swift"; sourceTree = "<group>"; };
+		000000000000000000000025 /* NutritionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionModels.swift"; sourceTree = "<group>"; };
+		000000000000000000000026 /* ExerciseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseModels.swift"; sourceTree = "<group>"; };
+		000000000000000000000027 /* ProgressDataModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressDataModels.swift"; sourceTree = "<group>"; };
+		000000000000000000000028 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatModels.swift"; sourceTree = "<group>"; };
+		000000000000000000000029 /* TrainingSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainingSessionManager.swift"; sourceTree = "<group>"; };
+		00000000000000000000002A /* TrainOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainOverviewView.swift"; sourceTree = "<group>"; };
+		00000000000000000000002B /* ActiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActiveWorkoutView.swift"; sourceTree = "<group>"; };
+		00000000000000000000002C /* TrainCompleteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainCompleteView.swift"; sourceTree = "<group>"; };
+		00000000000000000000002D /* NutritionDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionDate.swift"; sourceTree = "<group>"; };
+		00000000000000000000002E /* NutritionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionScreen.swift"; sourceTree = "<group>"; };
+		00000000000000000000002F /* AddMealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddMealView.swift"; sourceTree = "<group>"; };
+		000000000000000000000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
+		000000000000000000000031 /* SombreyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SombreyApp.entitlements"; sourceTree = "<group>"; };
+		000000000000000000000032 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
+		000000000000000000000033 /* BricolageGrotesque-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BricolageGrotesque-SemiBold.ttf"; sourceTree = "<group>"; };
+		000000000000000000000034 /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BricolageGrotesque-Bold.ttf"; sourceTree = "<group>"; };
+		000000000000000000000035 /* InstrumentSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-Regular.ttf"; sourceTree = "<group>"; };
+		000000000000000000000036 /* InstrumentSans-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-Medium.ttf"; sourceTree = "<group>"; };
+		000000000000000000000037 /* InstrumentSans-MediumItalic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-MediumItalic.ttf"; sourceTree = "<group>"; };
+		000000000000000000000038 /* InstrumentSans-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-SemiBold.ttf"; sourceTree = "<group>"; };
+		000000000000000000000039 /* InstrumentSans-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "InstrumentSans-Bold.ttf"; sourceTree = "<group>"; };
+		00000000000000000000003A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
+		00000000000000000000003B /* SombreyAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyAppTests.swift"; sourceTree = "<group>"; };
+		00000000000000000000003C /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStateTests.swift"; sourceTree = "<group>"; };
+		00000000000000000000003D /* ConvexClientProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConvexClientProviderTests.swift"; sourceTree = "<group>"; };
+		00000000000000000000003E /* SombreyAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyAppUITests.swift"; sourceTree = "<group>"; };
+		00000000000000000000003F /* Secrets.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Secrets.xcconfig.example"; sourceTree = "<group>"; };
+		000000000000000000000040 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Secrets.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		00000000000000000000008C /* Frameworks */ = {
+		0000000000000000000000A2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000000088 /* ClerkKit */,
-				000000000000000000000089 /* ClerkKitUI */,
-				00000000000000000000008A /* ConvexMobile */,
+				00000000000000000000009E /* ClerkKit */,
+				00000000000000000000009F /* ClerkKitUI */,
+				0000000000000000000000A0 /* ConvexMobile */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		00000000000000000000008F /* Frameworks */ = {
+		0000000000000000000000A5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -152,7 +174,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		000000000000000000000092 /* Frameworks */ = {
+		0000000000000000000000A8 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -163,51 +185,51 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		00000000000000000000006A /* Sombrey */ = {
+		000000000000000000000080 /* Sombrey */ = {
 			isa = PBXGroup;
 			children = (
-			00000000000000000000006B /* App */,
-			00000000000000000000006C /* DesignSystem */,
-			000000000000000000000070 /* Core */,
-			000000000000000000000074 /* Auth */,
-			000000000000000000000075 /* Wearable */,
-			000000000000000000000077 /* Home */,
-			000000000000000000000078 /* Settings */,
-			000000000000000000000079 /* Training */,
-			00000000000000000000007A /* Progress */,
-			00000000000000000000007B /* AICoach */,
-			00000000000000000000007C /* Nutrition */,
-			00000000000000000000007D /* Onboarding */,
-			00000000000000000000007E /* Resources */
+			000000000000000000000081 /* App */,
+			000000000000000000000082 /* DesignSystem */,
+			000000000000000000000086 /* Core */,
+			00000000000000000000008A /* Auth */,
+			00000000000000000000008B /* Wearable */,
+			00000000000000000000008D /* Home */,
+			00000000000000000000008E /* Settings */,
+			00000000000000000000008F /* Training */,
+			000000000000000000000090 /* Progress */,
+			000000000000000000000091 /* AICoach */,
+			000000000000000000000092 /* Nutrition */,
+			000000000000000000000093 /* Onboarding */,
+			000000000000000000000094 /* Resources */
 			);
 			path = "Sombrey";
 			sourceTree = "<group>";
 		};
-		00000000000000000000006B /* App */ = {
+		000000000000000000000081 /* App */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000001 /* SombreyApp.swift */,
 			000000000000000000000002 /* AppState.swift */,
 			00000000000000000000001C /* AuthenticatedRootView.swift */,
-			000000000000000000000023 /* Info.plist */,
-			000000000000000000000024 /* SombreyApp.entitlements */
+			000000000000000000000030 /* Info.plist */,
+			000000000000000000000031 /* SombreyApp.entitlements */
 			);
 			name = "App";
 			path = "App";
 			sourceTree = "<group>";
 		};
-		00000000000000000000006C /* DesignSystem */ = {
+		000000000000000000000082 /* DesignSystem */ = {
 			isa = PBXGroup;
 			children = (
-			00000000000000000000006D /* Tokens */,
-			00000000000000000000006E /* Environment */,
-			00000000000000000000006F /* Components */
+			000000000000000000000083 /* Tokens */,
+			000000000000000000000084 /* Environment */,
+			000000000000000000000085 /* Components */
 			);
 			name = "DesignSystem";
 			path = "DesignSystem";
 			sourceTree = "<group>";
 		};
-		00000000000000000000006D /* Tokens */ = {
+		000000000000000000000083 /* Tokens */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000003 /* Color+Studio.swift */,
@@ -218,7 +240,7 @@
 			path = "Tokens";
 			sourceTree = "<group>";
 		};
-		00000000000000000000006E /* Environment */ = {
+		000000000000000000000084 /* Environment */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000006 /* StudioScene.swift */,
@@ -228,7 +250,7 @@
 			path = "Environment";
 			sourceTree = "<group>";
 		};
-		00000000000000000000006F /* Components */ = {
+		000000000000000000000085 /* Components */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000008 /* ScreenContainer.swift */,
@@ -246,27 +268,29 @@
 			path = "Components";
 			sourceTree = "<group>";
 		};
-		000000000000000000000070 /* Core */ = {
+		000000000000000000000086 /* Core */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000071 /* Convex */,
-			000000000000000000000072 /* Networking */,
-			000000000000000000000073 /* Models */
+			000000000000000000000087 /* Convex */,
+			000000000000000000000088 /* Networking */,
+			000000000000000000000089 /* Models */
 			);
 			name = "Core";
 			path = "Core";
 			sourceTree = "<group>";
 		};
-		000000000000000000000071 /* Convex */ = {
+		000000000000000000000087 /* Convex */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000011 /* ConvexClientProvider.swift */
+			000000000000000000000011 /* ConvexClientProvider.swift */,
+			000000000000000000000023 /* ConvexEncoding.swift */,
+			000000000000000000000024 /* ConvexQuery.swift */
 			);
 			name = "Convex";
 			path = "Convex";
 			sourceTree = "<group>";
 		};
-		000000000000000000000072 /* Networking */ = {
+		000000000000000000000088 /* Networking */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000012 /* NetworkingConfig.swift */
@@ -275,17 +299,20 @@
 			path = "Networking";
 			sourceTree = "<group>";
 		};
-		000000000000000000000073 /* Models */ = {
+		000000000000000000000089 /* Models */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000013 /* ConvexIdentity.swift */,
-			000000000000000000000014 /* ReadinessModels.swift */
+			000000000000000000000014 /* ReadinessModels.swift */,
+			000000000000000000000025 /* NutritionModels.swift */,
+			000000000000000000000026 /* ExerciseModels.swift */,
+			000000000000000000000027 /* ProgressDataModels.swift */
 			);
 			name = "Models";
 			path = "Models";
 			sourceTree = "<group>";
 		};
-		000000000000000000000074 /* Auth */ = {
+		00000000000000000000008A /* Auth */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000015 /* ClerkAuthCoordinator.swift */,
@@ -295,20 +322,20 @@
 			path = "Auth";
 			sourceTree = "<group>";
 		};
-		000000000000000000000075 /* Wearable */ = {
+		00000000000000000000008B /* Wearable */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000017 /* WearableManager.swift */,
 			000000000000000000000018 /* QCBandService.swift */,
 			000000000000000000000019 /* MockQCBandService.swift */,
 			00000000000000000000001A /* QCBandSDKService.swift */,
-			000000000000000000000076 /* Models */
+			00000000000000000000008C /* Models */
 			);
 			name = "Wearable";
 			path = "Wearable";
 			sourceTree = "<group>";
 		};
-		000000000000000000000076 /* Models */ = {
+		00000000000000000000008C /* Models */ = {
 			isa = PBXGroup;
 			children = (
 			00000000000000000000001B /* WearableModels.swift */
@@ -317,7 +344,7 @@
 			path = "Models";
 			sourceTree = "<group>";
 		};
-		000000000000000000000077 /* Home */ = {
+		00000000000000000000008D /* Home */ = {
 			isa = PBXGroup;
 			children = (
 			00000000000000000000001E /* HomeScreen.swift */
@@ -326,7 +353,7 @@
 			path = "Home";
 			sourceTree = "<group>";
 		};
-		000000000000000000000078 /* Settings */ = {
+		00000000000000000000008E /* Settings */ = {
 			isa = PBXGroup;
 			children = (
 			00000000000000000000001F /* SettingsScreen.swift */
@@ -335,131 +362,135 @@
 			path = "Settings";
 			sourceTree = "<group>";
 		};
-		000000000000000000000079 /* Training */ = {
+		00000000000000000000008F /* Training */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000020 /* TrainScreen.swift */,
-			000000000000000000000025 /* README.md */
+			000000000000000000000029 /* TrainingSessionManager.swift */,
+			00000000000000000000002A /* TrainOverviewView.swift */,
+			00000000000000000000002B /* ActiveWorkoutView.swift */,
+			00000000000000000000002C /* TrainCompleteView.swift */
 			);
 			name = "Training";
 			path = "Training";
 			sourceTree = "<group>";
 		};
-		00000000000000000000007A /* Progress */ = {
+		000000000000000000000090 /* Progress */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000021 /* ProgressScreen.swift */,
-			000000000000000000000027 /* README.md */
+			000000000000000000000021 /* ProgressScreen.swift */
 			);
 			name = "Progress";
 			path = "Progress";
 			sourceTree = "<group>";
 		};
-		00000000000000000000007B /* AICoach */ = {
+		000000000000000000000091 /* AICoach */ = {
 			isa = PBXGroup;
 			children = (
 			000000000000000000000022 /* AICoachScreen.swift */,
-			000000000000000000000028 /* README.md */
+			000000000000000000000028 /* ChatModels.swift */
 			);
 			name = "AICoach";
 			path = "AICoach";
 			sourceTree = "<group>";
 		};
-		00000000000000000000007C /* Nutrition */ = {
+		000000000000000000000092 /* Nutrition */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000026 /* README.md */
+			00000000000000000000002D /* NutritionDate.swift */,
+			00000000000000000000002E /* NutritionScreen.swift */,
+			00000000000000000000002F /* AddMealView.swift */
 			);
 			name = "Nutrition";
 			path = "Nutrition";
 			sourceTree = "<group>";
 		};
-		00000000000000000000007D /* Onboarding */ = {
+		000000000000000000000093 /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000029 /* README.md */
+			000000000000000000000032 /* README.md */
 			);
 			name = "Onboarding";
 			path = "Onboarding";
 			sourceTree = "<group>";
 		};
-		00000000000000000000007E /* Resources */ = {
+		000000000000000000000094 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-			00000000000000000000007F /* Fonts */,
-			000000000000000000000031 /* Assets.xcassets */
+			000000000000000000000095 /* Fonts */,
+			00000000000000000000003A /* Assets.xcassets */
 			);
 			name = "Resources";
 			path = "Resources";
 			sourceTree = "<group>";
 		};
-		00000000000000000000007F /* Fonts */ = {
+		000000000000000000000095 /* Fonts */ = {
 			isa = PBXGroup;
 			children = (
-			00000000000000000000002A /* BricolageGrotesque-SemiBold.ttf */,
-			00000000000000000000002B /* BricolageGrotesque-Bold.ttf */,
-			00000000000000000000002C /* InstrumentSans-Regular.ttf */,
-			00000000000000000000002D /* InstrumentSans-Medium.ttf */,
-			00000000000000000000002E /* InstrumentSans-MediumItalic.ttf */,
-			00000000000000000000002F /* InstrumentSans-SemiBold.ttf */,
-			000000000000000000000030 /* InstrumentSans-Bold.ttf */
+			000000000000000000000033 /* BricolageGrotesque-SemiBold.ttf */,
+			000000000000000000000034 /* BricolageGrotesque-Bold.ttf */,
+			000000000000000000000035 /* InstrumentSans-Regular.ttf */,
+			000000000000000000000036 /* InstrumentSans-Medium.ttf */,
+			000000000000000000000037 /* InstrumentSans-MediumItalic.ttf */,
+			000000000000000000000038 /* InstrumentSans-SemiBold.ttf */,
+			000000000000000000000039 /* InstrumentSans-Bold.ttf */
 			);
 			name = "Fonts";
 			path = "Fonts";
 			sourceTree = "<group>";
 		};
-		000000000000000000000080 /* SombreyAppTests */ = {
+		000000000000000000000096 /* SombreyAppTests */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000032 /* SombreyAppTests.swift */,
-			000000000000000000000033 /* AppStateTests.swift */,
-			000000000000000000000034 /* ConvexClientProviderTests.swift */
+			00000000000000000000003B /* SombreyAppTests.swift */,
+			00000000000000000000003C /* AppStateTests.swift */,
+			00000000000000000000003D /* ConvexClientProviderTests.swift */
 			);
 			name = "SombreyAppTests";
 			path = "SombreyAppTests";
 			sourceTree = "<group>";
 		};
-		000000000000000000000081 /* SombreyAppUITests */ = {
+		000000000000000000000097 /* SombreyAppUITests */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000035 /* SombreyAppUITests.swift */
+			00000000000000000000003E /* SombreyAppUITests.swift */
 			);
 			name = "SombreyAppUITests";
 			path = "SombreyAppUITests";
 			sourceTree = "<group>";
 		};
-		000000000000000000000082 /* Products */ = {
+		000000000000000000000098 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000066 /* SombreyApp.app */,
-				000000000000000000000067 /* SombreyAppTests.xctest */,
-				000000000000000000000068 /* SombreyAppUITests.xctest */,
+				00000000000000000000007C /* SombreyApp.app */,
+				00000000000000000000007D /* SombreyAppTests.xctest */,
+				00000000000000000000007E /* SombreyAppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		000000000000000000000069 /* apps/ios */ = {
+		00000000000000000000007F /* apps/ios */ = {
 			isa = PBXGroup;
 			children = (
-			00000000000000000000006A /* Sombrey */,
-			000000000000000000000080 /* SombreyAppTests */,
-			000000000000000000000081 /* SombreyAppUITests */,
-			000000000000000000000036 /* Secrets.xcconfig.example */,
-			000000000000000000000037 /* Secrets.xcconfig */,
-			000000000000000000000082 /* Products */
+			000000000000000000000080 /* Sombrey */,
+			000000000000000000000096 /* SombreyAppTests */,
+			000000000000000000000097 /* SombreyAppUITests */,
+			00000000000000000000003F /* Secrets.xcconfig.example */,
+			000000000000000000000040 /* Secrets.xcconfig */,
+			000000000000000000000098 /* Products */
 			);
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		000000000000000000000094 /* SombreyApp */ = {
+		0000000000000000000000AA /* SombreyApp */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 00000000000000000000009C /* Build configuration list for PBXNativeTarget "SombreyApp" */;
+			buildConfigurationList = 0000000000000000000000B2 /* Build configuration list for PBXNativeTarget "SombreyApp" */;
 			buildPhases = (
-				00000000000000000000008B /* Sources */,
-				00000000000000000000008C /* Frameworks */,
-				00000000000000000000008D /* Resources */,
+				0000000000000000000000A1 /* Sources */,
+				0000000000000000000000A2 /* Frameworks */,
+				0000000000000000000000A3 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -467,61 +498,61 @@
 			);
 			name = SombreyApp;
 			packageProductDependencies = (
-				000000000000000000000085 /* ClerkKit */,
-				000000000000000000000086 /* ClerkKitUI */,
-				000000000000000000000087 /* ConvexMobile */,
+				00000000000000000000009B /* ClerkKit */,
+				00000000000000000000009C /* ClerkKitUI */,
+				00000000000000000000009D /* ConvexMobile */,
 			);
 			productName = SombreyApp;
-			productReference = 000000000000000000000066 /* SombreyApp.app */;
+			productReference = 00000000000000000000007C /* SombreyApp.app */;
 			productType = "com.apple.product-type.application";
 		};
-		000000000000000000000095 /* SombreyAppTests */ = {
+		0000000000000000000000AB /* SombreyAppTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 00000000000000000000009D /* Build configuration list for PBXNativeTarget "SombreyAppTests" */;
+			buildConfigurationList = 0000000000000000000000B3 /* Build configuration list for PBXNativeTarget "SombreyAppTests" */;
 			buildPhases = (
-				00000000000000000000008E /* Sources */,
-				00000000000000000000008F /* Frameworks */,
-				000000000000000000000090 /* Resources */,
+				0000000000000000000000A4 /* Sources */,
+				0000000000000000000000A5 /* Frameworks */,
+				0000000000000000000000A6 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				000000000000000000000097 /* PBXTargetDependency */,
+				0000000000000000000000AD /* PBXTargetDependency */,
 			);
 			name = SombreyAppTests;
 			productName = SombreyAppTests;
-			productReference = 000000000000000000000067 /* SombreyAppTests.xctest */;
+			productReference = 00000000000000000000007D /* SombreyAppTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		000000000000000000000096 /* SombreyAppUITests */ = {
+		0000000000000000000000AC /* SombreyAppUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 00000000000000000000009E /* Build configuration list for PBXNativeTarget "SombreyAppUITests" */;
+			buildConfigurationList = 0000000000000000000000B4 /* Build configuration list for PBXNativeTarget "SombreyAppUITests" */;
 			buildPhases = (
-				000000000000000000000091 /* Sources */,
-				000000000000000000000092 /* Frameworks */,
-				000000000000000000000093 /* Resources */,
+				0000000000000000000000A7 /* Sources */,
+				0000000000000000000000A8 /* Frameworks */,
+				0000000000000000000000A9 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				000000000000000000000099 /* PBXTargetDependency */,
+				0000000000000000000000AF /* PBXTargetDependency */,
 			);
 			name = SombreyAppUITests;
 			productName = SombreyAppUITests;
-			productReference = 000000000000000000000068 /* SombreyAppUITests.xctest */;
+			productReference = 00000000000000000000007E /* SombreyAppUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		00000000000000000000009B /* Project object */ = {
+		0000000000000000000000B1 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					000000000000000000000094 = {
+					0000000000000000000000AA = {
 						CreatedOnToolsVersion = 16.0;
 						DevelopmentTeam = 9H99MBY3C8;
 						ProvisioningStyle = Automatic;
@@ -531,21 +562,21 @@
 							};
 						};
 					};
-					000000000000000000000095 = {
+					0000000000000000000000AB = {
 						CreatedOnToolsVersion = 16.0;
 						DevelopmentTeam = 9H99MBY3C8;
 						ProvisioningStyle = Automatic;
-						TestTargetID = 000000000000000000000094;
+						TestTargetID = 0000000000000000000000AA;
 					};
-					000000000000000000000096 = {
+					0000000000000000000000AC = {
 						CreatedOnToolsVersion = 16.0;
 						DevelopmentTeam = 9H99MBY3C8;
 						ProvisioningStyle = Automatic;
-						TestTargetID = 000000000000000000000094;
+						TestTargetID = 0000000000000000000000AA;
 					};
 				};
 			};
-			buildConfigurationList = 00000000000000000000009F /* Build configuration list for PBXProject "SombreyApp" */;
+			buildConfigurationList = 0000000000000000000000B5 /* Build configuration list for PBXProject "SombreyApp" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -553,39 +584,39 @@
 				en,
 				Base,
 			);
-			mainGroup = 000000000000000000000069;
+			mainGroup = 00000000000000000000007F;
 			packageReferences = (
-				000000000000000000000083 /* XCRemoteSwiftPackageReference "clerk-ios" */,
-				000000000000000000000084 /* XCRemoteSwiftPackageReference "convex-swift" */,
+				000000000000000000000099 /* XCRemoteSwiftPackageReference "clerk-ios" */,
+				00000000000000000000009A /* XCRemoteSwiftPackageReference "convex-swift" */,
 			);
-			productRefGroup = 000000000000000000000082 /* Products */;
+			productRefGroup = 000000000000000000000098 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				000000000000000000000094 /* SombreyApp */,
-				000000000000000000000095 /* SombreyAppTests */,
-				000000000000000000000096 /* SombreyAppUITests */,
+				0000000000000000000000AA /* SombreyApp */,
+				0000000000000000000000AB /* SombreyAppTests */,
+				0000000000000000000000AC /* SombreyAppUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		00000000000000000000008D /* Resources */ = {
+		0000000000000000000000A3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				00000000000000000000005A /* BricolageGrotesque-SemiBold.ttf */,
-				00000000000000000000005B /* BricolageGrotesque-Bold.ttf */,
-				00000000000000000000005C /* InstrumentSans-Regular.ttf */,
-				00000000000000000000005D /* InstrumentSans-Medium.ttf */,
-				00000000000000000000005E /* InstrumentSans-MediumItalic.ttf */,
-				00000000000000000000005F /* InstrumentSans-SemiBold.ttf */,
-				000000000000000000000060 /* InstrumentSans-Bold.ttf */,
-				000000000000000000000061 /* Assets.xcassets */,
+				000000000000000000000070 /* BricolageGrotesque-SemiBold.ttf */,
+				000000000000000000000071 /* BricolageGrotesque-Bold.ttf */,
+				000000000000000000000072 /* InstrumentSans-Regular.ttf */,
+				000000000000000000000073 /* InstrumentSans-Medium.ttf */,
+				000000000000000000000074 /* InstrumentSans-MediumItalic.ttf */,
+				000000000000000000000075 /* InstrumentSans-SemiBold.ttf */,
+				000000000000000000000076 /* InstrumentSans-Bold.ttf */,
+				000000000000000000000077 /* Assets.xcassets */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		000000000000000000000090 /* Resources */ = {
+		0000000000000000000000A6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -593,7 +624,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		000000000000000000000093 /* Resources */ = {
+		0000000000000000000000A9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -604,82 +635,95 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		00000000000000000000008B /* Sources */ = {
+		0000000000000000000000A1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000000038 /* SombreyApp.swift */,
-				000000000000000000000039 /* AppState.swift */,
-				00000000000000000000003A /* Color+Studio.swift */,
-				00000000000000000000003B /* Font+Studio.swift */,
-				00000000000000000000003C /* Motion+Studio.swift */,
-				00000000000000000000003D /* StudioScene.swift */,
-				00000000000000000000003E /* EnvironmentView.swift */,
-				00000000000000000000003F /* ScreenContainer.swift */,
-				000000000000000000000040 /* NavTicks.swift */,
-				000000000000000000000041 /* HeroNumberText.swift */,
-				000000000000000000000042 /* MetricView.swift */,
-				000000000000000000000043 /* ReadinessIndicatorView.swift */,
-				000000000000000000000044 /* MetricCircleView.swift */,
-				000000000000000000000045 /* WearableStatusBadge.swift */,
-				000000000000000000000046 /* AiDisclosureBadge.swift */,
-				000000000000000000000047 /* IlluminatedCTAButtonStyle.swift */,
-				000000000000000000000048 /* ConvexClientProvider.swift */,
-				000000000000000000000049 /* NetworkingConfig.swift */,
-				00000000000000000000004A /* ConvexIdentity.swift */,
-				00000000000000000000004B /* ReadinessModels.swift */,
-				00000000000000000000004C /* ClerkAuthCoordinator.swift */,
-				00000000000000000000004D /* SignInView.swift */,
-				00000000000000000000004E /* WearableManager.swift */,
-				00000000000000000000004F /* QCBandService.swift */,
-				000000000000000000000050 /* MockQCBandService.swift */,
-				000000000000000000000051 /* QCBandSDKService.swift */,
-				000000000000000000000052 /* WearableModels.swift */,
-				000000000000000000000053 /* AuthenticatedRootView.swift */,
-				000000000000000000000054 /* ComingSoonView.swift */,
-				000000000000000000000055 /* HomeScreen.swift */,
-				000000000000000000000056 /* SettingsScreen.swift */,
-				000000000000000000000057 /* TrainScreen.swift */,
-				000000000000000000000058 /* ProgressScreen.swift */,
-				000000000000000000000059 /* AICoachScreen.swift */,
+				000000000000000000000041 /* SombreyApp.swift */,
+				000000000000000000000042 /* AppState.swift */,
+				000000000000000000000043 /* Color+Studio.swift */,
+				000000000000000000000044 /* Font+Studio.swift */,
+				000000000000000000000045 /* Motion+Studio.swift */,
+				000000000000000000000046 /* StudioScene.swift */,
+				000000000000000000000047 /* EnvironmentView.swift */,
+				000000000000000000000048 /* ScreenContainer.swift */,
+				000000000000000000000049 /* NavTicks.swift */,
+				00000000000000000000004A /* HeroNumberText.swift */,
+				00000000000000000000004B /* MetricView.swift */,
+				00000000000000000000004C /* ReadinessIndicatorView.swift */,
+				00000000000000000000004D /* MetricCircleView.swift */,
+				00000000000000000000004E /* WearableStatusBadge.swift */,
+				00000000000000000000004F /* AiDisclosureBadge.swift */,
+				000000000000000000000050 /* IlluminatedCTAButtonStyle.swift */,
+				000000000000000000000051 /* ConvexClientProvider.swift */,
+				000000000000000000000052 /* NetworkingConfig.swift */,
+				000000000000000000000053 /* ConvexIdentity.swift */,
+				000000000000000000000054 /* ReadinessModels.swift */,
+				000000000000000000000055 /* ClerkAuthCoordinator.swift */,
+				000000000000000000000056 /* SignInView.swift */,
+				000000000000000000000057 /* WearableManager.swift */,
+				000000000000000000000058 /* QCBandService.swift */,
+				000000000000000000000059 /* MockQCBandService.swift */,
+				00000000000000000000005A /* QCBandSDKService.swift */,
+				00000000000000000000005B /* WearableModels.swift */,
+				00000000000000000000005C /* AuthenticatedRootView.swift */,
+				00000000000000000000005D /* ComingSoonView.swift */,
+				00000000000000000000005E /* HomeScreen.swift */,
+				00000000000000000000005F /* SettingsScreen.swift */,
+				000000000000000000000060 /* TrainScreen.swift */,
+				000000000000000000000061 /* ProgressScreen.swift */,
+				000000000000000000000062 /* AICoachScreen.swift */,
+				000000000000000000000063 /* ConvexEncoding.swift */,
+				000000000000000000000064 /* ConvexQuery.swift */,
+				000000000000000000000065 /* NutritionModels.swift */,
+				000000000000000000000066 /* ExerciseModels.swift */,
+				000000000000000000000067 /* ProgressDataModels.swift */,
+				000000000000000000000068 /* ChatModels.swift */,
+				000000000000000000000069 /* TrainingSessionManager.swift */,
+				00000000000000000000006A /* TrainOverviewView.swift */,
+				00000000000000000000006B /* ActiveWorkoutView.swift */,
+				00000000000000000000006C /* TrainCompleteView.swift */,
+				00000000000000000000006D /* NutritionDate.swift */,
+				00000000000000000000006E /* NutritionScreen.swift */,
+				00000000000000000000006F /* AddMealView.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		00000000000000000000008E /* Sources */ = {
+		0000000000000000000000A4 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000000062 /* SombreyAppTests.swift */,
-				000000000000000000000063 /* AppStateTests.swift */,
-				000000000000000000000064 /* ConvexClientProviderTests.swift */,
+				000000000000000000000078 /* SombreyAppTests.swift */,
+				000000000000000000000079 /* AppStateTests.swift */,
+				00000000000000000000007A /* ConvexClientProviderTests.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		000000000000000000000091 /* Sources */ = {
+		0000000000000000000000A7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000000065 /* SombreyAppUITests.swift */,
+				00000000000000000000007B /* SombreyAppUITests.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-				000000000000000000000097 /* PBXTargetDependency */ = {
+				0000000000000000000000AD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 000000000000000000000094 /* SombreyApp */;
-			targetProxy = 000000000000000000000098 /* PBXContainerItemProxy */;
+			target = 0000000000000000000000AA /* SombreyApp */;
+			targetProxy = 0000000000000000000000AE /* PBXContainerItemProxy */;
 		};
-				000000000000000000000099 /* PBXTargetDependency */ = {
+				0000000000000000000000AF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 000000000000000000000094 /* SombreyApp */;
-			targetProxy = 00000000000000000000009A /* PBXContainerItemProxy */;
+			target = 0000000000000000000000AA /* SombreyApp */;
+			targetProxy = 0000000000000000000000B0 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		0000000000000000000000A0 /* Debug */ = {
+		0000000000000000000000B6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -704,7 +748,7 @@
 			};
 			name = Debug;
 		};
-		0000000000000000000000A1 /* Release */ = {
+		0000000000000000000000B7 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -726,9 +770,9 @@
 			};
 			name = Release;
 		};
-		0000000000000000000000A2 /* Debug */ = {
+		0000000000000000000000B8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 000000000000000000000037 /* Secrets.xcconfig */;
+			baseConfigurationReference = 000000000000000000000040 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -755,9 +799,9 @@
 			};
 			name = Debug;
 		};
-		0000000000000000000000A3 /* Release */ = {
+		0000000000000000000000B9 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 000000000000000000000037 /* Secrets.xcconfig */;
+			baseConfigurationReference = 000000000000000000000040 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -781,7 +825,7 @@
 			};
 			name = Release;
 		};
-		0000000000000000000000A4 /* Debug */ = {
+		0000000000000000000000BA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -807,7 +851,7 @@
 			};
 			name = Debug;
 		};
-		0000000000000000000000A5 /* Release */ = {
+		0000000000000000000000BB /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -830,7 +874,7 @@
 			};
 			name = Release;
 		};
-		0000000000000000000000A6 /* Debug */ = {
+		0000000000000000000000BC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -855,7 +899,7 @@
 			};
 			name = Debug;
 		};
-		0000000000000000000000A7 /* Release */ = {
+		0000000000000000000000BD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -880,38 +924,38 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		00000000000000000000009F /* Build configuration list for PBXProject "SombreyApp" */ = {
+		0000000000000000000000B5 /* Build configuration list for PBXProject "SombreyApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				0000000000000000000000A0 /* Debug */,
-				0000000000000000000000A1 /* Release */,
+				0000000000000000000000B6 /* Debug */,
+				0000000000000000000000B7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		00000000000000000000009C /* Build configuration list for PBXNativeTarget "SombreyApp" */ = {
+		0000000000000000000000B2 /* Build configuration list for PBXNativeTarget "SombreyApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				0000000000000000000000A2 /* Debug */,
-				0000000000000000000000A3 /* Release */,
+				0000000000000000000000B8 /* Debug */,
+				0000000000000000000000B9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		00000000000000000000009D /* Build configuration list for PBXNativeTarget "SombreyAppTests" */ = {
+		0000000000000000000000B3 /* Build configuration list for PBXNativeTarget "SombreyAppTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				0000000000000000000000A4 /* Debug */,
-				0000000000000000000000A5 /* Release */,
+				0000000000000000000000BA /* Debug */,
+				0000000000000000000000BB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		00000000000000000000009E /* Build configuration list for PBXNativeTarget "SombreyAppUITests" */ = {
+		0000000000000000000000B4 /* Build configuration list for PBXNativeTarget "SombreyAppUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				0000000000000000000000A6 /* Debug */,
-				0000000000000000000000A7 /* Release */,
+				0000000000000000000000BC /* Debug */,
+				0000000000000000000000BD /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -919,7 +963,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		000000000000000000000083 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
+		000000000000000000000099 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/clerk/clerk-ios";
 			requirement = {
@@ -927,7 +971,7 @@
 				minimumVersion = 1.5.0;
 			};
 		};
-		000000000000000000000084 /* XCRemoteSwiftPackageReference "convex-swift" */ = {
+		00000000000000000000009A /* XCRemoteSwiftPackageReference "convex-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/get-convex/convex-swift";
 			requirement = {
@@ -938,22 +982,22 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		000000000000000000000085 /* ClerkKit */ = {
+		00000000000000000000009B /* ClerkKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000000000083 /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			package = 000000000000000000000099 /* XCRemoteSwiftPackageReference "clerk-ios" */;
 			productName = ClerkKit;
 		};
-		000000000000000000000086 /* ClerkKitUI */ = {
+		00000000000000000000009C /* ClerkKitUI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000000000083 /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			package = 000000000000000000000099 /* XCRemoteSwiftPackageReference "clerk-ios" */;
 			productName = ClerkKitUI;
 		};
-		000000000000000000000087 /* ConvexMobile */ = {
+		00000000000000000000009D /* ConvexMobile */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000000000084 /* XCRemoteSwiftPackageReference "convex-swift" */;
+			package = 00000000000000000000009A /* XCRemoteSwiftPackageReference "convex-swift" */;
 			productName = ConvexMobile;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = 00000000000000000000009B /* Project object */;
+	rootObject = 0000000000000000000000B1 /* Project object */;
 }

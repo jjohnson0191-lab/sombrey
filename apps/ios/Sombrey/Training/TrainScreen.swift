@@ -1,18 +1,21 @@
 import SwiftUI
 
-/// Placeholder — full workout session UI lands in a later migration
-/// phase (see Training/README.md). Wired into nav now so the tab isn't
-/// a dead end.
+/// Routes between Overview -> Active -> Complete based on
+/// `TrainingSessionManager.phase`. Ported behaviorally from
+/// `apps/mobile/src/screens/TrainScreen.tsx` (one screen, three internal
+/// phases driven by local state) — not translated 1:1.
 struct TrainScreen: View {
     @Environment(AppState.self) private var appState
+    @State private var session = TrainingSessionManager()
 
     var body: some View {
-        @Bindable var appState = appState
-        ScreenContainer(scene: .trainOverview, selection: $appState.selectedTab) {
-            ComingSoonView(
-                title: "Train",
-                note: "Workout sessions are coming in a later phase — see apps/mobile's TrainScreen for the reference behavior."
-            )
+        switch session.phase {
+        case .overview:
+            TrainOverviewView(session: session)
+        case .active:
+            ActiveWorkoutView(session: session)
+        case .complete:
+            TrainCompleteView(session: session)
         }
     }
 }
