@@ -60,6 +60,29 @@ final class MockQCBandService: QCBandService {
         []
     }
 
+    func startSportSession(_ deviceId: DeviceID, sportType: Int) async throws {
+        // No-op: mock accepts the command instantly, no real band session exists.
+    }
+
+    func pauseSportSession(_ deviceId: DeviceID) async throws {}
+
+    func resumeSportSession(_ deviceId: DeviceID) async throws {}
+
+    func stopSportSession(_ deviceId: DeviceID) async throws {}
+
+    func sportSessionUpdates(for deviceId: DeviceID) -> AsyncStream<SportSessionLiveUpdate> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+
+    func sportSessionHistory(_ deviceId: DeviceID, since timestamp: Date) async throws -> [SportSessionSummary] {
+        []
+    }
+
+    func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult {
+        // Empty result, not a fabricated reading — every field stays nil.
+        OnDemandMeasurementResult()
+    }
+
     func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws {
         throw WearableUnsupportedError(feature: "Setting band targets")
     }

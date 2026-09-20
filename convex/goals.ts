@@ -60,9 +60,26 @@ export const listGoals = query({
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
 
+const GOAL_CATEGORY_VALIDATOR = v.union(
+  v.literal("strength"),
+  v.literal("hypertrophy"),
+  v.literal("body_composition"),
+  v.literal("fat_loss"),
+  v.literal("endurance"),
+  v.literal("running_performance"),
+  v.literal("cycling_performance"),
+  v.literal("sport_performance"),
+  v.literal("recovery"),
+  v.literal("general_fitness"),
+  v.literal("maintenance"),
+  v.literal("custom"),
+);
+
 export const setGoal = mutation({
   args: {
     primaryGoal: v.string(),
+    category: v.optional(GOAL_CATEGORY_VALIDATOR),
+    secondaryCategory: v.optional(GOAL_CATEGORY_VALIDATOR),
     targetWeightKg: v.optional(v.number()),
     targetBodyFatPct: v.optional(v.number()),
     targetDate: v.optional(v.string()),
@@ -82,6 +99,8 @@ export const setGoal = mutation({
     return ctx.db.insert("clientGoals", {
       userId: user._id,
       primaryGoal: args.primaryGoal,
+      category: args.category,
+      secondaryCategory: args.secondaryCategory,
       targetWeightKg: args.targetWeightKg,
       targetBodyFatPct: args.targetBodyFatPct,
       targetDate: args.targetDate,

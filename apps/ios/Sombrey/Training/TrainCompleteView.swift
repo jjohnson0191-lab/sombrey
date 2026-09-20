@@ -3,14 +3,15 @@ import SwiftUI
 /// Completion summary — real duration (an actual elapsed-time timer) and
 /// real set/rep counts from what the user just did, nothing estimated.
 ///
-/// Not yet persisted to Convex: `workoutLogs` is shaped around
-/// human-coach program assignment (see the migration plan's Convex
-/// audit) and isn't a fit for a Sombrey-native session; a real
-/// persistence path is a later phase, once that schema question is
-/// settled — showing a summary here without silently claiming it was
-/// "saved" is the honest interim state, not a bug.
+/// Phase 3 training-architecture expansion: now genuinely persisted (via
+/// `TrainingSessionManager.finish()`, already called before this phase is
+/// reached) to `sombreyWorkouts`/`sombreyWorkoutSets` — deliberately not
+/// `workoutLogs`, which is coach-assignment-shaped. Shows the band's own
+/// live tally (`WearableManager.lastCompletedSportSession`) when a Sport+
+/// session was paired, real data only — hidden entirely otherwise.
 struct TrainCompleteView: View {
     @Environment(AppState.self) private var appState
+    @Environment(WearableManager.self) private var wearableManager
     @Bindable var session: TrainingSessionManager
 
     var body: some View {
@@ -35,10 +36,28 @@ struct TrainCompleteView: View {
                 .padding(.top, 8)
                 .studioReveal(index: 1)
 
-                Text("Not yet saved to your training history — that's coming in a later phase.")
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.inkFaint)
+                if let sportSummary = wearableManager.lastCompletedSportSession {
+                    HStack(spacing: 24) {
+                        if sportSummary.heartRate > 0 {
+                            MetricView(label: "Heart rate", value: "\(sportSummary.heartRate) bpm")
+                        }
+                        if sportSummary.calories > 0 {
+                            MetricView(label: "Calories", value: "\(sportSummary.calories) kcal")
+                        }
+                        if sportSummary.distanceMeters > 0 {
+                            MetricView(label: "Distance", value: "\(sportSummary.distanceMeters) m")
+                        }
+                    }
+                    .padding(.top, 4)
                     .studioReveal(index: 2)
+                }
+
+                if let error = session.persistError {
+                    Text("Couldn't save this workout: \(error)")
+                        .font(StudioFont.body(12))
+                        .foregroundStyle(StudioColor.danger)
+                        .studioReveal(index: 2)
+                }
 
                 Button("Return to Home") {
                     session.reset()

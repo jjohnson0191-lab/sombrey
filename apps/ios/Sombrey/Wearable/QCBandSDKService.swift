@@ -54,6 +54,12 @@ final class QCBandSDKService: NSObject, QCBandService {
     private var pairContinuation: CheckedContinuation<Void, Error>?
 
     private var measurementContinuation: AsyncStream<WearableMeasurement>.Continuation?
+    private var sportUpdateContinuation: AsyncStream<SportSessionLiveUpdate>.Continuation?
+    /// The Sport+ type of whatever session is currently active on the
+    /// band, if any — `currentSportInfo` pushes are tagged with the
+    /// device's own type, but stop/pause/resume commands need to know
+    /// which one is running without re-asking the caller.
+    private var activeSportType: Int?
 
     private static let scanTimeout: TimeInterval = 15
     private static let restoreIdentifier = "SombreyBandCentralRestoreIdentifier"
@@ -267,6 +273,120 @@ final class QCBandSDKService: NSObject, QCBandService {
         }
     }
 
+    // MARK: - Sport+ workout sessions
+
+    func startSportSession(_ deviceId: DeviceID, sportType: Int) async throws {
+        try await operateSportMode(sportType: sportType, state: Self.sportStateStart)
+        activeSportType = sportType
+    }
+
+    func pauseSportSession(_ deviceId: DeviceID) async throws {
+        guard let sportType = activeSportType else { throw WearableSDKError.commandFailed("no active sport session") }
+        try await operateSportMode(sportType: sportType, state: Self.sportStatePause)
+    }
+
+    func resumeSportSession(_ deviceId: DeviceID) async throws {
+        guard let sportType = activeSportType else { throw WearableSDKError.commandFailed("no active sport session") }
+        try await operateSportMode(sportType: sportType, state: Self.sportStateContinue)
+    }
+
+    func stopSportSession(_ deviceId: DeviceID) async throws {
+        guard let sportType = activeSportType else { throw WearableSDKError.commandFailed("no active sport session") }
+        try await operateSportMode(sportType: sportType, state: Self.sportStateStop)
+        activeSportType = nil
+    }
+
+    func sportSessionUpdates(for deviceId: DeviceID) -> AsyncStream<SportSessionLiveUpdate> {
+        AsyncStream { continuation in
+            self.sportUpdateContinuation = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    guard self?.sportUpdateContinuation != nil else { return }
+                    self?.sportUpdateContinuation = nil
+                }
+            }
+        }
+    }
+
+    func sportSessionHistory(_ deviceId: DeviceID, since timestamp: Date) async throws -> [SportSessionSummary] {
+        let summaries = try await sportRecords(since: timestamp.timeIntervalSince1970)
+        return summaries.map { model in
+            SportSessionSummary(
+                sportType: model.exerciseType,
+                startedAt: Date(timeIntervalSince1970: model.startTime),
+                durationSeconds: model.duration,
+                distanceMeters: Double(model.distance),
+                calories: Double(model.calorie),
+                averageHeartRate: Double(model.averageHR),
+                lowestHeartRate: Double(model.lowestHR),
+                highestHeartRate: Double(model.highestHR),
+                averageSpeedMetersPerSecond: Double(model.averageSpeed),
+                steps: model.steps
+            )
+        }
+    }
+
+    // MARK: - On-demand measurement
+
+    func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult {
+        guard connectedPeripheral?.identifier.uuidString == deviceId else {
+            throw WearableSDKError.noConnectedDevice
+        }
+        guard let qcType = QCMeasuringType(rawValue: metric.qcRawValue) else {
+            throw WearableSDKError.commandFailed("unsupported measurement type")
+        }
+        let raw: Any? = try await withCheckedThrowingContinuation { continuation in
+            var didResume = false
+            QCSDKManager.shareInstance().startToMeasuring(
+                withOperateType: qcType,
+                timeout: 30,
+                measuringHandle: { _ in
+                    // Intermediate ticks — only the final result matters here.
+                },
+                completedHandle: { isSuccess, result, error in
+                    guard !didResume else { return }
+                    didResume = true
+                    if isSuccess {
+                        continuation.resume(returning: result)
+                    } else {
+                        continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
+                    }
+                }
+            )
+        }
+        return Self.parseMeasurementResult(raw, metric: metric)
+    }
+
+    private static func parseMeasurementResult(_ raw: Any?, metric: OnDemandMetric) -> OnDemandMeasurementResult {
+        var result = OnDemandMeasurementResult()
+        switch metric {
+        case .heartRate:
+            result.heartRate = intValue(raw)
+        case .spo2:
+            result.spo2Pct = doubleValue(raw)
+        case .bodyTemperature:
+            result.temperatureC = doubleValue(raw)
+        case .bloodPressure:
+            if let dict = raw as? [String: Any] {
+                result.systolicMmHg = intValue(dict["sbp"])
+                result.diastolicMmHg = intValue(dict["dbp"])
+            }
+        }
+        return result
+    }
+
+    private static func intValue(_ any: Any?) -> Int? {
+        if let number = any as? NSNumber { return number.intValue }
+        if let string = any as? String { return Int(string) }
+        return nil
+    }
+
+    private static func doubleValue(_ any: Any?) -> Double? {
+        if let number = any as? NSNumber { return number.doubleValue }
+        if let string = any as? String { return Double(string) }
+        return nil
+    }
+
     // MARK: - Not wired into Sombrey V1 (see QCBandService's header)
 
     func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws {
@@ -303,6 +423,20 @@ final class QCBandSDKService: NSObject, QCBandService {
             Task { @MainActor in
                 guard let self, let deviceId = self.activeDeviceId, hr > 0 else { return }
                 self.emit(deviceId: deviceId, type: .heartRate, value: Double(hr), unit: "bpm", at: Date())
+            }
+        }
+        manager.currentSportInfo = { [weak self] sportInfo in
+            Task { @MainActor in
+                guard let self else { return }
+                self.sportUpdateContinuation?.yield(SportSessionLiveUpdate(
+                    sportType: sportInfo.sportType.rawValue,
+                    state: sportInfo.state.rawValue,
+                    durationSeconds: sportInfo.duration,
+                    heartRate: sportInfo.hr,
+                    steps: sportInfo.step,
+                    distanceMeters: sportInfo.distance,
+                    calories: sportInfo.calorie
+                ))
             }
         }
     }
@@ -371,6 +505,44 @@ final class QCBandSDKService: NSObject, QCBandService {
     }
 
     // MARK: - Command wrappers (each an independent BLE round trip)
+
+    // Raw values per the vendor header (QCDFU_Utils.h): Start=0x01,
+    // Pause=0x02, Continue=0x03, Stop=0x04, Running=0x05, GetTime=0x06.
+    // Matched by raw int for the same reason `SLEEPTYPE` is — this
+    // specific enum's Swift bridging can't be trusted across Xcode
+    // versions.
+    private static let sportStateStart = 0x01
+    private static let sportStatePause = 0x02
+    private static let sportStateContinue = 0x03
+    private static let sportStateStop = 0x04
+
+    private func operateSportMode(sportType: Int, state: Int) async throws {
+        guard let type = OdmSportPlusExerciseModelType(rawValue: sportType),
+              let sportState = QCSportState(rawValue: state) else {
+            throw WearableSDKError.commandFailed("invalid sport type or state")
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            QCSDKCmdCreator.operateSportMode(withType: type, state: sportState) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func sportRecords(since timestamp: TimeInterval) async throws -> [OdmGeneralExerciseSummaryModel] {
+        try await withCheckedThrowingContinuation { continuation in
+            QCSDKCmdCreator.getSportRecords(fromLastTimeStamp: timestamp) { summaries, error in
+                if let summaries {
+                    continuation.resume(returning: summaries)
+                } else {
+                    continuation.resume(throwing: error ?? WearableSDKError.commandFailed("sport session history"))
+                }
+            }
+        }
+    }
 
     private func setDeviceTime() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -535,3 +707,5 @@ extension QCSchedualHeartRateModel: @unchecked Sendable {}
 extension QCBloodOxygenModel: @unchecked Sendable {}
 extension QCTemperatureModel: @unchecked Sendable {}
 extension QCBloodPressureModel: @unchecked Sendable {}
+extension QCSportInfoModel: @unchecked Sendable {}
+extension OdmGeneralExerciseSummaryModel: @unchecked Sendable {}

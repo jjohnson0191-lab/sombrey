@@ -950,6 +950,31 @@ export const updateExtendedProfile = mutation({
   },
 });
 
+// AI Coach's coaching mode — how much control the user gives the AI over
+// their training/nutrition. Full control by default is never assumed; the
+// client picks the initial value in onboarding and can change it anytime.
+export const setCoachingMode = mutation({
+  args: {
+    coachingMode: v.union(
+      v.literal("full_control"),
+      v.literal("recommendations"),
+      v.literal("tracking_only"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError({ code: "UNAUTHENTICATED", message: "Not logged in" });
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    if (!user) throw new ConvexError({ code: "NOT_FOUND", message: "User not found" });
+
+    await ctx.db.patch(user._id, { coachingMode: args.coachingMode });
+  },
+});
+
 /** Coach/Admin updating a client's extended profile */
 export const updateClientExtendedProfile = mutation({
   args: {

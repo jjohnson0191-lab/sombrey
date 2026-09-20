@@ -54,6 +54,26 @@ protocol QCBandService: AnyObject {
     /// time range with an optional stage breakdown, not a single value.
     func sleepHistory(_ deviceId: DeviceID, days: Int) async throws -> [SleepSessionData]
 
+    // MARK: Sport+ workout sessions — the real workout-lifecycle API
+    // (Phase 3 training-architecture expansion). `sportType` is always a
+    // raw `OdmSportPlusExerciseModelType` value from `SombreySportType`.
+    func startSportSession(_ deviceId: DeviceID, sportType: Int) async throws
+    func pauseSportSession(_ deviceId: DeviceID) async throws
+    func resumeSportSession(_ deviceId: DeviceID) async throws
+    func stopSportSession(_ deviceId: DeviceID) async throws
+    /// Live push while a Sport+ session is running — empty for
+    /// `MockQCBandService`, matching `measurements(for:)`'s honest-absence
+    /// convention.
+    func sportSessionUpdates(for deviceId: DeviceID) -> AsyncStream<SportSessionLiveUpdate>
+    /// The band's own historical Sport+ records since `timestamp` —
+    /// distinct from the live stream above; this is the richer,
+    /// device-processed summary (avg/min/max HR, distance, calories,
+    /// speed) fetched once a session has actually finished.
+    func sportSessionHistory(_ deviceId: DeviceID, since timestamp: Date) async throws -> [SportSessionSummary]
+
+    /// A single "measure now" reading — on-demand, not scheduled/passive.
+    func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult
+
     // MARK: Real band/SDK capabilities not wired into Sombrey V1 yet —
     // see the type header. Every conformer throws `WearableUnsupportedError`.
     func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws

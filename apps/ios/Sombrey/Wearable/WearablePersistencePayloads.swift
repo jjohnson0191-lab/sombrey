@@ -43,3 +43,17 @@ struct WearableSleepSessionPayload: Encodable, ConvexEncodable {
         stages = session.stages?.map(WearableSleepStagePayload.init)
     }
 }
+
+struct GPSPointPayload: Encodable, ConvexEncodable {
+    let latitude: Double
+    let longitude: Double
+    let recordedAt: Double // epoch ms
+    let altitudeMeters: Double?
+
+    init(_ point: GPSPoint) {
+        latitude = point.latitude
+        longitude = point.longitude
+        recordedAt = point.recordedAt.timeIntervalSince1970 * 1000
+        altitudeMeters = point.altitudeMeters
+    }
+}

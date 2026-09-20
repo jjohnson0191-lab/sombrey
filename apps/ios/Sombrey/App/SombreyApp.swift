@@ -62,13 +62,21 @@ private struct RootView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Shown once, before the user's first sign-in — persisted so it
+    /// never reappears after the user has made a choice (pair or skip).
+    /// `@AppStorage` rather than a one-shot in-memory flag so a killed-
+    /// and-relaunched app before sign-in doesn't show it again.
+    @AppStorage("sombreyOnboarding.pairingIntroShown") private var hasShownPairingIntro = false
+
     private enum Stage: Hashable {
-        case loading, signIn, connecting, failed, home
+        case loading, pairingIntro, signIn, connecting, failed, home
     }
 
     private var stage: Stage {
         if !clerk.isLoaded { return .loading }
-        if clerk.session == nil { return .signIn }
+        if clerk.session == nil {
+            return hasShownPairingIntro ? .signIn : .pairingIntro
+        }
         switch appState.authPhase {
         case .signedIn: return .home
         case .failed: return .failed
@@ -81,6 +89,8 @@ private struct RootView: View {
             switch stage {
             case .loading:
                 RootLoadingView(label: "Loading…")
+            case .pairingIntro:
+                BandPairingView { hasShownPairingIntro = true }
             case .signIn:
                 SignInView()
             case .home:

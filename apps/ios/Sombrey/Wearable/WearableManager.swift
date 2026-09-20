@@ -32,12 +32,29 @@ final class WearableManager {
     /// reads for "— steps / — active cal / HR —" once real data exists.
     private(set) var latestMeasurements: [WearableMetricType: WearableMeasurement] = [:]
 
+    /// The Sport+ session currently running on the band, if any — set by
+    /// `startSportSession(type:)`, cleared by `stopSportSession()`.
+    private(set) var activeSportSession: ActiveSportSession?
+    /// The last live tally from a session that just stopped — kept
+    /// around (unlike `activeSportSession`, which clears) so a
+    /// completion screen can show it once, without re-fetching.
+    private(set) var lastCompletedSportSession: SportSessionLiveUpdate?
+
     private let service: QCBandService
+    private let gpsTracker = GPSTracker()
     private var measurementTask: Task<Void, Never>?
+    private var sportUpdateTask: Task<Void, Never>?
     private var syncTask: Task<Void, Never>?
     private var pendingMeasurements: [WearableMeasurement] = []
 
     private static let lastDeviceIdKey = "sombreyWearable.lastDeviceId"
+
+    struct ActiveSportSession {
+        let sportType: Int
+        let convexSessionId: String
+        let startedAt: Date
+        var liveUpdate: SportSessionLiveUpdate?
+    }
 
     init(service: QCBandService) {
         self.service = service
@@ -140,6 +157,154 @@ final class WearableManager {
         }
     }
 
+    // MARK: - Sport+ workout sessions
+
+    /// Starts a Sport+ session on the band AND its Convex record together
+    /// — the two-object model the Phase 3 training-architecture spec
+    /// calls for (a Sport+ session is not a Sombrey training session).
+    /// `TrainingSessionManager` calls this, not the other way around.
+    func startSportSession(type: SombreySportType) async {
+        guard let device = pairedDevice else { return }
+        lastError = nil
+        do {
+            try await service.startSportSession(device.id, sportType: type.rawValue)
+            let startedAt = Date()
+            let sessionId: String = try await ConvexClientProvider.client.mutation("sportPlusSessions:startSession", with: [
+                "deviceId": device.id,
+                "sportType": Double(type.rawValue),
+                "startedAt": startedAt.timeIntervalSince1970 * 1000,
+            ])
+            activeSportSession = ActiveSportSession(sportType: type.rawValue, convexSessionId: sessionId, startedAt: startedAt, liveUpdate: nil)
+            subscribeToSportUpdates(deviceId: device.id)
+            if type.usesPhoneGPS {
+                gpsTracker.requestAuthorizationIfNeeded()
+                if gpsTracker.isAuthorized {
+                    gpsTracker.startTracking()
+                }
+            }
+        } catch {
+            lastError = String(describing: error)
+        }
+    }
+
+    func pauseSportSession() async {
+        guard let device = pairedDevice else { return }
+        do {
+            try await service.pauseSportSession(device.id)
+        } catch {
+            lastError = String(describing: error)
+        }
+    }
+
+    func resumeSportSession() async {
+        guard let device = pairedDevice else { return }
+        do {
+            try await service.resumeSportSession(device.id)
+        } catch {
+            lastError = String(describing: error)
+        }
+    }
+
+    /// Stops both the band's Sport+ session and finalizes its Convex
+    /// record — the immediate summary comes from the last live tick the
+    /// band pushed (real data, not fabricated), not the band's own
+    /// post-processed historical summary (`sync()` doesn't yet reconcile
+    /// against that — see the Phase 3 implementation report). Returns the
+    /// Convex session id so a caller (`TrainingSessionManager`) can
+    /// associate it with a Sombrey workout.
+    @discardableResult
+    func stopSportSession() async -> String? {
+        guard let device = pairedDevice, let active = activeSportSession else { return nil }
+        sportUpdateTask?.cancel()
+        sportUpdateTask = nil
+        let usesGPS = SombreySportType.byRawValue[active.sportType]?.usesPhoneGPS ?? false
+        if usesGPS { gpsTracker.stopTracking() }
+
+        do {
+            try await service.stopSportSession(device.id)
+        } catch {
+            lastError = String(describing: error)
+        }
+
+        let liveUpdate = active.liveUpdate
+        do {
+            try await ConvexClientProvider.client.mutation("sportPlusSessions:finishSession", with: [
+                "sessionId": active.convexSessionId,
+                "endedAt": Date().timeIntervalSince1970 * 1000,
+                "durationSeconds": liveUpdate.map { Double($0.durationSeconds) },
+                "distanceMeters": liveUpdate.map { Double($0.distanceMeters) },
+                "calories": liveUpdate.map { Double($0.calories) },
+                "averageHeartRate": liveUpdate.map { Double($0.heartRate) },
+                "steps": liveUpdate.map { Double($0.steps) },
+            ])
+        } catch {
+            lastError = String(describing: error)
+        }
+
+        if usesGPS && !gpsTracker.route.isEmpty {
+            let routePayload: [ConvexEncodable?] = gpsTracker.route.map { GPSPointPayload($0) as ConvexEncodable? }
+            try? await ConvexClientProvider.client.mutation("sportPlusSessions:recordDetail", with: [
+                "sessionId": active.convexSessionId,
+                "route": routePayload,
+            ])
+        }
+
+        let sessionId = active.convexSessionId
+        lastCompletedSportSession = liveUpdate
+        activeSportSession = nil
+        return sessionId
+    }
+
+    private func subscribeToSportUpdates(deviceId: DeviceID) {
+        sportUpdateTask?.cancel()
+        sportUpdateTask = Task { [weak self] in
+            guard let self else { return }
+            for await update in self.service.sportSessionUpdates(for: deviceId) {
+                guard !Task.isCancelled else { return }
+                self.activeSportSession?.liveUpdate = update
+            }
+        }
+    }
+
+    // MARK: - On-demand measurement
+
+    /// A single user-initiated "measure now" reading — persists whatever
+    /// values come back (never all four; the SDK returns one reading per
+    /// metric) and updates `latestMeasurements` for immediate display.
+    @discardableResult
+    func measureNow(_ metric: OnDemandMetric) async -> OnDemandMeasurementResult? {
+        guard let device = pairedDevice else { return nil }
+        lastError = nil
+        do {
+            let result = try await service.measureNow(device.id, metric: metric)
+            let now = Date()
+            var readings: [WearableMeasurement] = []
+            if let hr = result.heartRate {
+                readings.append(WearableMeasurement(deviceId: device.id, metricType: .heartRate, value: Double(hr), unit: "bpm", recordedAt: now))
+            }
+            if let spo2 = result.spo2Pct {
+                readings.append(WearableMeasurement(deviceId: device.id, metricType: .spo2, value: spo2, unit: "%", recordedAt: now))
+            }
+            if let temp = result.temperatureC {
+                readings.append(WearableMeasurement(deviceId: device.id, metricType: .skinTemperature, value: temp, unit: "°C", recordedAt: now))
+            }
+            if let systolic = result.systolicMmHg {
+                readings.append(WearableMeasurement(deviceId: device.id, metricType: .bloodPressureSystolic, value: Double(systolic), unit: "mmHg", recordedAt: now))
+            }
+            if let diastolic = result.diastolicMmHg {
+                readings.append(WearableMeasurement(deviceId: device.id, metricType: .bloodPressureDiastolic, value: Double(diastolic), unit: "mmHg", recordedAt: now))
+            }
+            for reading in readings { latestMeasurements[reading.metricType] = reading }
+            if !readings.isEmpty {
+                await persistMeasurements(deviceId: device.id, measurements: readings)
+            }
+            return result
+        } catch {
+            lastError = String(describing: error)
+            return nil
+        }
+    }
+
     // MARK: - App lifecycle
 
     /// Call from the root view's `.onChange(of: scenePhase)`.
@@ -169,13 +334,17 @@ final class WearableManager {
     private func teardownLocalState() {
         measurementTask?.cancel()
         measurementTask = nil
+        sportUpdateTask?.cancel()
+        sportUpdateTask = nil
         syncTask?.cancel()
         syncTask = nil
+        gpsTracker.stopTracking()
         pendingMeasurements.removeAll()
         latestMeasurements.removeAll()
         pairedDevice = nil
         status = nil
         lastSyncResult = nil
+        activeSportSession = nil
         discoveredDevices = []
         UserDefaults.standard.removeObject(forKey: Self.lastDeviceIdKey)
     }

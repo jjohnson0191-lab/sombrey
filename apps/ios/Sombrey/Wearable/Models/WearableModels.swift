@@ -83,13 +83,74 @@ struct SleepSessionData {
     var stages: [SleepStage]?
 }
 
-struct WorkoutSessionData {
-    let deviceId: DeviceID
+// MARK: - Sport+ workout sessions (Phase 3 training-architecture expansion)
+//
+// A Sport+ session is the band's own physiological/activity record of one
+// continuous activity (start->stop) — a distinct object from a Sombrey
+// training session (exercises/sets/reps/weight), never merged with it.
+// `sportType` is the raw `OdmSportPlusExerciseModelType` value from
+// `SombreySportType` — matched by raw int, never the vendor's bridged
+// Swift enum case names (unreliable across Xcode versions — see
+// `QCBandSDKService`'s own sleep-type handling for why).
+
+/// One push from the band while a Sport+ session is actively running —
+/// `QCSDKManager.currentSportInfo`'s payload, mapped 1:1.
+struct SportSessionLiveUpdate {
+    let sportType: Int
+    let state: Int
+    let durationSeconds: Int
+    let heartRate: Int
+    let steps: Int
+    let distanceMeters: Int
+    let calories: Int
+}
+
+/// A completed Sport+ session, from the band's own historical record
+/// (`getSportRecordsFromLastTimeStamp:`) — richer and more accurate than
+/// the last live tick, but only available after the band has processed
+/// the session, hence fetched separately during `sync()`.
+struct SportSessionSummary {
+    let sportType: Int
     let startedAt: Date
-    let endedAt: Date
-    var avgHeartRate: Double?
-    var maxHeartRate: Double?
-    var caloriesBurned: Double?
+    let durationSeconds: Int?
+    let distanceMeters: Double?
+    let calories: Double?
+    let averageHeartRate: Double?
+    let lowestHeartRate: Double?
+    let highestHeartRate: Double?
+    let averageSpeedMetersPerSecond: Double?
+    let steps: Int?
+}
+
+/// A metric the vendor SDK genuinely supports as an on-demand ("measure
+/// now") reading — see `QCSDKManager.startToMeasuringWithOperateType:`.
+/// HRV/stress/blood-glucose are deliberately excluded: the vendor
+/// documents HRV/stress as ring-only, and this can't be confirmed against
+/// the physical Sombrey Band from software alone.
+enum OnDemandMetric: String, CaseIterable {
+    case heartRate, bloodPressure, spo2, bodyTemperature
+
+    /// Raw `QCMeasuringType` value per the vendor header (QCSDKManager.h):
+    /// HeartRate=0, BloodPressue=1, BloodOxygen=2, BodyTemperature=7.
+    /// Matched by raw int for the same reason `SLEEPTYPE` is in
+    /// `QCBandSDKService` — this NS_ENUM's Swift case names aren't
+    /// reliably bridged across Xcode versions.
+    var qcRawValue: Int {
+        switch self {
+        case .heartRate: return 0
+        case .bloodPressure: return 1
+        case .spo2: return 2
+        case .bodyTemperature: return 7
+        }
+    }
+}
+
+struct OnDemandMeasurementResult {
+    var heartRate: Int?
+    var systolicMmHg: Int?
+    var diastolicMmHg: Int?
+    var spo2Pct: Double?
+    var temperatureC: Double?
 }
 
 enum WearableSyncStatus: String {

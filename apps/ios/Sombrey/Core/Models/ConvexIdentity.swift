@@ -8,10 +8,15 @@ struct SombreyUser: Identifiable, Decodable {
     let id: String
     let name: String?
     let email: String?
+    /// Added in the Phase 3 training-architecture expansion —
+    /// "full_control" / "recommendations" / "tracking_only". `nil`
+    /// means the user hasn't set one yet; treat as "recommendations".
+    let coachingMode: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
         case name
         case email
+        case coachingMode
     }
 }

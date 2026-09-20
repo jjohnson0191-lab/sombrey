@@ -6,10 +6,21 @@ import ConvexMobile
 /// build a session, then starts it. Empty state when the exercise
 /// library itself has nothing to show (a real, honest possibility, not
 /// a loading glitch).
+///
+/// Phase 3 training-architecture expansion: search, reorder, and "repeat
+/// previous workout" so a user can train entirely without AI — plus an
+/// optional Sport+ pairing (the band's own activity type), started
+/// alongside the Sombrey session, never replacing its set/rep/weight
+/// system.
 struct TrainOverviewView: View {
     @Environment(AppState.self) private var appState
+    @Environment(WearableManager.self) private var wearableManager
     @Bindable var session: TrainingSessionManager
     @State private var exercises = ConvexQuery<[Exercise]>()
+    @State private var searchTerm = ""
+    @State private var selectedSportType: SombreySportType?
+    @State private var isStarting = false
+    @State private var repeatTemplate = ConvexQuery<RepeatTemplate?>()
 
     var body: some View {
         @Bindable var appState = appState
@@ -24,13 +35,32 @@ struct TrainOverviewView: View {
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.inkSoft)
 
-                content
+                repeatPreviousButton
+
+                TextField("Search exercises", text: $searchTerm)
+                    .font(StudioFont.body(14))
+                    .padding(10)
+                    .background(StudioColor.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                    .onChange(of: searchTerm) { _, newValue in
+                        exercises.subscribe(to: "exercises:list", with: ["searchTerm": newValue])
+                    }
 
                 if !session.selectedExercises.isEmpty {
-                    Button("Start Workout (\(session.selectedExercises.count) exercises)") {
-                        session.startWorkout()
+                    selectedExercisesSection
+                }
+
+                content
+
+                if wearableManager.pairedDevice != nil {
+                    sportTypePicker
+                }
+
+                if !session.selectedExercises.isEmpty {
+                    Button(isStarting ? "Starting…" : "Start Workout (\(session.selectedExercises.count) exercises)") {
+                        startWorkout()
                     }
                     .buttonStyle(.illuminatedCTA)
+                    .disabled(isStarting)
                     .padding(.top, 8)
                 }
             }
@@ -38,6 +68,84 @@ struct TrainOverviewView: View {
         }
         .task {
             exercises.subscribe(to: "exercises:list")
+            repeatTemplate.subscribe(to: "sombreyWorkouts:getMostRecentWorkoutTemplate")
+        }
+    }
+
+    private func startWorkout() {
+        isStarting = true
+        Task {
+            session.workoutSource = session.workoutSource == .repeated ? .repeated : .userCreated
+            await session.startWorkout()
+            if let sportType = selectedSportType, wearableManager.pairedDevice != nil {
+                await wearableManager.startSportSession(type: sportType)
+            }
+            isStarting = false
+        }
+    }
+
+    @ViewBuilder
+    private var repeatPreviousButton: some View {
+        if let template = repeatTemplate.value, let template {
+            Button("Repeat \"\(template.workoutName)\"") {
+                let matched = template.exerciseIds.compactMap { id in exercises.value?.first { $0.id == id } }
+                session.loadRepeatTemplate(name: template.workoutName, exercises: matched)
+            }
+            .font(StudioFont.body(12, weight: .medium))
+            .foregroundStyle(StudioColor.inkSoft)
+            .underline()
+        }
+    }
+
+    @ViewBuilder
+    private var selectedExercisesSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("SELECTED — DRAG TO REORDER")
+                .font(StudioFont.body(11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(StudioColor.inkSoft)
+            List {
+                ForEach(session.selectedExercises) { exercise in
+                    Text(exercise.name)
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.ink)
+                }
+                .onMove { session.moveExercise(fromOffsets: $0, toOffset: $1) }
+                .onDelete { offsets in
+                    for index in offsets { session.toggle(session.selectedExercises[index]) }
+                }
+                .listRowBackground(Color.clear)
+            }
+            .listStyle(.plain)
+            .frame(height: CGFloat(min(session.selectedExercises.count, 5)) * 44 + 8)
+            .scrollDisabled(session.selectedExercises.count <= 5)
+        }
+    }
+
+    @ViewBuilder
+    private var sportTypePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("PAIR WITH BAND ACTIVITY (OPTIONAL)")
+                .font(StudioFont.body(11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(StudioColor.inkSoft)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SombreySportType.featuredRawValues.compactMap { SombreySportType.byRawValue[$0] }) { type in
+                        Button(type.displayName) {
+                            selectedSportType = (selectedSportType == type) ? nil : type
+                        }
+                        .font(StudioFont.body(12, weight: .medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            selectedSportType == type ? StudioColor.accentInk.opacity(0.15) : StudioColor.ink.opacity(0.05),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(StudioColor.ink)
+                    }
+                }
+            }
         }
     }
 
@@ -65,6 +173,12 @@ struct TrainOverviewView: View {
                 .padding(.top, 24)
         }
     }
+}
+
+/// Wire shape of `sombreyWorkouts:getMostRecentWorkoutTemplate`'s result.
+struct RepeatTemplate: Decodable {
+    let workoutName: String
+    let exerciseIds: [String]
 }
 
 private struct ExerciseRow: View {

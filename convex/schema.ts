@@ -37,6 +37,15 @@ export default defineSchema({
     coachingPriceCents: v.optional(v.number()),
     coachId: v.optional(v.id("users")),
     onboardingCompleted: v.boolean(),
+    // AI Coach's coaching mode for this user (Phase 3 training-architecture
+    // expansion) — AI is optional, and the user stays in control unless
+    // they explicitly choose full_control. Undefined defaults to
+    // "recommendations" client-side, the safe middle ground.
+    coachingMode: v.optional(v.union(
+      v.literal("full_control"),
+      v.literal("recommendations"),
+      v.literal("tracking_only"),
+    )),
     avatarStorageId: v.optional(v.id("_storage")),
     customerId: v.optional(v.string()),
     disabled: v.optional(v.boolean()),
@@ -576,7 +585,39 @@ export default defineSchema({
   // Client goals (one active goal per user)
   clientGoals: defineTable({
     userId: v.id("users"),
-    primaryGoal: v.string(),          // free text
+    primaryGoal: v.string(),          // free text — kept for backward compat
+    // Structured category, added in the Phase 3 training-architecture
+    // expansion — Sombrey must not assume every user is pursuing body
+    // transformation. `primaryGoal` (free text) stays as a human-readable
+    // label; this drives AI-context/analytics logic.
+    category: v.optional(v.union(
+      v.literal("strength"),
+      v.literal("hypertrophy"),
+      v.literal("body_composition"),
+      v.literal("fat_loss"),
+      v.literal("endurance"),
+      v.literal("running_performance"),
+      v.literal("cycling_performance"),
+      v.literal("sport_performance"),
+      v.literal("recovery"),
+      v.literal("general_fitness"),
+      v.literal("maintenance"),
+      v.literal("custom"),
+    )),
+    secondaryCategory: v.optional(v.union(
+      v.literal("strength"),
+      v.literal("hypertrophy"),
+      v.literal("body_composition"),
+      v.literal("fat_loss"),
+      v.literal("endurance"),
+      v.literal("running_performance"),
+      v.literal("cycling_performance"),
+      v.literal("sport_performance"),
+      v.literal("recovery"),
+      v.literal("general_fitness"),
+      v.literal("maintenance"),
+      v.literal("custom"),
+    )),
     targetWeightKg: v.optional(v.number()),
     targetBodyFatPct: v.optional(v.number()),
     targetDate: v.optional(v.string()), // ISO date string
@@ -1125,4 +1166,83 @@ export default defineSchema({
     }))),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"]),
+
+  // ── QCBand Sport+ sessions — the wearable's own activity record ──────────────
+  // Added in the Phase 3 training-architecture expansion. A Sport+ session is
+  // the band's physiological/activity record of one activity (start->stop),
+  // identified by the vendor's own OdmSportPlusExerciseModelType raw value —
+  // NOT the same object as a sombreyWorkouts row (sets/reps/weight); the two
+  // are associated via sportPlusSessionId on sombreyWorkouts, never merged.
+  sportPlusSessions: defineTable({
+    userId: v.id("users"),
+    deviceId: v.string(),
+    sportType: v.number(),                 // raw OdmSportPlusExerciseModelType value
+    startedAt: v.number(),                 // epoch ms
+    endedAt: v.optional(v.number()),       // epoch ms — unset while still active
+    durationSeconds: v.optional(v.number()),
+    distanceMeters: v.optional(v.number()),
+    calories: v.optional(v.number()),
+    averageHeartRate: v.optional(v.number()),
+    lowestHeartRate: v.optional(v.number()),
+    highestHeartRate: v.optional(v.number()),
+    averageSpeedMetersPerSecond: v.optional(v.number()),
+    steps: v.optional(v.number()),
+    source: v.string(),                    // "sombrey_band"
+  }).index("by_user", ["userId"])
+    .index("by_user_and_startedAt", ["userId", "startedAt"]),
+
+  // Per-session detail — heart-rate/speed timelines and, for GPS-tagged sport
+  // types, the phone-CoreLocation-derived route (the band has no onboard GPS
+  // chip — see the Phase 3 wearable audit). Kept separate from the summary
+  // row above since most reads only need the summary.
+  sportPlusSessionDetails: defineTable({
+    sportPlusSessionId: v.id("sportPlusSessions"),
+    userId: v.id("users"),
+    heartRates: v.optional(v.array(v.number())),
+    speedsMetersPerSecond: v.optional(v.array(v.number())),
+    route: v.optional(v.array(v.object({
+      latitude: v.number(),
+      longitude: v.number(),
+      recordedAt: v.number(),              // epoch ms
+      altitudeMeters: v.optional(v.number()),
+    }))),
+  }).index("by_session", ["sportPlusSessionId"])
+    .index("by_user", ["userId"]),
+
+  // ── Sombrey-native training sessions ──────────────────────────────────────────
+  // A Sombrey training session is the resistance/general-training record
+  // (exercises/sets/reps/weight) a user builds and executes — a distinct
+  // object from a sportPlusSessions row, per the Phase 3 training-
+  // architecture spec. `workoutLogs` (coach-program-assignment-shaped) is
+  // deliberately not reused here.
+  sombreyWorkouts: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    startedAt: v.number(),                 // epoch ms
+    completedAt: v.optional(v.number()),   // epoch ms — unset while in progress
+    durationSeconds: v.optional(v.number()),
+    source: v.union(v.literal("user_created"), v.literal("ai_created"), v.literal("repeated")),
+    // The paired band activity for this session, if the user started one —
+    // never required, never fabricated when absent.
+    sportPlusSessionId: v.optional(v.id("sportPlusSessions")),
+    notes: v.optional(v.string()),
+  }).index("by_user", ["userId"])
+    .index("by_user_and_startedAt", ["userId", "startedAt"])
+    .index("by_user_and_completedAt", ["userId", "completedAt"]),
+
+  // One row per completed set — queryable independently for progression
+  // analysis (e.g. "every set of this exercise for this user, in order")
+  // without loading whole workout documents.
+  sombreyWorkoutSets: defineTable({
+    workoutId: v.id("sombreyWorkouts"),
+    userId: v.id("users"),
+    exerciseId: v.id("exercises"),
+    orderIndex: v.number(),                // position within the workout
+    setIndex: v.number(),                  // position within this exercise
+    reps: v.number(),
+    weightKg: v.optional(v.number()),
+    completedAt: v.number(),               // epoch ms
+  }).index("by_workout", ["workoutId"])
+    .index("by_user_and_exercise", ["userId", "exerciseId"])
+    .index("by_user_and_completedAt", ["userId", "completedAt"]),
 });

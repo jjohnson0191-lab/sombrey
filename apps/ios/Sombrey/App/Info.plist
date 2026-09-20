@@ -102,5 +102,13 @@
 	<array>
 		<string>bluetooth-central</string>
 	</array>
+
+	<!-- Phase 3 training-architecture expansion: GPS-tagged Sport+ session
+	     types (GPS Run/Bike/Walk, outdoor cycling/hiking) request phone
+	     location — the band has no onboard GPS chip (see GPSTracker.swift
+	     and the Phase 3 wearable audit). When-in-use only; never requests
+	     Always. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Sombrey uses your location to record the route during outdoor GPS workouts like running and cycling.</string>
 </dict>
 </plist>
