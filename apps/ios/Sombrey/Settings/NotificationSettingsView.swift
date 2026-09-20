@@ -103,7 +103,12 @@ struct NotificationSettingsView: View {
         Task {
             if newValue {
                 let granted = await NotificationManager.shared.requestAuthorizationIfNeeded()
-                authorizationDenied = !granted && (await NotificationManager.shared.authorizationStatus()) == .denied
+                if !granted {
+                    let status = await NotificationManager.shared.authorizationStatus()
+                    authorizationDenied = status == .denied
+                } else {
+                    authorizationDenied = false
+                }
             }
             try? await ConvexClientProvider.client.mutation("notificationPreferences:set", with: [keyName(keyPath): newValue])
             await NotificationManager.shared.reconcileAll()
