@@ -55,6 +55,7 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     private var measurementContinuation: AsyncStream<WearableMeasurement>.Continuation?
     private var sportUpdateContinuation: AsyncStream<SportSessionLiveUpdate>.Continuation?
+    private var connectionStateContinuation: AsyncStream<WearableConnectionState>.Continuation?
     /// The Sport+ type of whatever session is currently active on the
     /// band, if any — `currentSportInfo` pushes are tagged with the
     /// device's own type, but stop/pause/resume commands need to know
@@ -134,6 +135,26 @@ final class QCBandSDKService: NSObject, QCBandService {
                 options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true]
             )
         }
+    }
+
+    func reconnectDevice(_ deviceId: DeviceID) async throws {
+        guard centralManager.state == .poweredOn else {
+            throw WearableSDKError.bluetoothUnavailable
+        }
+        guard let uuid = UUID(uuidString: deviceId) else {
+            throw WearableSDKError.deviceNotFound
+        }
+        // `retrievePeripherals(withIdentifiers:)` gets a real CBPeripheral
+        // handle for a device the system already knows about by UUID —
+        // standard CoreBluetooth, no scan required. Feeds it into the
+        // exact same `discoveredPeripherals`-backed connect path
+        // `pairDevice` already uses, rather than duplicating the connect
+        // logic.
+        guard let peripheral = centralManager.retrievePeripherals(withIdentifiers: [uuid]).first else {
+            throw WearableSDKError.deviceNotFound
+        }
+        discoveredPeripherals[deviceId] = peripheral
+        try await pairDevice(deviceId)
     }
 
     func unpairDevice(_ deviceId: DeviceID) async throws {
@@ -259,6 +280,18 @@ final class QCBandSDKService: NSObject, QCBandService {
             })
         }
         return byDay.values.compactMap(Self.sleepSession(from:)).sorted { $0.startedAt < $1.startedAt }
+    }
+
+    func connectionStateUpdates(for deviceId: DeviceID) -> AsyncStream<WearableConnectionState> {
+        AsyncStream { continuation in
+            self.connectionStateContinuation = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    guard self?.connectionStateContinuation != nil else { return }
+                    self?.connectionStateContinuation = nil
+                }
+            }
+        }
     }
 
     func measurements(for deviceId: DeviceID) -> AsyncStream<WearableMeasurement> {
@@ -640,6 +673,7 @@ extension QCBandSDKService: CBCentralManagerDelegate {
                 self.stopScanIfNeeded()
                 self.scanContinuation?.resume(returning: [])
                 self.scanContinuation = nil
+                self.connectionStateContinuation?.yield(.unavailable)
             }
         }
     }
@@ -659,8 +693,10 @@ extension QCBandSDKService: CBCentralManagerDelegate {
                     if success {
                         self.connectedPeripheral = peripheral
                         self.activeDeviceId = peripheral.identifier.uuidString
+                        self.connectionStateContinuation?.yield(.connected)
                         self.pairContinuation?.resume()
                     } else {
+                        self.connectionStateContinuation?.yield(.error)
                         self.pairContinuation?.resume(throwing: WearableSDKError.connectFailed)
                     }
                     self.pairContinuation = nil
@@ -671,6 +707,7 @@ extension QCBandSDKService: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
+            self.connectionStateContinuation?.yield(.error)
             self.pairContinuation?.resume(throwing: error ?? WearableSDKError.connectFailed)
             self.pairContinuation = nil
         }
@@ -686,7 +723,10 @@ extension QCBandSDKService: CBCentralManagerDelegate {
             // `unpairDevice`, which clears `connectedPeripheral` itself
             // before this delegate call would fire from a real teardown).
             if central.state == .poweredOn {
+                self.connectionStateContinuation?.yield(.reconnecting)
                 central.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+            } else {
+                self.connectionStateContinuation?.yield(.unavailable)
             }
         }
     }

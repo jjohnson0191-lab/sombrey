@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "prettier-fix": "prettier --write .",
-    "prettier-check": "prettier --check ."
+    "prettier-check": "prettier --check .",
+    "test:readiness": "node --experimental-strip-types --test tests/readiness/scoring.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

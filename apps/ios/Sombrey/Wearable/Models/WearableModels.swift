@@ -26,7 +26,26 @@ struct SombreyDevice: Identifiable, Hashable {
 }
 
 enum WearableConnectionState: String {
-    case disconnected, connecting, connected, syncing, error
+    /// No device has ever been paired — distinct from `.disconnected`
+    /// (a previously-paired device that's currently not connected).
+    /// Never inferred from "no saved device id" alone at the UI layer;
+    /// `WearableManager.pairedDevice == nil` is the one source of truth.
+    case notPaired
+    /// Actively scanning for nearby devices (`WearableManager.isScanning`).
+    case searching
+    /// A fresh pairing attempt is in flight — the label shown to the
+    /// user is "Pairing," distinct from `.reconnecting` below even
+    /// though both reuse this same underlying state internally.
+    case connecting
+    case connected
+    case syncing
+    /// The band dropped unexpectedly and `QCBandSDKService` is
+    /// automatically retrying the connection — distinct from
+    /// `.connecting` (a fresh, user-initiated pair) even though both
+    /// represent "not yet connected, actively trying."
+    case reconnecting
+    case disconnected
+    case error
     /// Bluetooth itself is off, unauthorized, or unsupported — distinct
     /// from `.disconnected` (no paired device) or `.error` (a specific
     /// operation failed): here no operation can even be attempted.

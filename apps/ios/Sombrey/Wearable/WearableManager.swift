@@ -44,10 +44,28 @@ final class WearableManager {
     private let gpsTracker = GPSTracker()
     private var measurementTask: Task<Void, Never>?
     private var sportUpdateTask: Task<Void, Never>?
+    private var connectionStateTask: Task<Void, Never>?
     private var syncTask: Task<Void, Never>?
     private var pendingMeasurements: [WearableMeasurement] = []
 
     private static let lastDeviceIdKey = "sombreyWearable.lastDeviceId"
+    private static let readinessDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    /// The single source of truth the UI should read instead of raw
+    /// `status?.connectionState` — layers "not paired" and "searching" on
+    /// top, neither of which the SDK-driven connection-state stream
+    /// itself represents.
+    var displayState: WearableConnectionState {
+        if pairedDevice == nil { return .notPaired }
+        if isScanning { return .searching }
+        return status?.connectionState ?? .disconnected
+    }
 
     struct ActiveSportSession {
         let sportType: Int
@@ -87,6 +105,7 @@ final class WearableManager {
             pairedDevice = device
             UserDefaults.standard.set(device.id, forKey: Self.lastDeviceIdKey)
             subscribeToMeasurements(deviceId: device.id)
+            subscribeToConnectionState(deviceId: device.id)
             await refreshStatus()
             await persistDeviceState(deviceId: device.id, model: device.model, nickname: device.nickname, connected: true, synced: false)
             await sync()
@@ -96,6 +115,30 @@ final class WearableManager {
         }
     }
 
+    /// For a device that was paired in a previous app session (or that
+    /// dropped and gave up auto-reconnecting) — reconnects by the saved
+    /// device id directly, without requiring a fresh scan first. Surfaced
+    /// from Settings' "Reconnect Sombrey Band."
+    func reconnect() async {
+        guard let device = pairedDevice else { return }
+        lastError = nil
+        status = WearableDeviceStatus(deviceId: device.id, connectionState: .reconnecting, batteryPct: status?.batteryPct, lastSeenAt: nil)
+        do {
+            try await service.reconnectDevice(device.id)
+            subscribeToMeasurements(deviceId: device.id)
+            subscribeToConnectionState(deviceId: device.id)
+            await refreshStatus()
+            await persistDeviceState(deviceId: device.id, model: nil, nickname: nil, connected: true, synced: false)
+            await sync()
+        } catch {
+            status = WearableDeviceStatus(deviceId: device.id, connectionState: .disconnected, batteryPct: status?.batteryPct, lastSeenAt: nil)
+            lastError = String(describing: error)
+        }
+    }
+
+    /// "Forget Band" — unpairs and clears all local state, distinct from
+    /// a transient `.disconnected` (which keeps `pairedDevice` so
+    /// Settings can offer "Reconnect").
     func unpair() async {
         guard let device = pairedDevice else { return }
         do {
@@ -104,6 +147,25 @@ final class WearableManager {
             lastError = String(describing: error)
         }
         teardownLocalState()
+    }
+
+    private func subscribeToConnectionState(deviceId: DeviceID) {
+        connectionStateTask?.cancel()
+        connectionStateTask = Task { [weak self] in
+            guard let self else { return }
+            for await state in self.service.connectionStateUpdates(for: deviceId) {
+                guard !Task.isCancelled else { return }
+                self.status = WearableDeviceStatus(
+                    deviceId: deviceId,
+                    connectionState: state,
+                    batteryPct: self.status?.batteryPct,
+                    lastSeenAt: state == .connected ? Date() : self.status?.lastSeenAt
+                )
+                if state == .connected {
+                    await self.refreshStatus()
+                }
+            }
+        }
     }
 
     // MARK: - Status & sync
@@ -131,6 +193,7 @@ final class WearableManager {
                 await self.syncSleepHistory(deviceId: device.id)
                 await self.persistDeviceState(deviceId: device.id, model: nil, nickname: nil, connected: false, synced: true)
                 await self.refreshStatus()
+                await self.triggerReadinessRecompute()
             } catch {
                 guard !Task.isCancelled else { return }
                 self.lastError = String(describing: error)
@@ -252,7 +315,19 @@ final class WearableManager {
         let sessionId = active.convexSessionId
         lastCompletedSportSession = liveUpdate
         activeSportSession = nil
+        await triggerReadinessRecompute()
         return sessionId
+    }
+
+    /// Sombrey Readiness Score — computed server-side (see
+    /// `convex/readiness.ts`/`readiness/scoring.ts`); this only asks it
+    /// to recompute using whatever real data just landed. `date` is a
+    /// UTC calendar day to match the server's own day-bucketing
+    /// convention exactly (documented V1 simplification, not
+    /// per-user-timezone-aware yet — see the Phase 3 readiness report).
+    private func triggerReadinessRecompute() async {
+        let dateString = Self.readinessDateFormatter.string(from: Date())
+        try? await ConvexClientProvider.client.mutation("readiness:computeAndStore", with: ["date": dateString])
     }
 
     private func subscribeToSportUpdates(deviceId: DeviceID) {
@@ -336,6 +411,8 @@ final class WearableManager {
         measurementTask = nil
         sportUpdateTask?.cancel()
         sportUpdateTask = nil
+        connectionStateTask?.cancel()
+        connectionStateTask = nil
         syncTask?.cancel()
         syncTask = nil
         gpsTracker.stopTracking()

@@ -37,6 +37,11 @@ protocol QCBandService: AnyObject {
     // MARK: Discovery & pairing
     func scanForDevices() async throws -> [SombreyDevice]
     func pairDevice(_ deviceId: DeviceID) async throws
+    /// Reconnects to a device already known by id — from a previous app
+    /// session, or after auto-reconnect gave up — without requiring a
+    /// fresh scan first (`pairDevice` needs the peripheral to already be
+    /// in a just-completed scan's results; this doesn't).
+    func reconnectDevice(_ deviceId: DeviceID) async throws
     func unpairDevice(_ deviceId: DeviceID) async throws
 
     // MARK: Status & sync
@@ -53,6 +58,13 @@ protocol QCBandService: AnyObject {
     /// Kept separate from `measurements` because a sleep session is a
     /// time range with an optional stage breakdown, not a single value.
     func sleepHistory(_ deviceId: DeviceID, days: Int) async throws -> [SleepSessionData]
+
+    /// Real-time connection-state pushes, driven by CoreBluetooth's own
+    /// delegate callbacks — not polling. This is what lets the UI tell
+    /// "connected" from "was connected a moment ago" honestly, and
+    /// surface `.reconnecting` when the band drops and the SDK is
+    /// automatically retrying. Empty for `MockQCBandService`.
+    func connectionStateUpdates(for deviceId: DeviceID) -> AsyncStream<WearableConnectionState>
 
     // MARK: Sport+ workout sessions — the real workout-lifecycle API
     // (Phase 3 training-architecture expansion). `sportType` is always a

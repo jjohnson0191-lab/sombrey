@@ -1245,4 +1245,31 @@ export default defineSchema({
   }).index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseId"])
     .index("by_user_and_completedAt", ["userId", "completedAt"]),
+
+  // ── Sombrey Readiness Score ───────────────────────────────────────────────
+  // One row per user per local calendar day. `algorithmVersion` is stored
+  // on every row so historical scores stay correctly interpretable if the
+  // algorithm changes later — see `convex/readiness/scoring.ts` for the
+  // algorithm itself and its documented scientific basis. Deliberately
+  // computed from the existing wearableMeasurements/wearableSleepSessions/
+  // sportPlusSessions tables at score time rather than duplicating that
+  // data here — only the score, its components, and confidence are new
+  // state.
+  readinessScores: defineTable({
+    userId: v.id("users"),
+    date: v.string(),                      // YYYY-MM-DD
+    algorithmVersion: v.string(),           // e.g. "v1"
+    score: v.optional(v.number()),          // 0-100, unset when there isn't enough data yet
+    confidence: v.number(),                 // 0-1, data sufficiency, not scientific confidence
+    components: v.array(v.object({
+      metric: v.string(),
+      subScore: v.optional(v.number()),
+      weight: v.number(),
+      confidence: v.number(),
+      description: v.string(),
+    })),
+    missingInputs: v.array(v.string()),
+    calculatedAt: v.number(),               // epoch ms
+  }).index("by_user", ["userId"])
+    .index("by_user_and_date", ["userId", "date"]),
 });

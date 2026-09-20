@@ -4,14 +4,18 @@ import SwiftUI
 /// moment (top-right, cool zone); today's training recommendation,
 /// activity, and nutrition sit lower as plain text rows, not cards.
 /// Ported behaviorally from `apps/mobile/src/screens/HomeScreen.tsx`
-/// (not translated 1:1): same honest-placeholder philosophy — no
-/// readiness score exists yet, so none is fabricated; no workout is
-/// scheduled yet (Train's real backend lands in a later phase), so that
-/// says so plainly instead of showing mock data.
+/// (not translated 1:1).
+///
+/// The readiness score comes from `readiness:getLatest` — a real,
+/// server-computed `ReadinessResult` (see `convex/readiness/scoring.ts`
+/// for the algorithm) — never fabricated locally. `ReadinessIndicatorView`
+/// itself already handles "not enough data yet" honestly when `score` is
+/// nil, so no separate loading/empty state is needed here.
 struct HomeScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
     @State private var showingNutrition = false
+    @State private var readiness = ConvexQuery<ReadinessResultDTO?>()
 
     var body: some View {
         @Bindable var appState = appState
@@ -21,7 +25,7 @@ struct HomeScreen: View {
                     .padding(.top, 20)
                     .studioReveal(index: 0)
 
-                ReadinessIndicatorView(result: nil, tone: .paper)
+                ReadinessIndicatorView(result: readiness.value.flatMap { $0 }?.toReadinessResult(), tone: .paper)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.top, 24)
                     .studioReveal(index: 1)
@@ -59,6 +63,9 @@ struct HomeScreen: View {
         .fullScreenCover(isPresented: $showingNutrition) {
             NutritionScreen()
         }
+        .task {
+            readiness.subscribe(to: "readiness:getLatest")
+        }
     }
 
     private var header: some View {
@@ -68,7 +75,7 @@ struct HomeScreen: View {
                 .foregroundStyle(StudioColor.paperSoft)
             Spacer()
             WearableStatusBadge(
-                state: wearableManager.status?.connectionState ?? .disconnected,
+                state: wearableManager.displayState,
                 batteryPct: wearableManager.status?.batteryPct
             )
         }

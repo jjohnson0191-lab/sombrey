@@ -37,6 +37,7 @@ struct SettingsScreen: View {
                         .foregroundStyle(StudioColor.inkSoft)
                 }
 
+                WearableBandSection()
                 goalSection
                 coachingModeSection
 

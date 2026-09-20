@@ -19,6 +19,7 @@ struct TrainOverviewView: View {
     @State private var exercises = ConvexQuery<[Exercise]>()
     @State private var searchTerm = ""
     @State private var selectedSportType: SombreySportType?
+    @State private var showingSportPicker = false
     @State private var isStarting = false
     @State private var repeatTemplate = ConvexQuery<RepeatTemplate?>()
 
@@ -129,6 +130,11 @@ struct TrainOverviewView: View {
                 .font(StudioFont.body(11, weight: .semibold))
                 .tracking(1.2)
                 .foregroundStyle(StudioColor.inkSoft)
+            if let selectedSportType, !SombreySportType.featuredRawValues.contains(selectedSportType.rawValue) {
+                Text("Selected: \(selectedSportType.displayName)")
+                    .font(StudioFont.body(12, weight: .medium))
+                    .foregroundStyle(StudioColor.accentInk)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(SombreySportType.featuredRawValues.compactMap { SombreySportType.byRawValue[$0] }) { type in
@@ -144,8 +150,19 @@ struct TrainOverviewView: View {
                         )
                         .foregroundStyle(StudioColor.ink)
                     }
+                    // The full 180-entry catalog stays one tap away — see
+                    // SportTypePickerView.
+                    Button("More sports…") { showingSportPicker = true }
+                        .font(StudioFont.body(12, weight: .medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(StudioColor.ink.opacity(0.05), in: Capsule())
+                        .foregroundStyle(StudioColor.inkSoft)
                 }
             }
+        }
+        .sheet(isPresented: $showingSportPicker) {
+            SportTypePickerView { selectedSportType = $0 }
         }
     }
 

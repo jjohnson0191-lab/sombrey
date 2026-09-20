@@ -28,6 +28,10 @@ final class MockQCBandService: QCBandService {
         // No-op: mock pairing always "succeeds" instantly.
     }
 
+    func reconnectDevice(_ deviceId: DeviceID) async throws {
+        // No-op: mock reconnect always "succeeds" instantly, same as pairing.
+    }
+
     func unpairDevice(_ deviceId: DeviceID) async throws {
         // No-op.
     }
@@ -58,6 +62,10 @@ final class MockQCBandService: QCBandService {
         // Empty, not fabricated — matches `measurements(for:)`'s honest-
         // absence convention above.
         []
+    }
+
+    func connectionStateUpdates(for deviceId: DeviceID) -> AsyncStream<WearableConnectionState> {
+        AsyncStream { continuation in continuation.finish() }
     }
 
     func startSportSession(_ deviceId: DeviceID, sportType: Int) async throws {

@@ -25,10 +25,10 @@ struct WearableStatusBadge: View {
         case .connected, .syncing:
             return LinearGradient(colors: [StudioColor.env2, StudioColor.env3, StudioColor.env5],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .connecting:
+        case .connecting, .searching, .reconnecting:
             return LinearGradient(colors: [StudioColor.env2, StudioColor.env3],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .disconnected, .error, .unavailable:
+        case .notPaired, .disconnected, .error, .unavailable:
             return LinearGradient(colors: [Color(hex: 0x4C555E), Color(hex: 0x6E766D), Color(hex: 0x8B8E82)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
         }
@@ -38,10 +38,23 @@ struct WearableStatusBadge: View {
         switch state {
         case .connected: return "Connected"
         case .syncing: return "Syncing"
-        case .connecting: return "Connecting"
+        case .connecting: return "Pairing"
+        case .searching: return "Searching"
+        case .reconnecting: return "Reconnecting"
+        case .notPaired: return "Not paired"
         case .disconnected: return "Disconnected"
         case .error: return "Connection error"
         case .unavailable: return "Bluetooth unavailable"
+        }
+    }
+
+    /// Swatch states that represent active, in-progress work — get the
+    /// same restrained sweep `.syncing` already used, rather than sitting
+    /// visually identical to a settled `.connecting`/"nothing happening."
+    private var isActivelyWorking: Bool {
+        switch state {
+        case .syncing, .searching, .reconnecting: return true
+        default: return false
         }
     }
 
@@ -53,8 +66,9 @@ struct WearableStatusBadge: View {
                 .animation(StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion), value: state)
                 .frame(width: 32, height: 16)
                 .overlay {
-                    // `si-sweep-once`: a single light sweep while syncing.
-                    if state == .syncing {
+                    // `si-sweep-once`: a single light sweep while actively
+                    // working (syncing/searching/reconnecting).
+                    if isActivelyWorking {
                         Capsule()
                             .fill(LinearGradient(colors: [.clear, .white.opacity(0.55), .clear],
                                                   startPoint: .leading, endPoint: .trailing))
@@ -81,7 +95,7 @@ struct WearableStatusBadge: View {
                     withAnimation(StudioMotion.tick) { breathe = true }
                 }
             Group {
-                if let batteryPct, state != .disconnected, state != .error, state != .unavailable {
+                if let batteryPct, state == .connected || state == .syncing {
                     Text("\(label) · \(Int(batteryPct.rounded()))%")
                 } else {
                     Text(label)
