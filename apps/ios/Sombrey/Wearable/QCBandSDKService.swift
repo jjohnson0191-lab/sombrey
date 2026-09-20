@@ -335,7 +335,13 @@ final class QCBandSDKService: NSObject, QCBandService {
         guard let qcType = QCMeasuringType(rawValue: metric.qcRawValue) else {
             throw WearableSDKError.commandFailed("unsupported measurement type")
         }
-        let raw: Any? = try await withCheckedThrowingContinuation { continuation in
+        // Parsed inside the completion handler, before crossing the
+        // continuation boundary: `Any?` (what the ObjC callback actually
+        // hands back — an NSNumber or NSDictionary depending on metric)
+        // can't be proven Sendable, but `OnDemandMeasurementResult` (a
+        // plain Swift struct of Int?/Double?) can — confirmed by a real
+        // Codemagic build ("sending 'result' risks causing data races").
+        return try await withCheckedThrowingContinuation { continuation in
             var didResume = false
             QCSDKManager.shareInstance().startToMeasuring(
                 withOperateType: qcType,
@@ -347,14 +353,13 @@ final class QCBandSDKService: NSObject, QCBandService {
                     guard !didResume else { return }
                     didResume = true
                     if isSuccess {
-                        continuation.resume(returning: result)
+                        continuation.resume(returning: Self.parseMeasurementResult(result, metric: metric))
                     } else {
                         continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
                     }
                 }
             )
         }
-        return Self.parseMeasurementResult(raw, metric: metric)
     }
 
     private static func parseMeasurementResult(_ raw: Any?, metric: OnDemandMetric) -> OnDemandMeasurementResult {
