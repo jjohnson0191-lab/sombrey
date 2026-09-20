@@ -433,7 +433,7 @@ struct HomeScreen: View {
     }
 
     private var insightText: String {
-        guard let result = readiness.value.flatMap({ $0 }) else {
+        guard let result = readiness.value.flatMap({ $0 })?.toReadinessResult() else {
             return "Building your baseline — check back after a few more days of data."
         }
         guard let topFactor = result.contributingFactors.first else {
