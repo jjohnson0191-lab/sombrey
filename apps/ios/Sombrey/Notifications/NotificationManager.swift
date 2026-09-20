@@ -217,6 +217,15 @@ final class NotificationManager: NSObject {
         center.removePendingNotificationRequests(withIdentifiers: ["missed-workout-\(dayOfWeek)"])
     }
 
+    /// Called on sign-out (see `SombreyApp.swift`'s `authPhase` observer)
+    /// — every request this manager schedules uses a stable, deterministic
+    /// identifier, so a blanket removal is safe and complete; nothing
+    /// server-side is touched, and `reconcileAll()` will naturally
+    /// reschedule for whichever account signs in next.
+    func cancelAllScheduled() {
+        center.removeAllPendingNotificationRequests()
+    }
+
     // MARK: - Wearable-driven notifications (morning summary, sleep, band)
 
     /// One combined notification, not two/three separate ones — per the

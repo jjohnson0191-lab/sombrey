@@ -12,9 +12,19 @@ import ClerkKit
 /// `@clerk/clerk-react` in a browser or ClerkKit natively. See the
 /// migration plan's Convex audit (section H).
 enum ConvexClientProvider {
-    /// The existing Sombrey Convex deployment — same URL the web app
-    /// reads from `VITE_CONVEX_URL` in `apps/mobile/.env.local`.
-    static let deploymentUrl = "https://adamant-chicken-676.convex.cloud"
+    /// Sombrey's PRODUCTION Convex deployment. All native-specific
+    /// backend code (readiness, wearable, Sport+, Sombrey workouts, meal/
+    /// workout scheduling, notification preferences) is only ever
+    /// deployed here via `npx convex deploy` — never to the dev
+    /// deployment `apps/mobile/.env.local`'s `VITE_CONVEX_URL` points at
+    /// (`adamant-chicken-676`, the legacy web/Capacitor app's local-dev
+    /// target). The two must not be confused: this constant intentionally
+    /// does NOT mirror that dev URL. Both deployments share the same
+    /// Clerk instance (`square-perch-9135.clerk.accounts.dev`, verified
+    /// against both deployments' `CLERK_FRONTEND_API_URL` and the app's
+    /// own Clerk publishable key), so this points the native app at the
+    /// production deployment its own functions actually live on.
+    static let deploymentUrl = "https://vibrant-malamute-973.convex.cloud"
 
     /// `@MainActor`: needed for the global `static let` itself under
     /// Swift 6's strict concurrency checking (see the `Sendable`

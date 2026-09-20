@@ -29,10 +29,12 @@ struct SombreyApp: App {
                 }
                 .task {
                     await notificationManager.reconcileAll()
+                    await wearableManager.resumeIfPaired()
                 }
                 .onChange(of: appState.authPhase) { _, newPhase in
                     if case .signedOut = newPhase {
                         wearableManager.handleSignOut()
+                        notificationManager.cancelAllScheduled()
                     }
                 }
                 .onOpenURL { url in

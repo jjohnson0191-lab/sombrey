@@ -25,6 +25,10 @@ final class WearableManager {
     private(set) var pairedDevice: SombreyDevice?
     private(set) var status: WearableDeviceStatus?
     private(set) var lastSyncResult: WearableSyncResult?
+    /// Wall-clock time of the last successful `sync()` — used only to
+    /// avoid resyncing on every trivial foreground (see
+    /// `handleScenePhaseChange`), not surfaced in any UI.
+    private(set) var lastSyncAt: Date?
     private(set) var isScanning = false
     private(set) var lastError: String?
     private(set) var discoveredDevices: [SombreyDevice] = []
@@ -208,6 +212,7 @@ final class WearableManager {
                 await self.persistDeviceState(deviceId: device.id, model: nil, nickname: nil, connected: false, synced: true)
                 await self.refreshStatus()
                 await self.triggerReadinessRecompute(postMorningSummary: foundFreshWake)
+                self.lastSyncAt = Date()
             } catch {
                 guard !Task.isCancelled else { return }
                 self.lastError = String(describing: error)
@@ -414,9 +419,50 @@ final class WearableManager {
     func handleScenePhaseChange(isActive: Bool) {
         guard pairedDevice != nil else { return }
         if isActive {
-            Task { await refreshStatus() }
+            Task {
+                await refreshStatus()
+                await resyncIfStale()
+            }
         } else {
             Task { await flushPendingMeasurements(deviceId: pairedDevice?.id ?? "") }
+        }
+    }
+
+    private static let minimumForegroundResyncInterval: TimeInterval = 15 * 60
+
+    /// Foreground resync — only while already connected (never attempts
+    /// a fresh BLE reconnect here; that stays the existing manual
+    /// "Reconnect" affordance in Settings) and only when the last sync
+    /// is genuinely stale, so switching back to the app after a minute
+    /// doesn't trigger a resync every time. This is what keeps
+    /// readiness/sleep/measurement data from going stale purely because
+    /// the app was merely backgrounded and re-foregrounded, without
+    /// polling on any fixed timer.
+    private func resyncIfStale() async {
+        guard status?.connectionState == .connected else { return }
+        if let lastSyncAt, Date().timeIntervalSince(lastSyncAt) < Self.minimumForegroundResyncInterval {
+            return
+        }
+        await sync()
+    }
+
+    /// Called once at launch (see `SombreyApp.swift`'s `.task`) when a
+    /// device was paired in a previous app session. `init(service:)`
+    /// only restores a local device-id stub from `UserDefaults` — there
+    /// is no live BLE connection yet at that point — so this performs
+    /// the same reconnect-then-sync `reconnect()` already does for the
+    /// Settings "Reconnect Sombrey Band" button, automatically, so
+    /// readiness/sleep/measurement data isn't stale simply because the
+    /// user never manually tapped it after relaunching the app. No-op
+    /// if nothing was ever paired; safe to call more than once (skips if
+    /// a connection attempt is already in flight or already connected).
+    func resumeIfPaired() async {
+        guard pairedDevice != nil else { return }
+        switch status?.connectionState {
+        case .connected, .connecting, .reconnecting, .syncing:
+            return
+        default:
+            await reconnect()
         }
     }
 
