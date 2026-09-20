@@ -1,6 +1,16 @@
 import Foundation
-import CoreBluetooth
-import QCBandSDK
+// @preconcurrency: CoreBluetooth and QCBandSDK both predate Swift
+// concurrency auditing — their types (CBCentralManager, CBPeripheral,
+// QCSleepModel, QCSportModel, etc.) aren't marked Sendable, which Swift
+// 6's region-isolation checker otherwise flags every time one crosses
+// the nonisolated-delegate-callback -> @MainActor boundary below ("sending
+// 'x' risks causing data races" — confirmed by a real Codemagic build).
+// This is Apple's own documented idiom for consuming an un-audited
+// pre-concurrency framework/library, not a suppression of a real bug:
+// every one of these values is still only ever touched from this type's
+// single @MainActor context (see the type's own header).
+@preconcurrency import CoreBluetooth
+@preconcurrency import QCBandSDK
 
 /// REAL QCBandSDK INTEGRATION — Phase 3 of the migration. This file (and
 /// no other) imports `QCBandSDK` and `CoreBluetooth`, matching the
