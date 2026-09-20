@@ -29,9 +29,15 @@ import QCBandSDK
 /// only because `CBCentralManagerDelegate` itself carries no actor
 /// annotation) immediately re-enter `@MainActor` via `Task { @MainActor in }`
 /// and never touch state from any other thread. `WearableManager`, the
-/// sole caller, is itself `@MainActor`.
+/// sole caller, is itself `@MainActor`. Conformance is declared in a
+/// separate `extension` below (not inline here) — matching
+/// `ConvexClientProvider.swift`'s `extension ConvexClientWithAuth:
+/// @unchecked Sendable {}` precedent exactly, since declaring it inline
+/// alongside the class's other conformances makes the Swift 6 checker
+/// analyze actor-isolation-crossing for protocol requirements it
+/// otherwise treats as an unconditional, unchecked promise.
 @MainActor
-final class QCBandSDKService: NSObject, QCBandService, @unchecked Sendable {
+final class QCBandSDKService: NSObject, QCBandService {
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals: [DeviceID: CBPeripheral] = [:]
     private var connectedPeripheral: CBPeripheral?
@@ -318,11 +324,24 @@ final class QCBandSDKService: NSObject, QCBandService, @unchecked Sendable {
         return emitted
     }
 
+    // Raw values per the vendor header (QCSleepModel.h): NONE=0, SOBER=1,
+    // LIGHT=2, DEEP=3, REM=4, UNWEARED=5. Matched on `.rawValue` rather
+    // than the bridged Swift case names — this specific NS_ENUM bridges
+    // unpredictably across Xcode/Swift versions (confirmed against a real
+    // Codemagic build; case-name guesses failed to compile), while the
+    // raw integer values are the stable, header-defined wire format.
+    private static let sleepTypeNone = 0
+    private static let sleepTypeSober = 1
+    private static let sleepTypeLight = 2
+    private static let sleepTypeDeep = 3
+    private static let sleepTypeRem = 4
+    private static let sleepTypeUnweared = 5
+
     private static func sleepSession(from stages: [QCSleepModel]) -> SleepSessionData? {
-        let real = stages.filter { $0.type != .none && $0.type != .unweared }
+        let real = stages.filter { $0.type.rawValue != sleepTypeNone && $0.type.rawValue != sleepTypeUnweared }
         guard !real.isEmpty else { return nil }
         let mapped: [SleepStage] = real.compactMap { model in
-            guard let stage = stage(for: model.type),
+            guard let stage = stage(forRawValue: model.type.rawValue),
                   let start = sdkDateFormatter.date(from: model.happenDate) else { return nil }
             return SleepStage(stage: stage, startedAt: start, durationMinutes: model.total)
         }
@@ -338,14 +357,13 @@ final class QCBandSDKService: NSObject, QCBandService, @unchecked Sendable {
         )
     }
 
-    private static func stage(for type: SLEEPTYPE) -> SleepStage.Stage? {
-        switch type {
-        case .light: return .light
-        case .deep: return .deep
-        case .rem: return .rem
-        case .sober: return .awake
-        case .none, .unweared: return nil
-        @unknown default: return nil
+    private static func stage(forRawValue rawValue: Int) -> SleepStage.Stage? {
+        switch rawValue {
+        case sleepTypeLight: return .light
+        case sleepTypeDeep: return .deep
+        case sleepTypeRem: return .rem
+        case sleepTypeSober: return .awake
+        default: return nil // NONE / UNWEARED
         }
     }
 
@@ -407,7 +425,7 @@ final class QCBandSDKService: NSObject, QCBandService, @unchecked Sendable {
 
     private func bloodPressureHistory() async throws -> [QCBloodPressureModel] {
         try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getSchedualBPHistoryData(withSuccess: { models in
+            QCSDKCmdCreator.getSchedualBPHistoryData(success: { models in
                 continuation.resume(returning: models)
             }, fail: {
                 continuation.resume(throwing: WearableSDKError.commandFailed("blood pressure history"))
@@ -448,7 +466,7 @@ extension QCBandSDKService: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
-            QCSDKManager.shareInstance().addPeripheral(peripheral) { [weak self] success in
+            QCSDKManager.shareInstance().add(peripheral) { [weak self] success in
                 Task { @MainActor in
                     guard let self else { return }
                     if success {
@@ -473,7 +491,7 @@ extension QCBandSDKService: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
-            QCSDKManager.shareInstance().removePeripheral(peripheral)
+            QCSDKManager.shareInstance().remove(peripheral)
             guard self.connectedPeripheral?.identifier == peripheral.identifier else { return }
             self.connectedPeripheral = nil
             // Best-effort automatic reconnect — mirrors the vendor demo's
@@ -496,3 +514,7 @@ extension QCBandSDKService: CBCentralManagerDelegate {
         }
     }
 }
+
+// See the type's own header for why this conformance lives in its own
+// extension rather than the class declaration's conformance list.
+extension QCBandSDKService: @unchecked Sendable {}
