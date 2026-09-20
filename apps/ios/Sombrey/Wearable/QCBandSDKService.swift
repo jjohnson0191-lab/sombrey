@@ -430,7 +430,7 @@ final class QCBandSDKService: NSObject, QCBandService {
                 guard let self else { return }
                 self.sportUpdateContinuation?.yield(SportSessionLiveUpdate(
                     sportType: sportInfo.sportType.rawValue,
-                    state: sportInfo.state.rawValue,
+                    state: Int(sportInfo.state.rawValue),
                     durationSeconds: sportInfo.duration,
                     heartRate: sportInfo.hr,
                     steps: sportInfo.step,
@@ -517,12 +517,17 @@ final class QCBandSDKService: NSObject, QCBandService {
     private static let sportStateStop = 0x04
 
     private func operateSportMode(sportType: Int, state: Int) async throws {
+        // QCSportState is a plain (non-NS_ENUM) C enum in the vendor
+        // header, which Clang/Swift bridges with a UInt32 raw value —
+        // unlike OdmSportPlusExerciseModelType (an explicit
+        // NS_ENUM(NSInteger, ...)), which bridges as Int. Confirmed by a
+        // real Codemagic build, not assumed.
         guard let type = OdmSportPlusExerciseModelType(rawValue: sportType),
-              let sportState = QCSportState(rawValue: state) else {
+              let sportState = QCSportState(rawValue: UInt32(state)) else {
             throw WearableSDKError.commandFailed("invalid sport type or state")
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            QCSDKCmdCreator.operateSportMode(withType: type, state: sportState) { _, error in
+            QCSDKCmdCreator.operateSportMode(with: type, state: sportState) { _, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
