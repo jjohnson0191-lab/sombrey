@@ -50,12 +50,18 @@ final class MockQCBandService: QCBandService {
         }
     }
 
-    func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws {
-        throw WearableUnsupportedError(feature: "Setting band targets")
+    func firmwareInfo(_ deviceId: DeviceID) async throws -> String {
+        "0.0.0-mock"
     }
 
-    func firmwareInfo(_ deviceId: DeviceID) async throws -> String {
-        throw WearableUnsupportedError(feature: "Firmware info")
+    func sleepHistory(_ deviceId: DeviceID, days: Int) async throws -> [SleepSessionData] {
+        // Empty, not fabricated — matches `measurements(for:)`'s honest-
+        // absence convention above.
+        []
+    }
+
+    func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws {
+        throw WearableUnsupportedError(feature: "Setting band targets")
     }
 
     func vibrate(_ deviceId: DeviceID) async throws {

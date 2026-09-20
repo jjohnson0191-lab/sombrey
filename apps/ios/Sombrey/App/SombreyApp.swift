@@ -4,7 +4,10 @@ import ClerkKit
 @main
 struct SombreyApp: App {
     @State private var appState = AppState()
-    @State private var wearableManager = WearableManager(service: MockQCBandService())
+    // Real QCBandSDK integration (Phase 3) — `MockQCBandService` remains
+    // available for SwiftUI Previews and tests only, see its own header.
+    @State private var wearableManager = WearableManager(service: QCBandSDKService())
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         ClerkAuthCoordinator.configure()
@@ -16,6 +19,14 @@ struct SombreyApp: App {
                 .environment(Clerk.shared)
                 .environment(appState)
                 .environment(wearableManager)
+                .onChange(of: scenePhase) { _, newPhase in
+                    wearableManager.handleScenePhaseChange(isActive: newPhase == .active)
+                }
+                .onChange(of: appState.authPhase) { _, newPhase in
+                    if case .signedOut = newPhase {
+                        wearableManager.handleSignOut()
+                    }
+                }
                 .onOpenURL { url in
                     // Native OAuth/session callback handling. No custom
                     // scheme parsing, no `appUrlOpen`/`getLaunchUrl`

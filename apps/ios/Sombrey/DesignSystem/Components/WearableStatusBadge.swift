@@ -28,7 +28,7 @@ struct WearableStatusBadge: View {
         case .connecting:
             return LinearGradient(colors: [StudioColor.env2, StudioColor.env3],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .disconnected, .error:
+        case .disconnected, .error, .unavailable:
             return LinearGradient(colors: [Color(hex: 0x4C555E), Color(hex: 0x6E766D), Color(hex: 0x8B8E82)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
         }
@@ -41,6 +41,7 @@ struct WearableStatusBadge: View {
         case .connecting: return "Connecting"
         case .disconnected: return "Disconnected"
         case .error: return "Connection error"
+        case .unavailable: return "Bluetooth unavailable"
         }
     }
 
@@ -80,7 +81,7 @@ struct WearableStatusBadge: View {
                     withAnimation(StudioMotion.tick) { breathe = true }
                 }
             Group {
-                if let batteryPct, state != .disconnected, state != .error {
+                if let batteryPct, state != .disconnected, state != .error, state != .unavailable {
                     Text("\(label) · \(Int(batteryPct.rounded()))%")
                 } else {
                     Text(label)

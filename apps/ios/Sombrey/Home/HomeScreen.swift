@@ -95,14 +95,21 @@ struct HomeScreen: View {
 
     private var activityRow: some View {
         HStack(spacing: 20) {
-            Text("— steps")
-            Text("— active cal")
-            Text("HR —")
+            Text(steps.map { "\(Int($0.value)) steps" } ?? "— steps")
+            Text(activeCalories.map { "\(Int($0.value)) active cal" } ?? "— active cal")
+            Text(heartRate.map { "HR \(Int($0.value))" } ?? "HR —")
         }
         .font(StudioFont.body(12))
         .foregroundStyle(StudioColor.inkSoft)
         .monospacedDigit()
     }
+
+    // Real readings once a band is connected and has synced at least
+    // once — `nil` (rendered as the existing "—" placeholder) is the
+    // honest state for "not connected" or "no data yet," never a guess.
+    private var steps: WearableMeasurement? { wearableManager.latestMeasurements[.steps] }
+    private var activeCalories: WearableMeasurement? { wearableManager.latestMeasurements[.activeCalories] }
+    private var heartRate: WearableMeasurement? { wearableManager.latestMeasurements[.heartRate] }
 
     private var ctaRow: some View {
         HStack(spacing: 12) {

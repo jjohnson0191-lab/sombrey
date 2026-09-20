@@ -27,6 +27,10 @@ struct SombreyDevice: Identifiable, Hashable {
 
 enum WearableConnectionState: String {
     case disconnected, connecting, connected, syncing, error
+    /// Bluetooth itself is off, unauthorized, or unsupported — distinct
+    /// from `.disconnected` (no paired device) or `.error` (a specific
+    /// operation failed): here no operation can even be attempted.
+    case unavailable
 }
 
 struct WearableDeviceStatus {
@@ -37,16 +41,20 @@ struct WearableDeviceStatus {
 }
 
 /// Metrics approved as first-class V1 wearable metrics, where the
-/// physical band actually supports them. HRV/stress are optional — not
-/// guaranteed available. No blood pressure metric exists yet; add it
-/// only once QCBandSDK confirms the band actually measures it.
+/// physical band actually supports them (confirmed against QCBandSDK's
+/// real headers in Phase 3 — see `QCBandSDKService`). HRV/stress are
+/// optional — not guaranteed available on every device.
 enum WearableMetricType: String {
     case heartRate = "heart_rate"
     case restingHeartRate = "resting_heart_rate"
     case steps
     case activeCalories = "active_calories"
+    case distanceMeters = "distance_meters"
     case spo2
     case skinTemperature = "skin_temperature"
+    case bloodPressureSystolic = "blood_pressure_systolic"
+    case bloodPressureDiastolic = "blood_pressure_diastolic"
+    case batteryPct = "battery_pct"
     case hrv
     case stress
 }
@@ -96,11 +104,30 @@ struct WearableSyncResult {
 }
 
 /// A capability the current band/SDK generation does not (yet) support.
-/// `QCBandService` methods for targets, firmware OTA, vibration,
-/// find-band, and camera/button control all resolve through this so the
-/// UI can distinguish "not connected" from "this isn't a real feature
-/// yet" — never silently no-op.
+/// `QCBandService` methods for targets, vibration, find-band, and
+/// camera/button control all resolve through this so the UI can
+/// distinguish "not connected" from "this isn't a real feature yet" —
+/// never silently no-op.
 struct WearableUnsupportedError: Error {
     let feature: String
     var message: String { "\(feature) is not supported by the current Sombrey Band integration yet." }
+}
+
+/// Real QCBandSDK/CoreBluetooth failure modes — thrown only by
+/// `QCBandSDKService`, never fabricated. `MockQCBandService` never throws
+/// these.
+enum WearableSDKError: Error {
+    /// Bluetooth is off, unauthorized, or unsupported on this device.
+    case bluetoothUnavailable
+    /// `pairDevice` was called with an id not present in the most recent
+    /// `scanForDevices()` result.
+    case deviceNotFound
+    /// CoreBluetooth reported a connect failure with no underlying error.
+    case connectFailed
+    /// No device is currently paired/connected for an operation that
+    /// requires one.
+    case noConnectedDevice
+    /// The SDK's own completion handler reported failure with no
+    /// `NSError` attached.
+    case commandFailed(String)
 }

@@ -1064,4 +1064,65 @@ export default defineSchema({
     exercisesSnapshot: v.string(),         // JSON-serialised exercises array
   }).index("by_workout", ["workoutId"])
     .index("by_workout_and_version", ["workoutId", "planVersion"]),
+
+  // ── Sombrey Band (QCBandSDK) — real wearable persistence ─────────────────────
+  // Added in the Phase 3 native wearable integration. One row per
+  // user+device pairing the native app has connected to; identity/status
+  // only — actual metric readings live in wearableMeasurements /
+  // wearableSleepSessions below, both scoped by deviceId so a user who
+  // re-pairs a different physical band doesn't blend the two histories.
+  wearableDevices: defineTable({
+    userId: v.id("users"),
+    deviceId: v.string(),                  // CBPeripheral.identifier.uuidString
+    model: v.optional(v.string()),
+    nickname: v.optional(v.string()),
+    firmwareVersion: v.optional(v.string()),
+    lastConnectedAt: v.optional(v.number()),  // epoch ms
+    lastSyncedAt: v.optional(v.number()),     // epoch ms
+  }).index("by_user", ["userId"])
+    .index("by_user_and_device", ["userId", "deviceId"]),
+
+  // Point-in-time wearable readings (steps/calories/heart rate/SpO2/
+  // temperature/blood pressure/battery). One row per reading — the native
+  // client dedupes by (deviceId, metricType, recordedAt) before inserting,
+  // see convex/wearable.ts.
+  wearableMeasurements: defineTable({
+    userId: v.id("users"),
+    deviceId: v.string(),
+    metricType: v.union(
+      v.literal("heart_rate"),
+      v.literal("resting_heart_rate"),
+      v.literal("steps"),
+      v.literal("active_calories"),
+      v.literal("distance_meters"),
+      v.literal("spo2"),
+      v.literal("skin_temperature"),
+      v.literal("blood_pressure_systolic"),
+      v.literal("blood_pressure_diastolic"),
+      v.literal("battery_pct"),
+    ),
+    value: v.number(),
+    unit: v.string(),
+    recordedAt: v.number(),                // epoch ms, device-reported when available
+    source: v.string(),                    // e.g. "sombrey_band"
+  }).index("by_user", ["userId"])
+    .index("by_user_and_metric", ["userId", "metricType"])
+    .index("by_device_and_recordedAt", ["deviceId", "recordedAt"]),
+
+  // Structured sleep sessions — kept separate from wearableMeasurements
+  // since a session is a time range with optional stage breakdown, not a
+  // single value.
+  wearableSleepSessions: defineTable({
+    userId: v.id("users"),
+    deviceId: v.string(),
+    startedAt: v.number(),                 // epoch ms
+    endedAt: v.number(),                   // epoch ms
+    totalSleepMinutes: v.number(),
+    stages: v.optional(v.array(v.object({
+      stage: v.union(v.literal("light"), v.literal("deep"), v.literal("rem"), v.literal("awake")),
+      startedAt: v.number(),               // epoch ms
+      durationMinutes: v.number(),
+    }))),
+  }).index("by_user", ["userId"])
+    .index("by_user_and_startedAt", ["userId", "startedAt"]),
 });
