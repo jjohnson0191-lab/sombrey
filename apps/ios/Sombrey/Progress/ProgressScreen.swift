@@ -259,6 +259,13 @@ struct SleepSessionSummaryDTO: Decodable {
 struct SportSessionSummaryDTO: Decodable {
     let startedAt: Double
     let durationSeconds: Double?
+    // Added for HomeScreen's Training card — same query
+    // (`sportPlusSessions:getRecentSessions`) already returns these; this
+    // screen just didn't need them before.
+    let sportType: Int?
+    let calories: Double?
+    let averageHeartRate: Double?
+    let distanceMeters: Double?
 }
 
 struct SombreyWorkoutSummaryDTO: Decodable {
