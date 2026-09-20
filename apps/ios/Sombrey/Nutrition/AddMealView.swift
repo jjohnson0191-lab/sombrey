@@ -85,6 +85,8 @@ struct AddMealView: View {
                     "servings": servings,
                     "mealType": mealType,
                 ])
+                let todayWeekday = Calendar.current.component(.weekday, from: Date())
+                NotificationManager.shared.cancelMissedMealReminders(forDayOfWeek: todayWeekday)
                 isSaving = false
                 dismiss()
             } catch {

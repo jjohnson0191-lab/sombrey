@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { ALGORITHM_VERSION, computeReadinessScore, type DailyAggregate } from "./readiness/scoring";
+import { ALGORITHM_VERSION, computeReadinessScore, deriveSleepSignal, type DailyAggregate } from "./readiness/scoring";
 
 // Sombrey Readiness Score — see `readiness/scoring.ts` for the algorithm
 // itself and its documented scientific basis/limitations. This file only
@@ -157,7 +157,15 @@ export const computeAndStore = mutation({
       calculatedAt: Date.now(),
     });
 
-    return id;
+    // Derived from the sleep component's OWN existing baseline/confidence
+    // logic via `deriveSleepSignal` — never a separate hardcoded
+    // threshold, and never fed back into the score itself. Purely for
+    // the client to decide whether a good/poor-sleep notification is
+    // warranted (see NotificationManager.swift).
+    const sleepComponent = result.components.find((c) => c.metric === "sleep");
+    const sleepSignal = deriveSleepSignal(sleepComponent);
+
+    return { id, score: result.score, confidence: result.confidence, sleepSignal };
   },
 });
 

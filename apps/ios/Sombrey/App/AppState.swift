@@ -35,6 +35,12 @@ final class AppState {
     }
 
     var selectedTab: SombreyTab = .home
+    /// Set by `AuthenticatedRootView` when a nutrition-category
+    /// notification is tapped. `HomeScreen` owns the nutrition
+    /// `fullScreenCover` (there's no dedicated Nutrition tab), so it
+    /// observes this independently after the tab switch to `.home` has
+    /// already happened, then resets it.
+    var pendingNutritionDeepLink = false
     private(set) var authPhase: AuthPhase = .loading
     private(set) var currentUser: SombreyUser?
     private(set) var userLoadError: String?

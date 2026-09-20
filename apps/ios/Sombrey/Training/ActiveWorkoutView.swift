@@ -169,6 +169,8 @@ struct ActiveWorkoutView: View {
                 sportPlusSessionId = await wearableManager.stopSportSession()
             }
             await session.finish(sportPlusSessionId: sportPlusSessionId)
+            let todayWeekday = Calendar.current.component(.weekday, from: Date())
+            NotificationManager.shared.cancelMissedWorkoutReminder(forDayOfWeek: todayWeekday)
             isFinishing = false
         }
     }

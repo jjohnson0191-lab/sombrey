@@ -18,6 +18,7 @@ struct SettingsScreen: View {
     @State private var coachingMode: CoachingMode = .recommendations
     @State private var isSavingGoal = false
     @State private var selectedGoalCategory: GoalCategory = .generalFitness
+    @State private var showingNotificationSettings = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -40,6 +41,7 @@ struct SettingsScreen: View {
                 WearableBandSection()
                 goalSection
                 coachingModeSection
+                notificationsRow
 
                 Spacer()
 
@@ -71,6 +73,27 @@ struct SettingsScreen: View {
                 selectedGoalCategory = match
             }
         }
+        .sheet(isPresented: $showingNotificationSettings) {
+            NotificationSettingsView()
+        }
+    }
+
+    private var notificationsRow: some View {
+        Button {
+            showingNotificationSettings = true
+        } label: {
+            HStack {
+                Text("Notifications")
+                    .font(StudioFont.body(14, weight: .medium))
+                    .foregroundStyle(StudioColor.ink)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
+            .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
     }
 
     private var goalSection: some View {

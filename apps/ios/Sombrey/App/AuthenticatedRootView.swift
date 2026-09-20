@@ -13,6 +13,7 @@ import SwiftUI
 /// reads as a system tab bar, not five instrument ticks.
 struct AuthenticatedRootView: View {
     @Environment(AppState.self) private var appState
+    @Environment(NotificationManager.self) private var notificationManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -34,5 +35,22 @@ struct AuthenticatedRootView: View {
         .id(appState.selectedTab)
         .transition(.opacity)
         .animation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion), value: appState.selectedTab)
+        .onChange(of: notificationManager.pendingDeepLink) { _, target in
+            guard let target else { return }
+            switch target {
+            case .home, .readiness:
+                appState.selectedTab = .home
+            case .nutrition:
+                appState.selectedTab = .home
+                appState.pendingNutritionDeepLink = true
+            case .training:
+                appState.selectedTab = .train
+            case .sleep:
+                appState.selectedTab = .progress
+            }
+            // Reset back to nil so re-tapping the same category later
+            // still triggers this `.onChange` (nil -> value -> nil).
+            _ = notificationManager.consumeDeepLink()
+        }
     }
 }

@@ -1272,4 +1272,60 @@ export default defineSchema({
     calculatedAt: v.number(),               // epoch ms
   }).index("by_user", ["userId"])
     .index("by_user_and_date", ["userId", "date"]),
+
+  // ── Notification-aware, schedule-aware Sombrey (nutrition/notifications phase) ──
+  // Scheduling itself happens on-device via UNCalendarNotificationTrigger
+  // (device-local time zone, handles DST/travel automatically); these
+  // rows are the source of truth the client reconciles its local
+  // notification requests against, and what makes the schedule visible
+  // across app relaunches/reinstalls.
+  //
+  // One row per (user, dayOfWeek, slot) — Monday's schedule is
+  // independent of Tuesday's by construction, never a single global
+  // daily schedule.
+  mealSchedules: defineTable({
+    userId: v.id("users"),
+    dayOfWeek: v.number(),                 // 1 (Sunday) - 7 (Saturday), matching Swift Calendar/DateComponents.weekday
+    slotOrder: v.number(),                 // display/notification-identifier order within the day
+    name: v.string(),                      // e.g. "Breakfast"
+    hour: v.number(),                      // 0-23, local time-of-day
+    minute: v.number(),                    // 0-59
+    enabled: v.boolean(),
+    reminderEnabled: v.boolean(),
+    missedReminderEnabled: v.boolean(),
+  }).index("by_user", ["userId"])
+    .index("by_user_and_day", ["userId", "dayOfWeek"]),
+
+  // A user's own explicitly-configured training days/times — NOT an
+  // AI-generated training plan (Sombrey has no workout-scheduling AI
+  // feature yet). Workout reminders/missed-workout detection are driven
+  // only by what the user configures here, matching the product rule
+  // that a "missed workout" must never be inferred from app-usage alone.
+  workoutSchedules: defineTable({
+    userId: v.id("users"),
+    dayOfWeek: v.number(),                 // 1-7
+    name: v.optional(v.string()),          // e.g. "Upper Body" — optional, purely descriptive
+    hour: v.number(),
+    minute: v.number(),
+    enabled: v.boolean(),
+    reminderEnabled: v.boolean(),
+    missedReminderEnabled: v.boolean(),
+  }).index("by_user", ["userId"])
+    .index("by_user_and_day", ["userId", "dayOfWeek"]),
+
+  // One row per user — every category defaults to a sensible value
+  // client-side when absent; stored here so preferences survive
+  // reinstall/new-device and so the AI/notification logic can reason
+  // about what the user actually wants without asking the OS.
+  notificationPreferences: defineTable({
+    userId: v.id("users"),
+    mealReminders: v.boolean(),
+    missedMealReminders: v.boolean(),
+    workoutReminders: v.boolean(),
+    missedWorkoutReminders: v.boolean(),
+    morningReadiness: v.boolean(),
+    poorSleep: v.boolean(),
+    goodSleep: v.boolean(),
+    wearableStatus: v.boolean(),
+  }).index("by_user", ["userId"]),
 });

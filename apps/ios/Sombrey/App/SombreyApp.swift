@@ -7,6 +7,7 @@ struct SombreyApp: App {
     // Real QCBandSDK integration (Phase 3) — `MockQCBandService` remains
     // available for SwiftUI Previews and tests only, see its own header.
     @State private var wearableManager = WearableManager(service: QCBandSDKService())
+    private var notificationManager: NotificationManager { NotificationManager.shared }
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -19,8 +20,15 @@ struct SombreyApp: App {
                 .environment(Clerk.shared)
                 .environment(appState)
                 .environment(wearableManager)
+                .environment(notificationManager)
                 .onChange(of: scenePhase) { _, newPhase in
                     wearableManager.handleScenePhaseChange(isActive: newPhase == .active)
+                    if newPhase == .active {
+                        Task { await notificationManager.reconcileAll() }
+                    }
+                }
+                .task {
+                    await notificationManager.reconcileAll()
                 }
                 .onChange(of: appState.authPhase) { _, newPhase in
                     if case .signedOut = newPhase {

@@ -44,6 +44,17 @@ struct WearableSleepSessionPayload: Encodable, ConvexEncodable {
     }
 }
 
+/// Decoded shape of `readiness:computeAndStore`'s return value (see
+/// `convex/readiness.ts`) — `sleepSignal` is derived server-side from the
+/// same scoring algorithm's own sleep sub-component and confidence, never
+/// a separately hardcoded threshold.
+struct ReadinessComputeResult: Decodable {
+    let id: String
+    let score: Int?
+    let confidence: Double
+    let sleepSignal: String
+}
+
 struct GPSPointPayload: Encodable, ConvexEncodable {
     let latitude: Double
     let longitude: Double

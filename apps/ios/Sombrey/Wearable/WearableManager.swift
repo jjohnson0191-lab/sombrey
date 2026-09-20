@@ -153,6 +153,7 @@ final class WearableManager {
         connectionStateTask?.cancel()
         connectionStateTask = Task { [weak self] in
             guard let self else { return }
+            var previousState = self.status?.connectionState
             for await state in self.service.connectionStateUpdates(for: deviceId) {
                 guard !Task.isCancelled else { return }
                 self.status = WearableDeviceStatus(
@@ -164,8 +165,21 @@ final class WearableManager {
                 if state == .connected {
                     await self.refreshStatus()
                 }
+                // Only notify on a real transition — never the initial
+                // state a fresh subscription happens to start on, and
+                // never every repeated tick of the same state.
+                if let previousState, previousState != state, state == .connected || state == .disconnected {
+                    await self.notifyConnectionChange(connected: state == .connected)
+                }
+                previousState = state
             }
         }
+    }
+
+    private func notifyConnectionChange(connected: Bool) async {
+        guard let preferences = await NotificationManager.shared.currentPreferences() else { return }
+        let deviceName = pairedDevice?.nickname ?? pairedDevice?.model ?? "Sombrey Band"
+        await NotificationManager.shared.postWearableConnectionNotification(connected: connected, deviceName: deviceName, preferences: preferences)
     }
 
     // MARK: - Status & sync
@@ -190,10 +204,10 @@ final class WearableManager {
                 guard !Task.isCancelled else { return }
                 self.lastSyncResult = result
                 await self.flushPendingMeasurements(deviceId: device.id)
-                await self.syncSleepHistory(deviceId: device.id)
+                let foundFreshWake = await self.syncSleepHistory(deviceId: device.id)
                 await self.persistDeviceState(deviceId: device.id, model: nil, nickname: nil, connected: false, synced: true)
                 await self.refreshStatus()
-                await self.triggerReadinessRecompute()
+                await self.triggerReadinessRecompute(postMorningSummary: foundFreshWake)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.lastError = String(describing: error)
@@ -204,19 +218,26 @@ final class WearableManager {
         await task.value
     }
 
-    private func syncSleepHistory(deviceId: DeviceID) async {
+    /// Returns whether a sleep session ending within the last 12 hours
+    /// was found — a real "just woke up and synced" signal, never a
+    /// fixed clock time pretending to know when the user woke.
+    @discardableResult
+    private func syncSleepHistory(deviceId: DeviceID) async -> Bool {
         do {
             let sessions = try await service.sleepHistory(deviceId, days: 7)
-            guard !sessions.isEmpty else { return }
+            guard !sessions.isEmpty else { return false }
             let payload: [ConvexEncodable?] = sessions.map { WearableSleepSessionPayload($0) as ConvexEncodable? }
             try await ConvexClientProvider.client.mutation("wearable:recordSleepSessions", with: [
                 "deviceId": deviceId,
                 "sessions": payload,
             ])
+            let twelveHoursAgo = Date().addingTimeInterval(-12 * 3600)
+            return sessions.contains { $0.endedAt >= twelveHoursAgo }
         } catch {
             // Non-fatal — sleep history is best-effort on top of the
             // measurement sync that already ran.
             lastError = String(describing: error)
+            return false
         }
     }
 
@@ -325,9 +346,16 @@ final class WearableManager {
     /// UTC calendar day to match the server's own day-bucketing
     /// convention exactly (documented V1 simplification, not
     /// per-user-timezone-aware yet — see the Phase 3 readiness report).
-    private func triggerReadinessRecompute() async {
+    ///
+    /// `postMorningSummary` is only ever true from the wearable-sync path
+    /// when a genuinely fresh sleep session was just found — never from
+    /// a workout-triggered recompute, and never on a fixed clock time.
+    private func triggerReadinessRecompute(postMorningSummary: Bool = false) async {
         let dateString = Self.readinessDateFormatter.string(from: Date())
-        try? await ConvexClientProvider.client.mutation("readiness:computeAndStore", with: ["date": dateString])
+        let result: ReadinessComputeResult? = try? await ConvexClientProvider.client.mutation("readiness:computeAndStore", with: ["date": dateString])
+        guard postMorningSummary, let result else { return }
+        guard let preferences = await NotificationManager.shared.currentPreferences() else { return }
+        await NotificationManager.shared.postMorningSummaryIfNeeded(score: result.score, sleepSignal: result.sleepSignal, preferences: preferences)
     }
 
     private func subscribeToSportUpdates(deviceId: DeviceID) {

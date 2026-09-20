@@ -66,6 +66,21 @@ struct HomeScreen: View {
         .task {
             readiness.subscribe(to: "readiness:getLatest")
         }
+        .onChange(of: appState.pendingNutritionDeepLink) { _, pending in
+            guard pending else { return }
+            showingNutrition = true
+            appState.pendingNutritionDeepLink = false
+        }
+        .onAppear {
+            // `.onChange` above only fires on a value transition, but
+            // this view is recreated (`.id(appState.selectedTab)`) after
+            // the flag is already set to true by the deep-link handler,
+            // so the initial-appear case needs its own check too.
+            if appState.pendingNutritionDeepLink {
+                showingNutrition = true
+                appState.pendingNutritionDeepLink = false
+            }
+        }
     }
 
     private var header: some View {

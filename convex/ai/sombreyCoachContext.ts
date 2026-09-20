@@ -27,6 +27,17 @@ import { ConvexError } from "convex/values";
  * sessions, and the user's active goal/coaching mode — all real, existing
  * tables as of this phase. Every line here is either a real number or an
  * explicit "not available yet" — never a guess.
+ *
+ * Nutrition/notification-awareness expansion: adds nutrition adherence
+ * (today's intake vs. target, and this week's logging consistency — a
+ * pattern, not a single day), meal/workout schedule presence, and the
+ * real computed readiness score (previously always "not available yet"
+ * here even after the readiness engine shipped — now fixed). Nutrition
+ * is deliberately NOT part of the numeric Readiness Score itself (see
+ * readiness/scoring.ts) — it's surfaced here as context for the model's
+ * own qualitative reasoning, which is the right tool for a genuinely
+ * context-dependent relationship a rigid formula would either ignore or
+ * overweight.
  */
 export const getSombreyContext = internalQuery({
   args: {},
@@ -105,16 +116,58 @@ export const getSombreyContext = internalQuery({
     }
 
     // ── Nutrition ───────────────────────────────────────────────────────────
+    // Nutrition-as-context expansion. Targets resolve the same way
+    // nutritionLogs.ts's getTodayProgress already does (the user's own
+    // Nutrition screen) — reusing that resolution, not the excluded
+    // legacy "workoutSplit" concept aiGeneratedPlans also carries; only
+    // its macroTargets field is touched here.
     const todayNow = new Date();
     const todayUTCMs = Date.UTC(todayNow.getUTCFullYear(), todayNow.getUTCMonth(), todayNow.getUTCDate());
     const nutritionLog = await ctx.db
       .query("nutritionLogs")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", todayUTCMs))
       .unique();
+    const aiPlan = await ctx.db
+      .query("aiGeneratedPlans")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .first();
+    const macroTargets = aiPlan?.status === "ready" ? aiPlan.macroTargets : null;
+    const caloriesTarget = macroTargets?.calories ?? 2500;
+    const proteinTarget = macroTargets?.protein ?? 180;
+    if (nutritionLog) {
+      const caloriesPct = Math.round((nutritionLog.totalCalories / caloriesTarget) * 100);
+      const proteinPct = Math.round((nutritionLog.totalProtein / proteinTarget) * 100);
+      lines.push(
+        `Today's logged intake: ${Math.round(nutritionLog.totalCalories)} kcal (${caloriesPct}% of target), ${Math.round(nutritionLog.totalProtein)}g protein (${proteinPct}% of target)`,
+      );
+    } else {
+      lines.push("Today's nutrition: nothing logged yet today");
+    }
+
+    // Logging consistency this week — a single missed day/meal is not
+    // itself meaningful; the pattern across the week is what the AI
+    // should actually reason about (see this file's own header note on
+    // not overreacting to isolated events).
+    const weekAgoUTCMs = Date.UTC(todayNow.getUTCFullYear(), todayNow.getUTCMonth(), todayNow.getUTCDate() - 6);
+    const nutritionLogsThisWeek = await ctx.db
+      .query("nutritionLogs")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).gte("date", weekAgoUTCMs))
+      .collect();
+    const daysWithCaloriesBelowHalfTarget = nutritionLogsThisWeek.filter((l) => l.totalCalories < caloriesTarget * 0.5).length;
     lines.push(
-      nutritionLog
-        ? `Today's logged intake: ${Math.round(nutritionLog.totalCalories)} kcal, ${Math.round(nutritionLog.totalProtein)}g protein`
-        : "Today's nutrition: nothing logged yet today",
+      `Nutrition logged on ${nutritionLogsThisWeek.length} of the last 7 days` +
+      (daysWithCaloriesBelowHalfTarget >= 3 ? ` (${daysWithCaloriesBelowHalfTarget} of those days were well below calorie target — a real pattern, not an isolated event)` : ""),
+    );
+
+    // ── Meal / workout schedule ──────────────────────────────────────────
+    const mealScheduleCount = (await ctx.db.query("mealSchedules").withIndex("by_user", (q) => q.eq("userId", user._id)).collect()).length;
+    const workoutScheduleCount = (await ctx.db.query("workoutSchedules").withIndex("by_user", (q) => q.eq("userId", user._id)).collect()).length;
+    lines.push(
+      mealScheduleCount > 0 ? `User has a configured meal schedule (${mealScheduleCount} slot(s) across the week)` : "User has not configured a meal schedule",
+    );
+    lines.push(
+      workoutScheduleCount > 0 ? `User has a configured training schedule (${workoutScheduleCount} session(s) across the week)` : "User has not configured a training schedule",
     );
 
     // ── Body measurements ────────────────────────────────────────────────
@@ -169,9 +222,28 @@ export const getSombreyContext = internalQuery({
       lines.push("Wearable vitals: not available yet (no Sombrey band connected)");
     }
 
-    lines.push(
-      "Readiness/recovery score: not available yet — Sombrey has no computed readiness algorithm live yet, even though wearable data above may be present. Do not compute or estimate one yourself.",
-    );
+    // ── Readiness ───────────────────────────────────────────────────────────
+    const latestReadiness = await ctx.db
+      .query("readinessScores")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .first();
+    if (latestReadiness?.score !== undefined) {
+      const confidencePct = Math.round(latestReadiness.confidence * 100);
+      const factors = latestReadiness.components
+        .filter((c) => c.subScore !== undefined)
+        .sort((a, b) => b.weight - a.weight)
+        .map((c) => c.description)
+        .join("; ");
+      lines.push(
+        `Readiness score (${latestReadiness.date}): ${latestReadiness.score}/100, confidence ${confidencePct}%` +
+        (factors ? ` — ${factors}` : ""),
+      );
+    } else {
+      lines.push(
+        "Readiness score: not enough wearable data yet to compute one. Do not estimate or guess a number in its place.",
+      );
+    }
 
     return lines.join("\n");
   },

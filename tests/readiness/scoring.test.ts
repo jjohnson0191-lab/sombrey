@@ -6,8 +6,14 @@ import {
   medianAbsoluteDeviation,
   scoreBand,
   confidenceBand,
+  deriveSleepSignal,
   type DailyAggregate,
+  type ComponentResult,
 } from "../../convex/readiness/scoring.ts";
+
+function sleepComponent(overrides: Partial<ComponentResult> = {}): ComponentResult {
+  return { metric: "sleep", weight: 0.35, confidence: 0.8, description: "", included: true, ...overrides };
+}
 
 function day(date: string, overrides: Partial<DailyAggregate> = {}): DailyAggregate {
   return { date, trainingMinutes: 0, ...overrides };
@@ -161,4 +167,24 @@ test("score/confidence bands cover the full range with non-medical wording", () 
   for (const label of [scoreBand(50), confidenceBand(0.5)]) {
     assert.ok(!/medical|diagnos|clinical/i.test(label));
   }
+});
+
+test("deriveSleepSignal: no component (never computed) reports unavailable, not a guess", () => {
+  assert.equal(deriveSleepSignal(undefined), "unavailable");
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: undefined })), "unavailable");
+});
+
+test("deriveSleepSignal: low confidence overrides subScore regardless of how good/bad it is", () => {
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 95, confidence: 0.1 })), "insufficient");
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 10, confidence: 0.34 })), "insufficient");
+  // Right at the algorithm's own 0.35 floor, confidence is now sufficient.
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 90, confidence: 0.35 })), "good");
+});
+
+test("deriveSleepSignal: thresholds match the readiness algorithm's own score bands, not new ones", () => {
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 85 })), "good");
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 84.9 })), "neutral");
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 45 })), "poor");
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 45.1 })), "neutral");
+  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 60 })), "neutral");
 });

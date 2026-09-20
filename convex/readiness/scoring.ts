@@ -319,3 +319,22 @@ export function confidenceBand(confidence: number): string {
   if (confidence >= 0.35) return "Improving";
   return "Building baseline";
 }
+
+export type SleepSignal = "good" | "poor" | "neutral" | "insufficient" | "unavailable";
+
+/**
+ * Derives a coarse good/poor/neutral sleep signal for notification
+ * purposes from the readiness algorithm's own sleep sub-component —
+ * never a separately hardcoded threshold. Requires the same 0.35
+ * confidence floor the readiness score itself uses elsewhere before it
+ * will call a night "good" or "poor"; below that it reports
+ * "insufficient" so a still-maturing personal baseline can't produce a
+ * confident-sounding sleep notification.
+ */
+export function deriveSleepSignal(sleepComponent: ComponentResult | undefined): SleepSignal {
+  if (sleepComponent?.subScore === undefined) return "unavailable";
+  if (sleepComponent.confidence < 0.35) return "insufficient";
+  if (sleepComponent.subScore >= 85) return "good";
+  if (sleepComponent.subScore <= 45) return "poor";
+  return "neutral";
+}
