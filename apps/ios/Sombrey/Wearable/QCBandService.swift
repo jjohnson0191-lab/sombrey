@@ -20,13 +20,20 @@ import Foundation
 /// tell "not connected" apart from "this isn't wired up yet," never a
 /// silent no-op.
 ///
-/// `Sendable`: `WearableManager` is `@MainActor`-isolated and awaits
-/// these methods directly, so the compiler needs to know a `QCBandService`
-/// instance is safe to use from that isolated context. `MockQCBandService`
-/// has no mutable stored state, a real checked conformance.
-/// `QCBandSDKService` is `@MainActor`-isolated itself and conforms via
-/// `@unchecked Sendable` — see its own file header for the justification.
-protocol QCBandService: AnyObject, Sendable {
+/// `@MainActor` (on the protocol itself, not `Sendable`): every real
+/// caller (`WearableManager`) and both conformers effectively already
+/// live on the main actor, so isolating the protocol itself is the
+/// direct fix rather than reaching for `@unchecked Sendable` — matching
+/// the Phase 3 wearable-integration plan's explicit preference for
+/// "actor isolation, `@MainActor`... over `@unchecked Sendable`" ceremony
+/// where a real single-actor design is possible. A `Sendable` + inline/
+/// extension `@unchecked Sendable` conformance on `QCBandSDKService`
+/// was tried first and rejected by a real Codemagic build ("conformance
+/// of 'QCBandSDKService' to protocol 'QCBandService' crosses into main
+/// actor-isolated code") — this protocol-level `@MainActor` is the
+/// actual fix, not a workaround.
+@MainActor
+protocol QCBandService: AnyObject {
     // MARK: Discovery & pairing
     func scanForDevices() async throws -> [SombreyDevice]
     func pairDevice(_ deviceId: DeviceID) async throws

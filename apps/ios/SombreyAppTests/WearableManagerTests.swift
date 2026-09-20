@@ -40,6 +40,10 @@ struct WearableManagerTests {
 
 /// `MockQCBandService`'s own contract — the "explicit sample data, never
 /// presented as real" honesty rules from its file header, verified.
+/// `@MainActor`: `QCBandService` is now a `@MainActor`-isolated protocol
+/// (see its own file header), so its synchronous requirement
+/// (`measurements(for:)`) can only be called from that actor.
+@MainActor
 struct MockQCBandServiceTests {
     @Test func scanReturnsExactlyOneClearlyMockedDevice() async throws {
         let service = MockQCBandService()

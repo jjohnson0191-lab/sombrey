@@ -18,24 +18,17 @@ import QCBandSDK
 /// resolves the peripheral's characteristics internally; nothing here
 /// talks to GATT characteristics directly.
 ///
-/// `Sendable`: `@unchecked` is a genuine third-party-SDK boundary, not a
-/// convenience escape. `CBCentralManager`, `CBPeripheral`, and
-/// `QCSDKManager` are System/vendor types the compiler cannot verify as
-/// Sendable. Every stored property here is only ever read or mutated from
-/// this type's own methods, which are all `@MainActor`-isolated by the
-/// type-level annotation; `CBCentralManager` is constructed with
+/// No `Sendable`/`@unchecked Sendable` ceremony needed here: `QCBandService`
+/// is itself `@MainActor`-isolated (see its own file header for why), and
+/// this class is `@MainActor` too, so every stored property — including
+/// the vendor/System types (`CBCentralManager`, `CBPeripheral`,
+/// `QCSDKManager`) the compiler can't independently verify as Sendable —
+/// is only ever touched from that one actor. Delegate methods below are
+/// `nonisolated` only because `CBCentralManagerDelegate` itself carries no
+/// actor annotation; each one immediately re-enters `@MainActor` via
+/// `Task { @MainActor in }`, and `CBCentralManager` is constructed with
 /// `queue: nil`, which per Apple's documentation delivers every delegate
-/// callback on the main queue, so delegate methods (marked `nonisolated`
-/// only because `CBCentralManagerDelegate` itself carries no actor
-/// annotation) immediately re-enter `@MainActor` via `Task { @MainActor in }`
-/// and never touch state from any other thread. `WearableManager`, the
-/// sole caller, is itself `@MainActor`. Conformance is declared in a
-/// separate `extension` below (not inline here) — matching
-/// `ConvexClientProvider.swift`'s `extension ConvexClientWithAuth:
-/// @unchecked Sendable {}` precedent exactly, since declaring it inline
-/// alongside the class's other conformances makes the Swift 6 checker
-/// analyze actor-isolation-crossing for protocol requirements it
-/// otherwise treats as an unconditional, unchecked promise.
+/// callback on the main queue anyway.
 @MainActor
 final class QCBandSDKService: NSObject, QCBandService {
     private var centralManager: CBCentralManager!
@@ -514,7 +507,3 @@ extension QCBandSDKService: CBCentralManagerDelegate {
         }
     }
 }
-
-// See the type's own header for why this conformance lives in its own
-// extension rather than the class declaration's conformance list.
-extension QCBandSDKService: @unchecked Sendable {}
