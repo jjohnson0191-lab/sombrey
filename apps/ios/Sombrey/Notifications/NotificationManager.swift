@@ -322,7 +322,7 @@ final class NotificationManager: NSObject {
     /// One-shot Convex query fetch — takes the first emitted value then
     /// cancels the underlying subscription, since `ConvexClientWithAuth`
     /// only exposes reactive `subscribe`, not a dedicated one-shot read.
-    private func fetchOnce<T: Decodable>(_ queryName: String, as type: T.Type) async -> T? {
+    private func fetchOnce<T: Decodable & Sendable>(_ queryName: String, as type: T.Type) async -> T? {
         await withCheckedContinuation { continuation in
             var cancellable: AnyCancellable?
             var didResume = false
