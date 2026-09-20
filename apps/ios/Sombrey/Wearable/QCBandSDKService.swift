@@ -508,12 +508,30 @@ extension QCBandSDKService: CBCentralManagerDelegate {
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        // Extract synchronously, outside the Task: `[String: Any]` can't
+        // be proven Sendable (an `Any` value could be anything), so the
+        // dictionary itself can't cross into the @MainActor closure below
+        // — only the already-`@preconcurrency`-treated `CBPeripheral` we
+        // actually need does.
+        guard let peripheral = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first else { return }
         Task { @MainActor in
-            guard let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
-                  let peripheral = peripherals.first else { return }
             self.connectedPeripheral = peripheral
             self.activeDeviceId = peripheral.identifier.uuidString
             peripheral.delegate = nil
         }
     }
 }
+
+// These specific QCBandSDK model classes still triggered Swift 6's
+// "sending 'x' risks causing data races" region-isolation check even
+// under `@preconcurrency import QCBandSDK` above (confirmed by a real
+// Codemagic build — `@preconcurrency` alone didn't cover every case).
+// They're plain, vendor-owned data-holder classes returned by a single
+// ObjC completion handler and never touched again after that handler
+// resumes the awaiting continuation — a genuine third-party-SDK boundary
+// the compiler can't verify, not a real concurrent-mutation risk.
+extension QCSleepModel: @unchecked Sendable {}
+extension QCSchedualHeartRateModel: @unchecked Sendable {}
+extension QCBloodOxygenModel: @unchecked Sendable {}
+extension QCTemperatureModel: @unchecked Sendable {}
+extension QCBloodPressureModel: @unchecked Sendable {}
