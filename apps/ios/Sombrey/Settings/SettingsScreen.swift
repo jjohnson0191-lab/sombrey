@@ -19,6 +19,7 @@ struct SettingsScreen: View {
     @State private var isSavingGoal = false
     @State private var selectedGoalCategory: GoalCategory = .generalFitness
     @State private var showingNotificationSettings = false
+    @State private var showingVitals = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -39,6 +40,7 @@ struct SettingsScreen: View {
                 }
 
                 WearableBandSection()
+                vitalsRow
                 goalSection
                 coachingModeSection
                 notificationsRow
@@ -76,6 +78,27 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showingNotificationSettings) {
             NotificationSettingsView()
         }
+        .fullScreenCover(isPresented: $showingVitals) {
+            VitalsScreen()
+        }
+    }
+
+    private var vitalsRow: some View {
+        Button {
+            showingVitals = true
+        } label: {
+            HStack {
+                Text("Vitals")
+                    .font(StudioFont.body(14, weight: .medium))
+                    .foregroundStyle(StudioColor.ink)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
+            .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
     }
 
     private var notificationsRow: some View {

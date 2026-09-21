@@ -158,6 +158,13 @@ final class QCBandSDKService: NSObject, QCBandService {
     }
 
     func unpairDevice(_ deviceId: DeviceID) async throws {
+        // Explicit stop here rather than relying solely on the
+        // `didDisconnectPeripheral` delegate path below: `connectedPeripheral`
+        // is cleared synchronously a few lines down, which makes that
+        // delegate callback's own identity guard a no-op once it actually
+        // fires later.
+        liveHeartRateTask?.cancel()
+        liveHeartRateTask = nil
         if let peripheral = connectedPeripheral {
             centralManager.cancelPeripheralConnection(peripheral)
         }
@@ -423,6 +430,48 @@ final class QCBandSDKService: NSObject, QCBandService {
         if let number = any as? NSNumber { return number.doubleValue }
         if let string = any as? String { return Double(string) }
         return nil
+    }
+
+    // MARK: - Live heart rate (real-time HR streaming)
+
+    // Raw values per the vendor header (QCDFU_Utils.h): plain C enum
+    // (not NS_ENUM) — bridges as UInt32 with a non-failable
+    // `init(rawValue:)`, same reasoning as `QCSportState` above; matched
+    // by raw int rather than a guessed bridged case name.
+    // QCBandRealTimeHeartRateCmdTypeStart=0x01, ...End=0x02, ...Hold=0x03.
+    private static let realTimeHRCmdStart: UInt32 = 0x01
+    private static let realTimeHRCmdEnd: UInt32 = 0x02
+    private static let realTimeHRCmdHold: UInt32 = 0x03
+    // The vendor demo app (`QCBandSDKDemo/ViewController.m`) re-sends a
+    // "hold" every 20s to keep the band's real-time HR mode alive —
+    // confirmed against that real, working reference implementation, not
+    // guessed. Sombrey holds indefinitely (no demo-style 120s auto-cutoff)
+    // since the product wants continuous live HR for as long as the app
+    // is foregrounded and connected, not a bounded one-off measurement;
+    // `stopLiveHeartRate` is what actually ends the session (disconnect/
+    // background/teardown), so this never outlives its purpose.
+    private static let realTimeHRHoldInterval: TimeInterval = 20
+
+    private var liveHeartRateTask: Task<Void, Never>?
+
+    func startLiveHeartRate(_ deviceId: DeviceID) async {
+        guard connectedPeripheral?.identifier.uuidString == deviceId else { return }
+        guard liveHeartRateTask == nil else { return } // already running
+        QCSDKCmdCreator.realTimeHeartRate(withCmd: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdStart), finished: nil)
+        liveHeartRateTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.realTimeHRHoldInterval))
+                guard !Task.isCancelled, let self else { return }
+                QCSDKCmdCreator.realTimeHeartRate(withCmd: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdHold), finished: nil)
+            }
+        }
+    }
+
+    func stopLiveHeartRate(_ deviceId: DeviceID) async {
+        guard liveHeartRateTask != nil else { return }
+        liveHeartRateTask?.cancel()
+        liveHeartRateTask = nil
+        QCSDKCmdCreator.realTimeHeartRate(withCmd: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdEnd), finished: nil)
     }
 
     // MARK: - Not wired into Sombrey V1 (see QCBandService's header)
@@ -718,6 +767,12 @@ extension QCBandSDKService: CBCentralManagerDelegate {
             QCSDKManager.shareInstance().remove(peripheral)
             guard self.connectedPeripheral?.identifier == peripheral.identifier else { return }
             self.connectedPeripheral = nil
+            // The band itself is gone — no point continuing to send hold
+            // commands into a dead connection; `WearableManager` clears
+            // the stale live BPM value once it observes `.reconnecting`/
+            // `.disconnected` via `connectionStateUpdates`.
+            self.liveHeartRateTask?.cancel()
+            self.liveHeartRateTask = nil
             // Best-effort automatic reconnect — mirrors the vendor demo's
             // own behavior for an unexpected drop (not a user-initiated
             // `unpairDevice`, which clears `connectedPeripheral` itself

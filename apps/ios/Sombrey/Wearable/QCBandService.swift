@@ -86,6 +86,18 @@ protocol QCBandService: AnyObject {
     /// A single "measure now" reading — on-demand, not scheduled/passive.
     func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult
 
+    /// Starts the band's continuous real-time heart-rate stream — unlike
+    /// steps/battery (which tick passively on their own), the vendor SDK
+    /// requires an explicit start command before `measurements(for:)`
+    /// will ever yield a `.heartRate` reading from a live tick. The
+    /// conformer owns whatever periodic "keep alive" the SDK requires
+    /// internally; callers just start/stop around a connected session.
+    func startLiveHeartRate(_ deviceId: DeviceID) async
+    /// Stops the real-time heart-rate stream — must be called on
+    /// disconnect/background/teardown so the band isn't left in an
+    /// active-measurement mode indefinitely.
+    func stopLiveHeartRate(_ deviceId: DeviceID) async
+
     // MARK: Real band/SDK capabilities not wired into Sombrey V1 yet —
     // see the type header. Every conformer throws `WearableUnsupportedError`.
     func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws

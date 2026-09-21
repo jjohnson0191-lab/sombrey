@@ -80,6 +80,11 @@
 		0000000000000000000000DB /* SportTypePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DA /* SportTypePickerView.swift */; };
 		0000000000000000000000DD /* ReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DC /* ReadinessTests.swift */; };
 		0000000000000000000000E9 /* NotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000EA /* NotificationTests.swift */; };
+		0000000000000000000000F4 /* VitalsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F5 /* VitalsTests.swift */; };
+		0000000000000000000000EC /* VitalsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000EB /* VitalsScreen.swift */; };
+		0000000000000000000000EE /* MetricHistoryChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000ED /* MetricHistoryChart.swift */; };
+		0000000000000000000000F0 /* StudioCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000EF /* StudioCard.swift */; };
+		0000000000000000000000F2 /* WearableDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F1 /* WearableDiagnosticsView.swift */; };
 		0000000000000000000000DF /* NotificationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DE /* NotificationModels.swift */; };
 		0000000000000000000000E1 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E0 /* NotificationManager.swift */; };
 		0000000000000000000000E3 /* NotificationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E2 /* NotificationSettingsView.swift */; };
@@ -185,6 +190,11 @@
 		0000000000000000000000E6 /* WorkoutScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkoutScheduleView.swift"; sourceTree = "<group>"; };
 		0000000000000000000000DC /* ReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReadinessTests.swift"; sourceTree = "<group>"; };
 		0000000000000000000000EA /* NotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NotificationTests.swift"; sourceTree = "<group>"; };
+		0000000000000000000000F5 /* VitalsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VitalsTests.swift"; sourceTree = "<group>"; };
+		0000000000000000000000EB /* VitalsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VitalsScreen.swift"; sourceTree = "<group>"; };
+		0000000000000000000000ED /* MetricHistoryChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetricHistoryChart.swift"; sourceTree = "<group>"; };
+		0000000000000000000000EF /* StudioCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StudioCard.swift"; sourceTree = "<group>"; };
+		0000000000000000000000F1 /* WearableDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableDiagnosticsView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -234,6 +244,7 @@
 			000000000000000000000091 /* AICoach */,
 			000000000000000000000092 /* Nutrition */,
 			000000000000000000000093 /* Onboarding */,
+			0000000000000000000000F3 /* Vitals */,
 			000000000000000000000094 /* Resources */
 			);
 			path = "Sombrey";
@@ -296,7 +307,8 @@
 			00000000000000000000000E /* WearableStatusBadge.swift */,
 			00000000000000000000000F /* AiDisclosureBadge.swift */,
 			000000000000000000000010 /* IlluminatedCTAButtonStyle.swift */,
-			00000000000000000000001E /* ComingSoonView.swift */
+			00000000000000000000001E /* ComingSoonView.swift */,
+			0000000000000000000000EF /* StudioCard.swift */
 			);
 			name = "Components";
 			path = "Components";
@@ -366,6 +378,7 @@
 			0000000000000000000000C3 /* WearablePersistencePayloads.swift */,
 			0000000000000000000000D0 /* SombreySportType.swift */,
 			0000000000000000000000D2 /* GPSTracker.swift */,
+			0000000000000000000000F1 /* WearableDiagnosticsView.swift */,
 			00000000000000000000008C /* Models */
 			);
 			name = "Wearable";
@@ -398,6 +411,16 @@
 			);
 			name = "Notifications";
 			path = "Notifications";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000F3 /* Vitals */ = {
+			isa = PBXGroup;
+			children = (
+			0000000000000000000000EB /* VitalsScreen.swift */,
+			0000000000000000000000ED /* MetricHistoryChart.swift */
+			);
+			name = "Vitals";
+			path = "Vitals";
 			sourceTree = "<group>";
 		};
 		00000000000000000000008E /* Settings */ = {
@@ -501,7 +524,8 @@
 			0000000000000000000000C5 /* WearableManagerTests.swift */,
 			0000000000000000000000D6 /* Phase3TrainingArchitectureTests.swift */,
 			0000000000000000000000DC /* ReadinessTests.swift */,
-			0000000000000000000000EA /* NotificationTests.swift */
+			0000000000000000000000EA /* NotificationTests.swift */,
+			0000000000000000000000F5 /* VitalsTests.swift */
 			);
 			name = "SombreyAppTests";
 			path = "SombreyAppTests";
@@ -760,6 +784,10 @@
 				0000000000000000000000D9 /* WearableBandSection.swift */,
 				0000000000000000000000DB /* SportTypePickerView.swift */,
 				0000000000000000000000DF /* NotificationModels.swift */,
+				0000000000000000000000EC /* VitalsScreen.swift */,
+				0000000000000000000000EE /* MetricHistoryChart.swift */,
+				0000000000000000000000F0 /* StudioCard.swift */,
+				0000000000000000000000F2 /* WearableDiagnosticsView.swift */,
 				0000000000000000000000E1 /* NotificationManager.swift */,
 				0000000000000000000000E3 /* NotificationSettingsView.swift */,
 				0000000000000000000000E5 /* MealScheduleView.swift */,
@@ -778,6 +806,7 @@
 				0000000000000000000000D7 /* Phase3TrainingArchitectureTests.swift */,
 				0000000000000000000000DD /* ReadinessTests.swift */,
 				0000000000000000000000E9 /* NotificationTests.swift */,
+				0000000000000000000000F4 /* VitalsTests.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -860,7 +889,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -891,7 +920,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -916,7 +945,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -942,7 +971,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -964,7 +993,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -989,7 +1018,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

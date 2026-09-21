@@ -254,6 +254,11 @@ struct SleepStageDTO: Decodable {
 struct SleepSessionSummaryDTO: Decodable {
     let totalSleepMinutes: Int
     let stages: [SleepStageDTO]?
+    // Added for VitalsScreen's sleep timing/trend — same query already
+    // returns these (`wearableSleepSessions`' own required fields), this
+    // screen just didn't decode them before.
+    let startedAt: Double
+    let endedAt: Double
 }
 
 struct SportSessionSummaryDTO: Decodable {

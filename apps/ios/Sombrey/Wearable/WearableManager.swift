@@ -29,6 +29,10 @@ final class WearableManager {
     /// avoid resyncing on every trivial foreground (see
     /// `handleScenePhaseChange`), not surfaced in any UI.
     private(set) var lastSyncAt: Date?
+    /// Total measurements received this session (live ticks + historical
+    /// sync), for the developer diagnostics view only — not shown to
+    /// normal users, not persisted.
+    private(set) var measurementsReceivedCount: Int = 0
     private(set) var isScanning = false
     private(set) var lastError: String?
     private(set) var discoveredDevices: [SombreyDevice] = []
@@ -168,6 +172,17 @@ final class WearableManager {
                 )
                 if state == .connected {
                     await self.refreshStatus()
+                    // Real-time HR is not ambient like steps/battery — it
+                    // requires an explicit start command, only meaningful
+                    // once actually connected (see `QCBandSDKService`).
+                    await self.service.startLiveHeartRate(deviceId)
+                } else if state == .disconnected || state == .error || state == .unavailable {
+                    // The band is genuinely gone (not merely
+                    // `.reconnecting`, which is a transient auto-retry) —
+                    // stop the live-HR stream and clear the last BPM so
+                    // Home/Vitals never shows a stale reading as current.
+                    await self.service.stopLiveHeartRate(deviceId)
+                    self.latestMeasurements[.heartRate] = nil
                 }
                 // Only notify on a real transition — never the initial
                 // state a fresh subscription happens to start on, and
@@ -417,14 +432,25 @@ final class WearableManager {
 
     /// Call from the root view's `.onChange(of: scenePhase)`.
     func handleScenePhaseChange(isActive: Bool) {
-        guard pairedDevice != nil else { return }
+        guard let device = pairedDevice else { return }
         if isActive {
             Task {
                 await refreshStatus()
                 await resyncIfStale()
+                // Real-time HR is stopped on background (below) to avoid
+                // draining the band's battery while nobody can see the
+                // reading; resume it here rather than waiting for a full
+                // reconnect cycle, since the BLE connection itself is
+                // typically still alive across a brief background.
+                if self.status?.connectionState == .connected {
+                    await self.service.startLiveHeartRate(device.id)
+                }
             }
         } else {
-            Task { await flushPendingMeasurements(deviceId: pairedDevice?.id ?? "") }
+            Task {
+                await flushPendingMeasurements(deviceId: device.id)
+                await service.stopLiveHeartRate(device.id)
+            }
         }
     }
 
@@ -492,6 +518,7 @@ final class WearableManager {
         gpsTracker.stopTracking()
         pendingMeasurements.removeAll()
         latestMeasurements.removeAll()
+        measurementsReceivedCount = 0
         pairedDevice = nil
         status = nil
         lastSyncResult = nil
@@ -509,6 +536,7 @@ final class WearableManager {
             for await measurement in self.service.measurements(for: deviceId) {
                 guard !Task.isCancelled else { return }
                 self.latestMeasurements[measurement.metricType] = measurement
+                self.measurementsReceivedCount += 1
                 self.pendingMeasurements.append(measurement)
                 if self.pendingMeasurements.count >= 20 {
                     await self.flushPendingMeasurements(deviceId: deviceId)

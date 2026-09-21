@@ -155,6 +155,33 @@ export const getRecentMeasurements = query({
   },
 });
 
+// One generic range query for a single metric type, used by every Vitals
+// graph (1D/7D/30D) and by Home's resting-HR-today derivation. Unlike
+// `getRecentMeasurements` above (which takes its `limit` across ALL metric
+// types before filtering — fine for "latest snapshot," wrong for "every
+// heart-rate reading in the last 30 days," since a busy day of other
+// metrics could crowd out older heart-rate rows before the filter ever
+// runs), this scopes directly to one metric type via
+// `by_user_metric_and_recordedAt`, so a range is always complete for the
+// metric actually asked for. Ascending order — chronological, ready for a
+// line chart's x-axis.
+export const getMeasurementsByRange = query({
+  args: {
+    metricType: metricTypeValidator,
+    sinceMs: v.number(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    return await ctx.db
+      .query("wearableMeasurements")
+      .withIndex("by_user_metric_and_recordedAt", (q) =>
+        q.eq("userId", user._id).eq("metricType", args.metricType).gte("recordedAt", args.sinceMs))
+      .order("asc")
+      .take(args.limit ?? 5000);
+  },
+});
+
 // ─── Sleep sessions ──────────────────────────────────────────────────────
 export const recordSleepSessions = mutation({
   args: {

@@ -1148,7 +1148,13 @@ export default defineSchema({
     source: v.string(),                    // e.g. "sombrey_band"
   }).index("by_user", ["userId"])
     .index("by_user_and_metric", ["userId", "metricType"])
-    .index("by_device_and_recordedAt", ["deviceId", "recordedAt"]),
+    .index("by_device_and_recordedAt", ["deviceId", "recordedAt"])
+    // Powers `wearable:getMeasurementsByRange` — a single metric type's
+    // readings ordered/scoped by time without loading every other metric
+    // type first (the gap `by_user_and_metric` alone left: it can filter
+    // to one metric but not also range/order by `recordedAt` on the same
+    // index lookup).
+    .index("by_user_metric_and_recordedAt", ["userId", "metricType", "recordedAt"]),
 
   // Structured sleep sessions — kept separate from wearableMeasurements
   // since a session is a time range with optional stage breakdown, not a

@@ -24,11 +24,14 @@ struct HomeScreen: View {
     @Environment(WearableManager.self) private var wearableManager
     @State private var showingNutrition = false
     @State private var showingBandPairing = false
+    @State private var showingVitals = false
+    @State private var showingDiagnostics = false
     @State private var readiness = ConvexQuery<ReadinessResultDTO?>()
     @State private var sleep = ConvexQuery<[SleepSessionSummaryDTO]>()
     @State private var sportSessions = ConvexQuery<[SportSessionSummaryDTO]>()
     @State private var workouts = ConvexQuery<[SombreyWorkoutSummaryDTO]>()
     @State private var nutritionProgress = ConvexQuery<NutritionProgress>()
+    @State private var todayHeartRate = ConvexQuery<[WearableMeasurementDTO]>()
 
     var body: some View {
         @Bindable var appState = appState
@@ -86,12 +89,19 @@ struct HomeScreen: View {
         .fullScreenCover(isPresented: $showingBandPairing) {
             BandPairingView { showingBandPairing = false }
         }
+        .fullScreenCover(isPresented: $showingVitals) {
+            VitalsScreen()
+        }
         .task {
             readiness.subscribe(to: "readiness:getLatest")
             sleep.subscribe(to: "wearable:getRecentSleepSessions")
             sportSessions.subscribe(to: "sportPlusSessions:getRecentSessions")
             workouts.subscribe(to: "sombreyWorkouts:listHistory")
             nutritionProgress.subscribe(to: "nutritionLogs:getTodayProgress")
+            todayHeartRate.subscribe(to: "wearable:getMeasurementsByRange", with: [
+                "metricType": "heart_rate",
+                "sinceMs": Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000,
+            ])
         }
         .onChange(of: appState.pendingNutritionDeepLink) { _, pending in
             guard pending else { return }
@@ -184,6 +194,14 @@ struct HomeScreen: View {
         }
         .buttonStyle(.plain)
         .studioCard()
+        // Developer-only diagnostics — long-press, never a visible
+        // button, so a normal user won't stumble into it.
+        .onLongPressGesture(minimumDuration: 1.2) {
+            showingDiagnostics = true
+        }
+        .sheet(isPresented: $showingDiagnostics) {
+            WearableDiagnosticsView()
+        }
     }
 
     private var bandStatusText: String {
@@ -202,35 +220,102 @@ struct HomeScreen: View {
 
     // MARK: - Today's metrics
 
+    /// Tappable — opens Vitals, where every metric (and its history) can
+    /// be inspected in depth. Home only ever shows a concise snapshot.
     private var metricsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("TODAY'S METRICS")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
+        Button {
+            showingVitals = true
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("TODAY'S METRICS")
+                        .font(StudioFont.body(11, weight: .semibold))
+                        .tracking(1.3)
+                        .foregroundStyle(StudioColor.inkSoft)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
 
-            if wearableManager.pairedDevice == nil {
-                Text("Put on your Sombrey Band to begin collecting data.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else if wearableManager.latestMeasurements.isEmpty {
-                Text("Waiting for your first sync…")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                let columns = [GridItem(.flexible(), spacing: 20), GridItem(.flexible(), spacing: 20)]
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    MetricView(label: "Heart Rate", value: metricText(.heartRate, format: { "\(Int($0.rounded()))" }), unit: heartRate == nil ? nil : "BPM")
-                    MetricView(label: "SpO2", value: metricText(.spo2, format: { "\(Int($0.rounded()))" }), unit: spo2 == nil ? nil : "%")
-                    MetricView(label: "Temperature", value: metricText(.skinTemperature, format: { String(format: "%.1f", $0) }), unit: temperature == nil ? nil : "°C")
-                    MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
-                    MetricView(label: "Steps", value: metricText(.steps, format: { "\(Int($0.rounded()))" }), unit: nil)
-                    MetricView(label: "Distance", value: metricText(.distanceMeters, format: { String(format: "%.1f", $0 / 1000) }), unit: distance == nil ? nil : "km")
-                    MetricView(label: "Calories", value: metricText(.activeCalories, format: { "\(Int($0.rounded()))" }), unit: activeCalories == nil ? nil : "kcal")
+                if wearableManager.pairedDevice == nil {
+                    Text("Put on your Sombrey Band to begin collecting data.")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkFaint)
+                } else if wearableManager.latestMeasurements.isEmpty {
+                    Text("Waiting for your first sync…")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkFaint)
+                } else {
+                    heartRateRow
+
+                    let columns = [GridItem(.flexible(), spacing: 20), GridItem(.flexible(), spacing: 20)]
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                        MetricView(label: "SpO2", value: metricText(.spo2, format: { "\(Int($0.rounded()))" }), unit: spo2 == nil ? nil : "%")
+                        MetricView(label: "Temperature", value: metricText(.skinTemperature, format: { String(format: "%.1f", $0) }), unit: temperature == nil ? nil : "°C")
+                        MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
+                        MetricView(label: "Steps", value: metricText(.steps, format: { "\(Int($0.rounded()))" }), unit: nil)
+                        MetricView(label: "Distance", value: metricText(.distanceMeters, format: { String(format: "%.1f", $0 / 1000) }), unit: distance == nil ? nil : "km")
+                        MetricView(label: "Calories", value: metricText(.activeCalories, format: { "\(Int($0.rounded()))" }), unit: activeCalories == nil ? nil : "kcal")
+                    }
                 }
             }
         }
+        .buttonStyle(.plain)
         .studioCard()
+    }
+
+    /// Live BPM (real-time, requires the band to actually be streaming —
+    /// see `WearableManager`/`QCBandSDKService`'s real-time HR pipeline)
+    /// alongside today's resting HR — a genuinely different, historically-
+    /// derived number (the day's minimum heart-rate reading), never just
+    /// a copy of whatever the live value currently reads.
+    @ViewBuilder
+    private var heartRateRow: some View {
+        HStack(alignment: .top, spacing: 28) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("HEART RATE")
+                    .font(StudioFont.body(10, weight: .semibold))
+                    .tracking(1.1)
+                    .foregroundStyle(StudioColor.inkSoft)
+                if let live = heartRate {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(Int(live.value.rounded()))")
+                            .font(StudioFont.body(22, weight: .semibold))
+                            .foregroundStyle(StudioColor.ink)
+                            .monospacedDigit()
+                        Text("BPM · LIVE")
+                            .font(StudioFont.body(10, weight: .semibold))
+                            .foregroundStyle(StudioColor.accentInk)
+                    }
+                } else if wearableManager.displayState == .connected {
+                    Text("Measuring…")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkFaint)
+                } else {
+                    Text("—")
+                        .font(StudioFont.body(22, weight: .semibold))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("RESTING HR")
+                    .font(StudioFont.body(10, weight: .semibold))
+                    .tracking(1.1)
+                    .foregroundStyle(StudioColor.inkSoft)
+                if let resting = todayRestingHeartRate {
+                    Text("\(Int(resting.rounded())) BPM")
+                        .font(StudioFont.body(22, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                        .monospacedDigit()
+                } else {
+                    Text("Building baseline")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
+            }
+        }
     }
 
     private var heartRate: WearableMeasurement? { wearableManager.latestMeasurements[.heartRate] }
@@ -238,6 +323,15 @@ struct HomeScreen: View {
     private var temperature: WearableMeasurement? { wearableManager.latestMeasurements[.skinTemperature] }
     private var distance: WearableMeasurement? { wearableManager.latestMeasurements[.distanceMeters] }
     private var activeCalories: WearableMeasurement? { wearableManager.latestMeasurements[.activeCalories] }
+
+    /// Today's minimum real heart-rate reading — the same legitimate
+    /// proxy `convex/readiness.ts`'s cardiovascular component already
+    /// uses server-side, never simply "whatever the live BPM shows right
+    /// now." `nil` (rendered as "Building baseline") until at least one
+    /// real reading has landed today.
+    private var todayRestingHeartRate: Double? {
+        todayHeartRate.value?.map(\.value).min()
+    }
 
     private func metricText(_ type: WearableMetricType, format: (Double) -> String) -> String {
         wearableManager.latestMeasurements[type].map { format($0.value) } ?? "—"
@@ -254,11 +348,24 @@ struct HomeScreen: View {
     // MARK: - Sleep
 
     private var sleepCard: some View {
+        Button { showingVitals = true } label: { sleepCardContent }
+            .buttonStyle(.plain)
+            .studioCard()
+    }
+
+    @ViewBuilder
+    private var sleepCardContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("SLEEP")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
+            HStack {
+                Text("SLEEP")
+                    .font(StudioFont.body(11, weight: .semibold))
+                    .tracking(1.3)
+                    .foregroundStyle(StudioColor.inkSoft)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
 
             if let latest = sleep.value?.first {
                 let hours = latest.totalSleepMinutes / 60
@@ -285,7 +392,6 @@ struct HomeScreen: View {
                     .foregroundStyle(StudioColor.inkFaint)
             }
         }
-        .studioCard()
     }
 
     // MARK: - Training
@@ -453,28 +559,5 @@ struct HomeScreen: View {
             Button("Ask Sombrey") { appState.selectedTab = .aiCoach }
                 .buttonStyle(.outlineCTA)
         }
-    }
-}
-
-/// The one card surface Home's new sections share — restrained glass,
-/// matching the existing `.ultraThinMaterial` + soft ink border treatment
-/// already used elsewhere (`BandPairingView`'s device rows,
-/// `MealScheduleView`'s slot rows), not a new visual language.
-private struct StudioCardModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(StudioColor.ink.opacity(0.08), lineWidth: 1)
-            }
-    }
-}
-
-private extension View {
-    func studioCard() -> some View {
-        modifier(StudioCardModifier())
     }
 }

@@ -91,6 +91,11 @@ final class MockQCBandService: QCBandService {
         OnDemandMeasurementResult()
     }
 
+    // No real-time SDK stream to start/stop — matches `measurements(for:)`'s
+    // honest-absence convention for this conformer.
+    func startLiveHeartRate(_ deviceId: DeviceID) async {}
+    func stopLiveHeartRate(_ deviceId: DeviceID) async {}
+
     func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws {
         throw WearableUnsupportedError(feature: "Setting band targets")
     }
