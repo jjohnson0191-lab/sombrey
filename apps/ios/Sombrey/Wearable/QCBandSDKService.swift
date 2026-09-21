@@ -457,12 +457,12 @@ final class QCBandSDKService: NSObject, QCBandService {
     func startLiveHeartRate(_ deviceId: DeviceID) async {
         guard connectedPeripheral?.identifier.uuidString == deviceId else { return }
         guard liveHeartRateTask == nil else { return } // already running
-        QCSDKCmdCreator.realTimeHeartRate(withCmd: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdStart), finished: nil)
+        QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdStart), finished: nil)
         liveHeartRateTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.realTimeHRHoldInterval))
                 guard !Task.isCancelled, let self else { return }
-                QCSDKCmdCreator.realTimeHeartRate(withCmd: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdHold), finished: nil)
+                QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdHold), finished: nil)
             }
         }
     }
@@ -471,7 +471,7 @@ final class QCBandSDKService: NSObject, QCBandService {
         guard liveHeartRateTask != nil else { return }
         liveHeartRateTask?.cancel()
         liveHeartRateTask = nil
-        QCSDKCmdCreator.realTimeHeartRate(withCmd: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdEnd), finished: nil)
+        QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdEnd), finished: nil)
     }
 
     // MARK: - Not wired into Sombrey V1 (see QCBandService's header)

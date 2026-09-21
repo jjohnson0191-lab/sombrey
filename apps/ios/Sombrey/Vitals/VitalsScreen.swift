@@ -223,7 +223,7 @@ struct VitalsScreen: View {
                     .font(StudioFont.hero(40, weight: .bold))
                     .foregroundStyle(StudioColor.ink)
                     .monospacedDigit()
-                Text("\(Self.dateTimeString(systolic.recordedAt)) · wearable-estimated, not a diagnostic reading")
+                Text("\(Self.dateTimeFormatter.string(from: systolic.recordedAt)) · wearable-estimated, not a diagnostic reading")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.inkFaint)
             } else {
@@ -359,10 +359,6 @@ struct VitalsScreen: View {
         formatter.dateFormat = "MMM d, h:mm a"
         return formatter
     }()
-
-    private static func dateTimeString(_ recordedAtMs: Double) -> String {
-        dateTimeFormatter.string(from: Date(timeIntervalSince1970: recordedAtMs / 1000))
-    }
 
     private static let timeOnlyFormatter: DateFormatter = {
         let formatter = DateFormatter()

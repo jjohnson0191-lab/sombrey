@@ -36,7 +36,7 @@ struct WearableDiagnosticsView: View {
                 Section("Last error") {
                     Text(wearableManager.lastError ?? "none")
                         .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(wearableManager.lastError == nil ? .secondary : .red)
+                        .foregroundStyle(wearableManager.lastError == nil ? Color.secondary : Color.red)
                 }
             }
             .navigationTitle("Wearable Diagnostics")
