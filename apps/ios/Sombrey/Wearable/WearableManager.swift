@@ -171,6 +171,7 @@ final class WearableManager {
             var previousState = self.status?.connectionState
             for await state in self.service.connectionStateUpdates(for: deviceId) {
                 guard !Task.isCancelled else { return }
+                WearableDiagnostics.log("connectionStateUpdates: \(state.rawValue)")
                 self.status = WearableDeviceStatus(
                     deviceId: deviceId,
                     connectionState: state,
@@ -405,14 +406,35 @@ final class WearableManager {
     /// already in flight (for any metric — the physical band can only
     /// run one measurement command at a time) is a no-op rather than a
     /// second concurrent SDK command racing the first.
+    ///
+    /// Pauses continuous live heart rate for the duration of the
+    /// command and restarts it afterward: live HR and a one-shot
+    /// on-demand measurement both drive the band's PPG sensor, and
+    /// nothing in the vendor SDK/demo documents these as safe to run
+    /// concurrently. Added after a physical-device report where BP
+    /// on-demand measurement failing and live HR going stale showed up
+    /// in the same session — this is the leading hypothesis for a
+    /// shared cause, not a vendor-confirmed requirement (see
+    /// `WearableDiagnostics` logging added alongside this for the next
+    /// physical test to confirm or rule out).
     @discardableResult
     func measureNow(_ metric: OnDemandMetric) async -> OnDemandMeasurementResult? {
-        guard let device = pairedDevice, activeOnDemandMeasurement == nil else { return nil }
+        guard let device = pairedDevice, activeOnDemandMeasurement == nil else {
+            WearableDiagnostics.log("measureNow(\(metric.rawValue)): blocked — device=\(pairedDevice != nil) activeOnDemandMeasurement=\(String(describing: activeOnDemandMeasurement))")
+            return nil
+        }
+        WearableDiagnostics.log("measureNow(\(metric.rawValue)): starting, pausing live HR first")
         lastError = nil
         activeOnDemandMeasurement = metric
         defer { activeOnDemandMeasurement = nil }
+        await service.stopLiveHeartRate(device.id)
+        defer {
+            WearableDiagnostics.log("measureNow(\(metric.rawValue)): finished, resuming live HR")
+            Task { await self.service.startLiveHeartRate(device.id) }
+        }
         do {
             let result = try await service.measureNow(device.id, metric: metric)
+            WearableDiagnostics.log("measureNow(\(metric.rawValue)): result hr=\(String(describing: result.heartRate)) spo2=\(String(describing: result.spo2Pct)) temp=\(String(describing: result.temperatureC)) sbp=\(String(describing: result.systolicMmHg)) dbp=\(String(describing: result.diastolicMmHg))")
             let now = Date()
             var readings: [WearableMeasurement] = []
             if let hr = result.heartRate {
@@ -444,6 +466,7 @@ final class WearableManager {
             }
             return result
         } catch {
+            WearableDiagnostics.error("measureNow(\(metric.rawValue)): threw \(String(describing: error))")
             lastError = String(describing: error)
             return nil
         }

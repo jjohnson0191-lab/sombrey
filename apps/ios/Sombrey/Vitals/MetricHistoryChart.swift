@@ -54,7 +54,15 @@ struct MetricHistoryChart: View {
 
             let points = measurements.value ?? []
             if points.isEmpty {
-                Text(measurements.isLoading ? "Loading…" : "No data for this range.")
+                // `errorMessage` used to be silently swallowed here — a
+                // failed subscription (auth, network, a bad query
+                // argument) rendered identically to "genuinely no
+                // measurements exist yet," which made a real regression
+                // indistinguishable from cold-start. Surfacing it is a
+                // correctness fix, not new UI: an error is data the user
+                // (and whoever's diagnosing this) needs, never one this
+                // view manufactures.
+                Text(measurements.isLoading ? "Loading…" : (measurements.errorMessage.map { "Couldn't load history: \($0)" } ?? "No data for this range."))
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.inkFaint)
                     .frame(height: 160, alignment: .center)
@@ -80,9 +88,14 @@ struct MetricHistoryChart: View {
             }
         }
         .task { subscribe() }
+        .onChange(of: measurements.isLoading) { _, isLoading in
+            guard !isLoading else { return }
+            WearableDiagnostics.log("MetricHistoryChart(\(metricType.rawValue)): resolved, points=\(measurements.value?.count ?? -1) error=\(measurements.errorMessage ?? "nil")")
+        }
     }
 
     private func subscribe() {
+        WearableDiagnostics.log("MetricHistoryChart(\(metricType.rawValue)): subscribing, range=\(range.rawValue) sinceMs=\(range.sinceMs)")
         measurements.subscribe(to: "wearable:getMeasurementsByRange", with: [
             "metricType": metricType.rawValue,
             "sinceMs": range.sinceMs,

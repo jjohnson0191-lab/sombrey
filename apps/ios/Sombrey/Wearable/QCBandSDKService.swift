@@ -383,11 +383,13 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult {
         guard connectedPeripheral?.identifier.uuidString == deviceId else {
+            WearableDiagnostics.error("measureNow(\(metric.rawValue)): no connected device")
             throw WearableSDKError.noConnectedDevice
         }
         guard let qcType = QCMeasuringType(rawValue: metric.qcRawValue) else {
             throw WearableSDKError.commandFailed("unsupported measurement type")
         }
+        WearableDiagnostics.log("measureNow(\(metric.rawValue)): sending startToMeasuring, qcRawValue=\(metric.qcRawValue)")
         // Parsed inside the completion handler, before crossing the
         // continuation boundary: `Any?` (what the ObjC callback actually
         // hands back — an NSNumber or NSDictionary depending on metric)
@@ -399,12 +401,18 @@ final class QCBandSDKService: NSObject, QCBandService {
             QCSDKManager.shareInstance().startToMeasuring(
                 withOperateType: qcType,
                 timeout: 30,
-                measuringHandle: { _ in
-                    // Intermediate ticks — only the final result matters here.
+                measuringHandle: { tick in
+                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): measuringHandle tick, type=\(String(describing: type(of: tick as Any)))")
                 },
                 completedHandle: { isSuccess, result, error in
                     guard !didResume else { return }
                     didResume = true
+                    // This line answers exactly what the vendor SDK
+                    // actually handed back for this device/firmware —
+                    // the dynamic type of `result` — rather than
+                    // continuing to assume `QCBloodPressureModel` (or
+                    // the dictionary fallback) is correct.
+                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): completedHandle isSuccess=\(isSuccess) resultType=\(String(describing: type(of: result as Any))) resultIsNil=\(result == nil) error=\(error?.localizedDescription ?? "nil")")
                     if isSuccess {
                         continuation.resume(returning: Self.parseMeasurementResult(result, metric: metric))
                     } else {
@@ -485,20 +493,32 @@ final class QCBandSDKService: NSObject, QCBandService {
     private var liveHeartRateTask: Task<Void, Never>?
 
     func startLiveHeartRate(_ deviceId: DeviceID) async {
-        guard connectedPeripheral?.identifier.uuidString == deviceId else { return }
-        guard liveHeartRateTask == nil else { return } // already running
+        guard connectedPeripheral?.identifier.uuidString == deviceId else {
+            WearableDiagnostics.log("startLiveHeartRate: ignored, deviceId mismatch or not connected")
+            return
+        }
+        guard liveHeartRateTask == nil else {
+            WearableDiagnostics.log("startLiveHeartRate: already running, no-op")
+            return
+        }
+        WearableDiagnostics.log("startLiveHeartRate: sending Start command")
         QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdStart), finished: nil)
         liveHeartRateTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.realTimeHRHoldInterval))
                 guard !Task.isCancelled, let self else { return }
+                WearableDiagnostics.log("startLiveHeartRate: sending Hold command")
                 QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdHold), finished: nil)
             }
         }
     }
 
     func stopLiveHeartRate(_ deviceId: DeviceID) async {
-        guard liveHeartRateTask != nil else { return }
+        guard liveHeartRateTask != nil else {
+            WearableDiagnostics.log("stopLiveHeartRate: not running, no-op")
+            return
+        }
+        WearableDiagnostics.log("stopLiveHeartRate: sending End command")
         liveHeartRateTask?.cancel()
         liveHeartRateTask = nil
         QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdEnd), finished: nil)
@@ -538,6 +558,13 @@ final class QCBandSDKService: NSObject, QCBandService {
         }
         manager.realTimeHeartRate = { [weak self] hr in
             Task { @MainActor in
+                // Logged unconditionally, before the `hr > 0` guard below,
+                // so a physical-device test can distinguish "the SDK
+                // callback never fires at all" (nothing logged) from
+                // "it fires but with a rejected value" (logged, then
+                // dropped) — the two look identical from the UI alone
+                // (both show live HR stuck on "Measuring…").
+                WearableDiagnostics.log("realTimeHeartRate callback fired: hr=\(hr)")
                 guard let self, let deviceId = self.activeDeviceId, hr > 0 else { return }
                 self.emit(deviceId: deviceId, type: .heartRate, value: Double(hr), unit: "bpm", at: Date())
             }
@@ -565,7 +592,10 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// readiness) uniformly, rather than each call site needing its own
     /// guard. See `isValid(metricType:value:)` for why.
     private func emit(deviceId: DeviceID, type: WearableMetricType, value: Double, unit: String, at date: Date) {
-        guard type.isPhysicallyPlausible(value) else { return }
+        guard type.isPhysicallyPlausible(value) else {
+            WearableDiagnostics.log("emit: rejected \(type.rawValue)=\(value) as not physically plausible")
+            return
+        }
         measurementContinuation?.yield(WearableMeasurement(deviceId: deviceId, metricType: type, value: value, unit: unit, recordedAt: date))
     }
 
