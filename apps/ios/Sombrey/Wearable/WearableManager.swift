@@ -417,9 +417,10 @@ final class WearableManager {
             if let diastolic = result.diastolicMmHg {
                 readings.append(WearableMeasurement(deviceId: device.id, metricType: .bloodPressureDiastolic, value: Double(diastolic), unit: "mmHg", recordedAt: now))
             }
-            for reading in readings { latestMeasurements[reading.metricType] = reading }
-            if !readings.isEmpty {
-                await persistMeasurements(deviceId: device.id, measurements: readings)
+            let validReadings = readings.filter { $0.metricType.isPhysicallyPlausible($0.value) }
+            for reading in validReadings { recordAsLatestIfNewer(reading) }
+            if !validReadings.isEmpty {
+                await persistMeasurements(deviceId: device.id, measurements: validReadings)
             }
             return result
         } catch {
@@ -535,7 +536,7 @@ final class WearableManager {
             guard let self else { return }
             for await measurement in self.service.measurements(for: deviceId) {
                 guard !Task.isCancelled else { return }
-                self.latestMeasurements[measurement.metricType] = measurement
+                self.recordAsLatestIfNewer(measurement)
                 self.measurementsReceivedCount += 1
                 self.pendingMeasurements.append(measurement)
                 if self.pendingMeasurements.count >= 20 {
@@ -543,6 +544,21 @@ final class WearableManager {
                 }
             }
         }
+    }
+
+    /// Only overwrites `latestMeasurements` when the incoming reading is
+    /// genuinely more recent than what's already stored — a historical
+    /// sync batch isn't guaranteed to arrive in strict chronological
+    /// order (the vendor's own scheduled-history payload just lists a
+    /// day's samples), so blindly overwriting by processing order could
+    /// let an older reading clobber a newer, still-valid one that's
+    /// already showing. `>=` (not `>`) so same-timestamp updates (a live
+    /// tick re-affirming itself) still apply normally.
+    private func recordAsLatestIfNewer(_ measurement: WearableMeasurement) {
+        if let existing = latestMeasurements[measurement.metricType], existing.recordedAt > measurement.recordedAt {
+            return
+        }
+        latestMeasurements[measurement.metricType] = measurement
     }
 
     private func flushPendingMeasurements(deviceId: DeviceID) async {

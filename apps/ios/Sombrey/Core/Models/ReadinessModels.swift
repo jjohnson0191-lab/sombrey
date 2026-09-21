@@ -22,6 +22,12 @@ struct ReadinessResult {
     let score: Int?
     /// 0–1, reflects data sufficiency, not scientific confidence.
     let confidence: Double
+    /// e.g. "Ready" — a pure presentation label computed server-side by
+    /// `convex/readiness/scoring.ts`'s own `scoreBand()`, never a new
+    /// threshold invented on the client. nil alongside a nil `score`.
+    let scoreBand: String?
+    /// e.g. "High" — same idea, from `scoring.ts`'s `confidenceBand()`.
+    let confidenceBand: String
     let contributingFactors: [ContributingFactor]
     let missingInputs: [String]
     let calculatedAt: Date
@@ -49,6 +55,8 @@ struct ReadinessResultDTO: Decodable {
     let algorithmVersion: String
     let score: Double?
     let confidence: Double
+    let scoreBand: String?
+    let confidenceBand: String
     private let components: [ReadinessComponentDTO]
     let missingInputs: [String]
     let calculatedAt: Double
@@ -67,6 +75,8 @@ struct ReadinessResultDTO: Decodable {
             algorithmVersion: algorithmVersion,
             score: score.map { Int($0.rounded()) },
             confidence: confidence,
+            scoreBand: scoreBand,
+            confidenceBand: confidenceBand,
             contributingFactors: factors,
             missingInputs: missingInputs,
             calculatedAt: Date(timeIntervalSince1970: calculatedAt / 1000)

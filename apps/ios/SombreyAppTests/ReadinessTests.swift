@@ -19,6 +19,8 @@ struct ReadinessDecodingTests {
         "algorithmVersion": "v1",
         "score": 78.0,
         "confidence": 0.62,
+        "scoreBand": "Ready",
+        "confidenceBand": "Improving",
         "components": [
             {"metric": "sleep", "subScore": 88.0, "weight": 0.5, "confidence": 0.7, "description": "Sleep duration is strong"},
             {"metric": "cardiovascular", "subScore": 70.0, "weight": 0.5, "confidence": 0.5, "description": "Recovery trend is stable"},
@@ -34,6 +36,8 @@ struct ReadinessDecodingTests {
         #expect(dto.date == "2026-01-15")
         #expect(dto.algorithmVersion == "v1")
         #expect(dto.score == 78.0)
+        #expect(dto.scoreBand == "Ready")
+        #expect(dto.confidenceBand == "Improving")
     }
 
     @Test func mapsToRoundedIntScoreAndDropsExcludedComponentsFromFactors() throws {
@@ -49,11 +53,12 @@ struct ReadinessDecodingTests {
 
     @Test func nullScoreDecodesToNilNotZero() throws {
         let json = """
-        {"userId":"u","date":"2026-01-01","algorithmVersion":"v1","score":null,"confidence":0,"components":[],"missingInputs":["No data"],"calculatedAt":1000.0}
+        {"userId":"u","date":"2026-01-01","algorithmVersion":"v1","score":null,"confidence":0,"scoreBand":null,"confidenceBand":"Building baseline","components":[],"missingInputs":["No data"],"calculatedAt":1000.0}
         """.data(using: .utf8)!
         let dto = try JSONDecoder().decode(ReadinessResultDTO.self, from: json)
         let result = dto.toReadinessResult()
         #expect(result.score == nil)
+        #expect(result.scoreBand == nil)
     }
 }
 

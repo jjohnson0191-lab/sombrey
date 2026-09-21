@@ -528,7 +528,14 @@ final class QCBandSDKService: NSObject, QCBandService {
         }
     }
 
+    /// The single choke point every reading passes through — live
+    /// callbacks, on-demand results, and historical sync all funnel
+    /// here, so this is the one place a validity check protects the
+    /// whole pipeline (`WearableManager`, Convex persistence, graphs,
+    /// readiness) uniformly, rather than each call site needing its own
+    /// guard. See `isValid(metricType:value:)` for why.
     private func emit(deviceId: DeviceID, type: WearableMetricType, value: Double, unit: String, at date: Date) {
+        guard type.isPhysicallyPlausible(value) else { return }
         measurementContinuation?.yield(WearableMeasurement(deviceId: deviceId, metricType: type, value: value, unit: unit, recordedAt: date))
     }
 

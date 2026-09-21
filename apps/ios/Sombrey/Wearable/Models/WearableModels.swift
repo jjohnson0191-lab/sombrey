@@ -76,6 +76,35 @@ enum WearableMetricType: String {
     case batteryPct = "battery_pct"
     case hrv
     case stress
+
+    /// Whether `value` is even physically possible for this metric on a
+    /// living person wearing the band — the one shared validity check
+    /// every reading passes through before it's allowed to reach
+    /// `WearableManager`, a graph, Convex persistence, or the readiness
+    /// engine (`QCBandSDKService.emit`, `WearableManager.measureNow`).
+    ///
+    /// Neither vendor header (`QCTemperatureModel.h`, `QCSportModel.h`,
+    /// etc.) documents an explicit "no reading" sentinel constant, but a
+    /// scheduled/historical payload's zero-filled empty slots are
+    /// indistinguishable from a real reading of exactly 0 for several
+    /// metrics — and 0 is physically impossible for a living person on
+    /// every one of them, confirmed against a real device: skin
+    /// temperature briefly read 24.4°C, then a later array entry (a
+    /// zero-filled gap, not a new measurement) overwrote it with 0.0°C.
+    /// `emitHeartRate` already guarded against exactly this for heart
+    /// rate (`guard bpm > 0`); this generalizes that same, already-
+    /// established rule. Steps/calories/distance/battery are
+    /// deliberately exempt — 0 steps, 0 active calories, and 0% battery
+    /// are all real, legitimate states, never treated as invalid.
+    func isPhysicallyPlausible(_ value: Double) -> Bool {
+        switch self {
+        case .heartRate, .restingHeartRate, .spo2, .skinTemperature,
+             .bloodPressureSystolic, .bloodPressureDiastolic:
+            return value > 0
+        case .steps, .activeCalories, .distanceMeters, .batteryPct, .hrv, .stress:
+            return value >= 0
+        }
+    }
 }
 
 struct WearableMeasurement {

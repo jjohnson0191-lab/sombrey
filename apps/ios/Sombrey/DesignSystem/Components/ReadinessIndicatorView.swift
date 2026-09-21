@@ -43,7 +43,11 @@ struct ReadinessIndicatorView: View {
             }
             .studioReveal()
         } else if let result {
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 8) {
+                Text("READINESS")
+                    .font(StudioFont.body(11, weight: .semibold))
+                    .tracking(1.3)
+                    .foregroundStyle(softColor)
                 ZStack(alignment: .bottomTrailing) {
                     // The instrument-reading arc: a quiet stroke sized
                     // to `confidence`, revealed once, then still.
@@ -62,9 +66,14 @@ struct ReadinessIndicatorView: View {
                         }
                     HeroNumberText(text: "\(result.score!)", size: .lg, tone: tone == .paper ? .paper : .ink)
                 }
-                Text("READINESS")
-                    .font(StudioFont.body(11, weight: .semibold))
-                    .tracking(1.3)
+                if let band = result.scoreBand {
+                    Text(band.uppercased())
+                        .font(StudioFont.body(15, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundStyle(markColor)
+                }
+                Text("\(result.confidenceBand) confidence")
+                    .font(StudioFont.body(12))
                     .foregroundStyle(softColor)
                 if !result.contributingFactors.isEmpty {
                     VStack(alignment: .trailing, spacing: 2) {
@@ -77,7 +86,7 @@ struct ReadinessIndicatorView: View {
                     }
                     .padding(.top, 4)
                 }
-                Text("v\(result.algorithmVersion) · confidence \(Int((result.confidence * 100).rounded()))% · not a medical measurement")
+                Text("v\(result.algorithmVersion) · not a medical measurement")
                     .font(StudioFont.body(10))
                     .foregroundStyle(faintColor)
             }

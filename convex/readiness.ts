@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { ALGORITHM_VERSION, computeReadinessScore, deriveSleepSignal, type DailyAggregate } from "./readiness/scoring";
+import { ALGORITHM_VERSION, computeReadinessScore, deriveSleepSignal, scoreBand, confidenceBand, type DailyAggregate } from "./readiness/scoring";
 
 // Sombrey Readiness Score — see `readiness/scoring.ts` for the algorithm
 // itself and its documented scientific basis/limitations. This file only
@@ -85,17 +85,22 @@ export const computeAndStore = mutation({
     const hrReadingsByDay = new Map<string, { value: number; recordedAt: number }[]>();
     const spo2ByDay = new Map<string, number[]>();
     const tempByDay = new Map<string, number[]>();
+    // `value > 0` below: none of these three can legitimately read 0 on
+    // a living person wearing the band — a persisted 0 is a zero-filled
+    // "no reading" gap (the same class of sentinel `QCBandSDKService`
+    // now rejects at the source going forward), not a real measurement,
+    // and must never shape a baseline or the score itself.
     for (const m of measurements) {
       const dateStr = utcDay(m.recordedAt);
-      if (m.metricType === "heart_rate") {
+      if (m.metricType === "heart_rate" && m.value > 0) {
         const list = hrReadingsByDay.get(dateStr) ?? [];
         list.push({ value: m.value, recordedAt: m.recordedAt });
         hrReadingsByDay.set(dateStr, list);
-      } else if (m.metricType === "spo2") {
+      } else if (m.metricType === "spo2" && m.value > 0) {
         const list = spo2ByDay.get(dateStr) ?? [];
         list.push(m.value);
         spo2ByDay.set(dateStr, list);
-      } else if (m.metricType === "skin_temperature") {
+      } else if (m.metricType === "skin_temperature" && m.value > 0) {
         const list = tempByDay.get(dateStr) ?? [];
         list.push(m.value);
         tempByDay.set(dateStr, list);
@@ -169,15 +174,30 @@ export const computeAndStore = mutation({
   },
 });
 
+// `scoreBand`/`confidenceBand` are pure presentation labels already
+// defined and tested in `readiness/scoring.ts` — computed here on read,
+// never stored, so a future threshold tweak there applies retroactively
+// to old rows too. This does not change the score/confidence themselves
+// or how they're computed; it only surfaces an already-existing piece of
+// the algorithm's own output that no query exposed to the client before.
+function withBands<T extends { score?: number; confidence: number }>(row: T) {
+  return {
+    ...row,
+    scoreBand: row.score !== undefined ? scoreBand(row.score) : null,
+    confidenceBand: confidenceBand(row.confidence),
+  };
+}
+
 export const getLatest = query({
   args: {},
   handler: async (ctx) => {
     const user = await requireAuth(ctx);
-    return await ctx.db
+    const row = await ctx.db
       .query("readinessScores")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
       .order("desc")
       .first();
+    return row ? withBands(row) : null;
   },
 });
 
@@ -185,10 +205,11 @@ export const getHistory = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
-    return await ctx.db
+    const rows = await ctx.db
       .query("readinessScores")
       .withIndex("by_user_and_date", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(args.limit ?? 14);
+    return rows.map(withBands);
   },
 });

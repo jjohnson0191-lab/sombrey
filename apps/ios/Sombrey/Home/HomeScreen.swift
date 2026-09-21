@@ -1,24 +1,31 @@
 import SwiftUI
 
-/// Home — the daily Sombrey command center. Readiness remains the top
-/// visual moment, but Home no longer stops there: band connection state,
-/// today's real wearable metrics, sleep, training, and nutrition all get
-/// their own honest summary, with a short data-derived insight closing
-/// the screen. Ported behaviorally from
+/// Home — the daily Sombrey command center, hierarchy in strict order:
+/// Readiness (the dominant hero, the one thing that answers "how ready
+/// am I") → live Heart Rate/band connection → Today's Vitals → Sleep →
+/// Training → Nutrition → Today's Insight. Ported behaviorally from
 /// `apps/mobile/src/screens/HomeScreen.tsx` (not translated 1:1).
 ///
 /// Conceptual separation kept throughout this screen: band data (the
 /// wearable's own measurements) versus Sombrey intelligence
 /// (interpretation of that data, e.g. readiness, the daily insight). A
 /// section only ever renders a value that was actually synced/computed —
-/// no field here is ever fabricated or defaulted to zero.
+/// no field here is ever fabricated or defaulted to zero, and every
+/// measurement flowing in has already passed
+/// `WearableMetricType.isPhysicallyPlausible` at the source
+/// (`QCBandSDKService.emit`), so a sentinel/zero-filled reading (the
+/// class of bug that made temperature briefly flash 0.0°C on a real
+/// device) can never reach this screen.
 ///
 /// The readiness score comes from `readiness:getLatest` — a real,
 /// server-computed `ReadinessResult` (see `convex/readiness/scoring.ts`
-/// for the algorithm) — never fabricated locally. `ReadinessIndicatorView`
-/// itself already handles "not enough data yet" honestly when `score` is
-/// nil, so no separate loading/empty state is needed here, and this
-/// screen does not modify that component or the algorithm it reflects.
+/// for the algorithm, unchanged this pass) — never fabricated locally.
+/// `ReadinessIndicatorView` handles "not enough data yet" honestly when
+/// `score` is nil; this pass added its `scoreBand`/`confidenceBand`
+/// presentation labels (both pre-existing, tested functions in
+/// `scoring.ts`, just not previously exposed to the client) and gave it
+/// more staging here (`readinessHero`), but the component's own
+/// data/cold-start logic is unchanged.
 struct HomeScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
@@ -41,9 +48,9 @@ struct HomeScreen: View {
                     .padding(.top, 20)
                     .studioReveal(index: 0)
 
-                ReadinessIndicatorView(result: readiness.value.flatMap { $0 }?.toReadinessResult(), tone: .paper)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, 24)
+                readinessHero
+                    .padding(.top, 20)
+                    .padding(.bottom, 8)
                     .studioReveal(index: 1)
 
                 if let error = appState.userLoadError {
@@ -53,11 +60,11 @@ struct HomeScreen: View {
                         .padding(.top, 16)
                 }
 
-                bandStatusCard
-                    .padding(.top, 28)
+                liveHeartRateCard
+                    .padding(.top, 24)
                     .studioReveal(index: 2)
 
-                metricsCard
+                vitalsCard
                     .padding(.top, 16)
                     .studioReveal(index: 3)
 
@@ -140,55 +147,79 @@ struct HomeScreen: View {
         return "Good morning"
     }
 
-    // MARK: - Sombrey Band status
+    // MARK: - Readiness hero
 
-    /// Prominent, tappable — distinct from the small header badge above,
-    /// which stays as an ambient glance indicator. Tapping when nothing
-    /// is paired opens the same real pairing flow Settings uses; tapping
-    /// once paired hands off to Settings' own Wearable/Band section,
-    /// rather than a second Bluetooth implementation living here.
-    private var bandStatusCard: some View {
+    /// The central Sombrey instrument reading — everything below it is
+    /// subordinate. `ReadinessIndicatorView` itself is untouched in
+    /// structure (still the same real `readiness:getLatest` data,
+    /// contributing-factor logic, and cold-start honesty); this wrapper
+    /// only adds the physical-instrument staging around it: a restrained
+    /// radial backlight (the same "one panel lit from within" language
+    /// `BandPairingView`'s mark already uses, not a new visual idiom)
+    /// and real breathing room, so it reads as the dominant element even
+    /// with six more sections following it.
+    private var readinessHero: some View {
+        ReadinessIndicatorView(result: readiness.value.flatMap { $0 }?.toReadinessResult(), tone: .paper)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.vertical, 20)
+            .background {
+                RadialGradient(
+                    colors: [StudioColor.env2.opacity(0.30), .clear],
+                    center: UnitPoint(x: 0.86, y: 0.5), startRadius: 0, endRadius: 220
+                )
+                .allowsHitTesting(false)
+            }
+    }
+
+    // MARK: - Live heart rate / band connection
+
+    private static let liveStaleThreshold: TimeInterval = 45
+
+    /// Heart rate is now its own dominant section immediately beneath
+    /// Readiness — not a grid cell it competes with. Also carries the
+    /// band connection affordance (tap to pair when nothing's connected,
+    /// otherwise hands off to Settings' Wearable/Band section) so Home
+    /// still has exactly one place to connect/reconnect, matching the
+    /// previous `bandStatusCard`'s behavior, just recomposed here.
+    private var liveHeartRateCard: some View {
         Button {
             if wearableManager.displayState == .notPaired {
                 showingBandPairing = true
+            } else if wearableManager.displayState == .connected {
+                showingVitals = true
             } else {
                 appState.selectedTab = .settings
             }
         } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("SOMBREY BAND")
-                        .font(StudioFont.body(11, weight: .semibold))
-                        .tracking(1.3)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(wearableManager.displayState == .connected ? StudioColor.accentInk : StudioColor.ink.opacity(0.25))
+                        .frame(width: 6, height: 6)
+                    Text(bandStatusText.uppercased())
+                        .font(StudioFont.body(10, weight: .semibold))
+                        .tracking(1.1)
                         .foregroundStyle(StudioColor.inkSoft)
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(wearableManager.displayState == .connected ? StudioColor.accentInk : StudioColor.ink.opacity(0.25))
-                            .frame(width: 8, height: 8)
-                        Text(bandStatusText)
-                            .font(StudioFont.body(16, weight: .medium))
-                            .foregroundStyle(StudioColor.ink)
+                    Spacer()
+                    if wearableManager.displayState == .connected, let battery = wearableManager.status?.batteryPct {
+                        Text("\(Int(battery.rounded()))%")
+                            .font(StudioFont.body(11, weight: .medium))
+                            .foregroundStyle(StudioColor.inkSoft)
                     }
-                    if wearableManager.displayState == .notPaired {
-                        Text("Connect your Sombrey Band to start collecting real data.")
-                            .font(StudioFont.body(12))
-                            .foregroundStyle(StudioColor.inkFaint)
-                    }
-                }
-                Spacer()
-                if wearableManager.displayState == .connected, let battery = wearableManager.status?.batteryPct {
-                    Text("\(Int(battery.rounded()))%")
-                        .font(StudioFont.body(20, weight: .semibold))
-                        .foregroundStyle(StudioColor.ink)
-                        .monospacedDigit()
-                } else if wearableManager.displayState == .notPaired {
-                    Text("Connect Band")
-                        .font(StudioFont.body(12, weight: .medium))
-                        .foregroundStyle(StudioColor.accentInk)
-                } else {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(StudioColor.inkFaint)
+                }
+
+                if wearableManager.displayState == .notPaired {
+                    Text("Connect your Sombrey Band")
+                        .font(StudioFont.body(18, weight: .medium))
+                        .foregroundStyle(StudioColor.ink)
+                    Text("Start collecting real heart rate, sleep, and activity data.")
+                        .font(StudioFont.body(12))
+                        .foregroundStyle(StudioColor.inkFaint)
+                } else {
+                    heartRateReadout
                 }
             }
         }
@@ -218,21 +249,105 @@ struct HomeScreen: View {
         }
     }
 
-    // MARK: - Today's metrics
+    /// Live BPM alongside today's resting HR — a genuinely different,
+    /// historically-derived number (the day's minimum heart-rate
+    /// reading), never just a copy of whatever the live value currently
+    /// reads. `TimelineView` gives an honest, continuously-updating
+    /// freshness readout and lets a live reading fall back to
+    /// "Measuring…" on its own once it's actually stale — never a BPM
+    /// frozen on screen well after the last real tick.
+    @ViewBuilder
+    private var heartRateReadout: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let secondsSinceReading = heartRate.map { context.date.timeIntervalSince($0.recordedAt) }
+            let isFresh = (secondsSinceReading ?? .infinity) < Self.liveStaleThreshold
+
+            HStack(alignment: .top, spacing: 28) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("HEART RATE")
+                        .font(StudioFont.body(10, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(StudioColor.inkSoft)
+                    if let live = heartRate, isFresh {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("\(Int(live.value.rounded()))")
+                                .font(StudioFont.hero(40, weight: .bold))
+                                .foregroundStyle(StudioColor.ink)
+                                .monospacedDigit()
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("BPM")
+                                    .font(StudioFont.body(11, weight: .semibold))
+                                    .foregroundStyle(StudioColor.inkSoft)
+                                Text("LIVE")
+                                    .font(StudioFont.body(10, weight: .semibold))
+                                    .foregroundStyle(StudioColor.accentInk)
+                            }
+                        }
+                        Text(Self.freshnessText(secondsSinceReading))
+                            .font(StudioFont.body(11))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    } else if wearableManager.displayState == .connected {
+                        Text("Measuring…")
+                            .font(StudioFont.body(16, weight: .medium))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    } else {
+                        Text("—")
+                            .font(StudioFont.hero(40, weight: .bold))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("RESTING")
+                        .font(StudioFont.body(10, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(StudioColor.inkSoft)
+                    if let resting = todayRestingHeartRate {
+                        Text("\(Int(resting.rounded()))")
+                            .font(StudioFont.body(22, weight: .semibold))
+                            .foregroundStyle(StudioColor.ink)
+                            .monospacedDigit()
+                        Text("BPM today")
+                            .font(StudioFont.body(11))
+                            .foregroundStyle(StudioColor.inkSoft)
+                    } else {
+                        Text("Building baseline")
+                            .font(StudioFont.body(13))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func freshnessText(_ seconds: TimeInterval?) -> String {
+        guard let seconds, seconds.isFinite else { return "" }
+        if seconds < 3 { return "Updated just now" }
+        return "Updated \(Int(seconds))s ago"
+    }
+
+    // MARK: - Today's vitals
 
     /// Tappable — opens Vitals, where every metric (and its history) can
     /// be inspected in depth. Home only ever shows a concise snapshot.
-    private var metricsCard: some View {
+    /// Heart rate lives in its own section above; this is everything
+    /// else that has real current data.
+    private var vitalsCard: some View {
         Button {
             showingVitals = true
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("TODAY'S METRICS")
+                    Text("TODAY'S VITALS")
                         .font(StudioFont.body(11, weight: .semibold))
                         .tracking(1.3)
                         .foregroundStyle(StudioColor.inkSoft)
                     Spacer()
+                    if let lastSync = wearableManager.lastSyncAt {
+                        Text("Synced \(Self.timeOnlyFormatter.string(from: lastSync))")
+                            .font(StudioFont.body(10))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11))
                         .foregroundStyle(StudioColor.inkFaint)
@@ -247,8 +362,6 @@ struct HomeScreen: View {
                         .font(StudioFont.body(13))
                         .foregroundStyle(StudioColor.inkFaint)
                 } else {
-                    heartRateRow
-
                     let columns = [GridItem(.flexible(), spacing: 20), GridItem(.flexible(), spacing: 20)]
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                         MetricView(label: "SpO2", value: metricText(.spo2, format: { "\(Int($0.rounded()))" }), unit: spo2 == nil ? nil : "%")
@@ -256,7 +369,7 @@ struct HomeScreen: View {
                         MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
                         MetricView(label: "Steps", value: metricText(.steps, format: { "\(Int($0.rounded()))" }), unit: nil)
                         MetricView(label: "Distance", value: metricText(.distanceMeters, format: { String(format: "%.1f", $0 / 1000) }), unit: distance == nil ? nil : "km")
-                        MetricView(label: "Calories", value: metricText(.activeCalories, format: { "\(Int($0.rounded()))" }), unit: activeCalories == nil ? nil : "kcal")
+                        MetricView(label: "Active Calories", value: metricText(.activeCalories, format: { "\(Int($0.rounded()))" }), unit: activeCalories == nil ? nil : "kcal")
                     }
                 }
             }
@@ -265,58 +378,11 @@ struct HomeScreen: View {
         .studioCard()
     }
 
-    /// Live BPM (real-time, requires the band to actually be streaming —
-    /// see `WearableManager`/`QCBandSDKService`'s real-time HR pipeline)
-    /// alongside today's resting HR — a genuinely different, historically-
-    /// derived number (the day's minimum heart-rate reading), never just
-    /// a copy of whatever the live value currently reads.
-    @ViewBuilder
-    private var heartRateRow: some View {
-        HStack(alignment: .top, spacing: 28) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("HEART RATE")
-                    .font(StudioFont.body(10, weight: .semibold))
-                    .tracking(1.1)
-                    .foregroundStyle(StudioColor.inkSoft)
-                if let live = heartRate {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(Int(live.value.rounded()))")
-                            .font(StudioFont.body(22, weight: .semibold))
-                            .foregroundStyle(StudioColor.ink)
-                            .monospacedDigit()
-                        Text("BPM · LIVE")
-                            .font(StudioFont.body(10, weight: .semibold))
-                            .foregroundStyle(StudioColor.accentInk)
-                    }
-                } else if wearableManager.displayState == .connected {
-                    Text("Measuring…")
-                        .font(StudioFont.body(13))
-                        .foregroundStyle(StudioColor.inkFaint)
-                } else {
-                    Text("—")
-                        .font(StudioFont.body(22, weight: .semibold))
-                        .foregroundStyle(StudioColor.inkFaint)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("RESTING HR")
-                    .font(StudioFont.body(10, weight: .semibold))
-                    .tracking(1.1)
-                    .foregroundStyle(StudioColor.inkSoft)
-                if let resting = todayRestingHeartRate {
-                    Text("\(Int(resting.rounded())) BPM")
-                        .font(StudioFont.body(22, weight: .semibold))
-                        .foregroundStyle(StudioColor.ink)
-                        .monospacedDigit()
-                } else {
-                    Text("Building baseline")
-                        .font(StudioFont.body(13))
-                        .foregroundStyle(StudioColor.inkFaint)
-                }
-            }
-        }
-    }
+    private static let timeOnlyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
 
     private var heartRate: WearableMeasurement? { wearableManager.latestMeasurements[.heartRate] }
     private var spo2: WearableMeasurement? { wearableManager.latestMeasurements[.spo2] }

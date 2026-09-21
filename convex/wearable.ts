@@ -165,6 +165,26 @@ export const getRecentMeasurements = query({
 // `by_user_metric_and_recordedAt`, so a range is always complete for the
 // metric actually asked for. Ascending order — chronological, ready for a
 // line chart's x-axis.
+// Metric-specific validity — a physically impossible sentinel (most
+// commonly a zero-filled "no reading for this slot" gap in a scheduled-
+// history payload) must never reach a graph, even if it was persisted
+// before the native client started rejecting these at the source
+// (`QCBandSDKService.emit`). Zero IS a legitimate reading for
+// steps/calories/distance/battery, so this is deliberately per-metric,
+// not a blanket "zero is invalid" rule.
+const metricsWhereZeroIsInvalid = new Set([
+  "heart_rate",
+  "resting_heart_rate",
+  "spo2",
+  "skin_temperature",
+  "blood_pressure_systolic",
+  "blood_pressure_diastolic",
+]);
+
+function isValidMeasurement(metricType: string, value: number): boolean {
+  return metricsWhereZeroIsInvalid.has(metricType) ? value > 0 : value >= 0;
+}
+
 export const getMeasurementsByRange = query({
   args: {
     metricType: metricTypeValidator,
@@ -173,12 +193,13 @@ export const getMeasurementsByRange = query({
   },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
-    return await ctx.db
+    const rows = await ctx.db
       .query("wearableMeasurements")
       .withIndex("by_user_metric_and_recordedAt", (q) =>
         q.eq("userId", user._id).eq("metricType", args.metricType).gte("recordedAt", args.sinceMs))
       .order("asc")
       .take(args.limit ?? 5000);
+    return rows.filter((r) => isValidMeasurement(r.metricType, r.value));
   },
 });
 
