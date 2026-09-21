@@ -39,6 +39,13 @@ final class WearableManager {
     /// Most recent reading per metric — what `HomeScreen`'s activity row
     /// reads for "— steps / — active cal / HR —" once real data exists.
     private(set) var latestMeasurements: [WearableMetricType: WearableMeasurement] = [:]
+    /// The on-demand metric a `measureNow(_:)` call is currently
+    /// mid-flight for, if any — `nil` the rest of the time. Doubles as
+    /// the single duplicate-request guard (a second tap while one is
+    /// already running is a no-op, never a second concurrent SDK
+    /// command) and as the UI's one source of truth for a "Measuring…"
+    /// state (see `VitalsScreen`'s blood-pressure section).
+    private(set) var activeOnDemandMeasurement: OnDemandMetric?
 
     /// The Sport+ session currently running on the band, if any — set by
     /// `startSportSession(type:)`, cleared by `stopSportSession()`.
@@ -394,10 +401,16 @@ final class WearableManager {
     /// A single user-initiated "measure now" reading — persists whatever
     /// values come back (never all four; the SDK returns one reading per
     /// metric) and updates `latestMeasurements` for immediate display.
+    /// Guarded by `activeOnDemandMeasurement`: a second call while one is
+    /// already in flight (for any metric — the physical band can only
+    /// run one measurement command at a time) is a no-op rather than a
+    /// second concurrent SDK command racing the first.
     @discardableResult
     func measureNow(_ metric: OnDemandMetric) async -> OnDemandMeasurementResult? {
-        guard let device = pairedDevice else { return nil }
+        guard let device = pairedDevice, activeOnDemandMeasurement == nil else { return nil }
         lastError = nil
+        activeOnDemandMeasurement = metric
+        defer { activeOnDemandMeasurement = nil }
         do {
             let result = try await service.measureNow(device.id, metric: metric)
             let now = Date()
@@ -411,10 +424,17 @@ final class WearableManager {
             if let temp = result.temperatureC {
                 readings.append(WearableMeasurement(deviceId: device.id, metricType: .skinTemperature, value: temp, unit: "°C", recordedAt: now))
             }
-            if let systolic = result.systolicMmHg {
+            // Systolic/diastolic are a pair — a lone half of a blood
+            // pressure reading (the SDK dropped or invalidated the
+            // other) isn't a meaningful, displayable measurement, so
+            // both are required and both must independently pass the
+            // same validity gate every other metric goes through before
+            // either is even considered, rather than letting one half
+            // silently persist without its pair.
+            if let systolic = result.systolicMmHg, let diastolic = result.diastolicMmHg,
+               WearableMetricType.bloodPressureSystolic.isPhysicallyPlausible(Double(systolic)),
+               WearableMetricType.bloodPressureDiastolic.isPhysicallyPlausible(Double(diastolic)) {
                 readings.append(WearableMeasurement(deviceId: device.id, metricType: .bloodPressureSystolic, value: Double(systolic), unit: "mmHg", recordedAt: now))
-            }
-            if let diastolic = result.diastolicMmHg {
                 readings.append(WearableMeasurement(deviceId: device.id, metricType: .bloodPressureDiastolic, value: Double(diastolic), unit: "mmHg", recordedAt: now))
             }
             let validReadings = readings.filter { $0.metricType.isPhysicallyPlausible($0.value) }
@@ -559,6 +579,23 @@ final class WearableManager {
             return
         }
         latestMeasurements[measurement.metricType] = measurement
+    }
+
+    /// The one accessor Home/Vitals use for the band's cumulative-day
+    /// counters (steps, active calories, distance) — `latestMeasurements`
+    /// itself is never cleared for these on disconnect (a same-day
+    /// partial total, e.g. synced at 8am and not since, is still a
+    /// genuine, legitimate reading to keep showing), so nothing else
+    /// stops a reading tagged with a *past* calendar day from sitting in
+    /// `latestMeasurements` indefinitely and being displayed as if it
+    /// were today's. Per-sample metrics (heart rate, SpO2, temperature,
+    /// blood pressure) intentionally keep using `latestMeasurements`
+    /// directly — those aren't the same "silently stale across a day
+    /// boundary" shape, so gating them here too is a call for a future,
+    /// separately-audited change, not this one.
+    func latestMeasurementForToday(_ type: WearableMetricType) -> WearableMeasurement? {
+        guard let measurement = latestMeasurements[type], measurement.isFromToday else { return nil }
+        return measurement
     }
 
     private func flushPendingMeasurements(deviceId: DeviceID) async {

@@ -93,15 +93,27 @@ enum WearableMetricType: String {
     /// zero-filled gap, not a new measurement) overwrote it with 0.0°C.
     /// `emitHeartRate` already guarded against exactly this for heart
     /// rate (`guard bpm > 0`); this generalizes that same, already-
-    /// established rule. Steps/calories/distance/battery are
-    /// deliberately exempt — 0 steps, 0 active calories, and 0% battery
-    /// are all real, legitimate states, never treated as invalid.
+    /// established rule. Steps/distance/battery remain exempt — 0 steps,
+    /// 0 meters, and 0% battery are all unambiguous, real, legitimate
+    /// states.
+    ///
+    /// Active calories is the one deliberate exception to "0 is a real
+    /// reading here": `QCSportModel.calories` (and the matching
+    /// `currentStepInfo` live-callback field) is a cumulative
+    /// since-midnight device counter with no documented distinction
+    /// between "band genuinely recorded zero effort today" and "the SDK
+    /// hasn't produced a real reading for today yet" — both surface as
+    /// the same `0`. Per explicit product decision, Sombrey never shows
+    /// a numeric `0 kcal`, since a user reading that value can't tell
+    /// those two states apart; the UI shows "—" (`WearableManager` /
+    /// `HomeScreen` / `VitalsScreen`) until a real, positive reading
+    /// exists for today instead.
     func isPhysicallyPlausible(_ value: Double) -> Bool {
         switch self {
         case .heartRate, .restingHeartRate, .spo2, .skinTemperature,
-             .bloodPressureSystolic, .bloodPressureDiastolic:
+             .bloodPressureSystolic, .bloodPressureDiastolic, .activeCalories:
             return value > 0
-        case .steps, .activeCalories, .distanceMeters, .batteryPct, .hrv, .stress:
+        case .steps, .distanceMeters, .batteryPct, .hrv, .stress:
             return value >= 0
         }
     }
@@ -113,6 +125,18 @@ struct WearableMeasurement {
     let value: Double
     let unit: String
     let recordedAt: Date
+
+    /// Whether `recordedAt` falls on today's calendar date, in the
+    /// device's local time zone. The one check that keeps a
+    /// cumulative-since-midnight device counter (steps/active
+    /// calories/distance, from `QCSportModel`'s daily summary) from
+    /// silently surviving into a new calendar day as if it were still
+    /// current — nothing elsewhere in `WearableManager` ever clears
+    /// these values on its own (unlike live heart rate, which is cleared
+    /// on disconnect), so a stale prior-day total would otherwise keep
+    /// showing as "today's" reading indefinitely. See
+    /// `WearableManager.latestMeasurementForToday(_:)`.
+    var isFromToday: Bool { Calendar.current.isDateInToday(recordedAt) }
 }
 
 struct SleepStage {

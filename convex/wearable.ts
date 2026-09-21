@@ -170,8 +170,18 @@ export const getRecentMeasurements = query({
 // history payload) must never reach a graph, even if it was persisted
 // before the native client started rejecting these at the source
 // (`QCBandSDKService.emit`). Zero IS a legitimate reading for
-// steps/calories/distance/battery, so this is deliberately per-metric,
-// not a blanket "zero is invalid" rule.
+// steps/distance/battery, so this is deliberately per-metric, not a
+// blanket "zero is invalid" rule.
+//
+// `active_calories` is the one addition to this set that isn't simply
+// "physically impossible at 0": the device's cumulative-since-midnight
+// calorie counter has no documented way to distinguish "genuinely zero
+// effort today" from "no real reading yet," so per explicit product
+// decision Sombrey never surfaces a bare `0` for it — matching
+// `WearableMetricType.isPhysicallyPlausible` on the native client, which
+// already rejects `0` for this metric at the source. Kept here too as a
+// second, independent gate for any row written before that client-side
+// rule existed.
 const metricsWhereZeroIsInvalid = new Set([
   "heart_rate",
   "resting_heart_rate",
@@ -179,6 +189,7 @@ const metricsWhereZeroIsInvalid = new Set([
   "skin_temperature",
   "blood_pressure_systolic",
   "blood_pressure_diastolic",
+  "active_calories",
 ]);
 
 function isValidMeasurement(metricType: string, value: number): boolean {

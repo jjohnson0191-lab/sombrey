@@ -16,11 +16,22 @@ struct VitalsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var todayHeartRate = ConvexQuery<[WearableMeasurementDTO]>()
     @State private var recentTemperature = ConvexQuery<[WearableMeasurementDTO]>()
     @State private var recentSleep = ConvexQuery<[SleepSessionSummaryDTO]>()
     @State private var recentSportSessions = ConvexQuery<[SportSessionSummaryDTO]>()
     @State private var recentWorkouts = ConvexQuery<[SombreyWorkoutSummaryDTO]>()
+    /// Set when a `measureNow(.bloodPressure)` call returns without a
+    /// complete systolic+diastolic pair — cleared the moment a new
+    /// attempt starts. Purely a local "show a retry hint" flag; the
+    /// actual in-flight/duplicate-prevention state lives on
+    /// `WearableManager.activeOnDemandMeasurement`, not here.
+    @State private var bpMeasurementFailed = false
+    /// Drives the measuring-state pulse — a genuinely live, in-progress
+    /// hardware operation, which is exactly what `StudioMotion.tick` is
+    /// reserved for (see its own doc comment).
+    @State private var bpMeasuringPulse = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -216,21 +227,12 @@ struct VitalsScreen: View {
 
     private var bloodPressureSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("BLOOD PRESSURE")
-            if let systolic = wearableManager.latestMeasurements[.bloodPressureSystolic],
-               let diastolic = wearableManager.latestMeasurements[.bloodPressureDiastolic] {
-                Text("\(Int(systolic.value.rounded()))/\(Int(diastolic.value.rounded()))")
-                    .font(StudioFont.hero(40, weight: .bold))
-                    .foregroundStyle(StudioColor.ink)
-                    .monospacedDigit()
-                Text("\(Self.dateTimeFormatter.string(from: systolic.recordedAt)) · wearable-estimated, not a diagnostic reading")
-                    .font(StudioFont.body(11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                Text("No recent measurement.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
+            HStack(alignment: .center) {
+                sectionHeader("BLOOD PRESSURE")
+                Spacer()
+                measureBPButton
             }
+            bloodPressureReadout
             VStack(alignment: .leading, spacing: 4) {
                 Text("Systolic").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
                 MetricHistoryChart(metricType: .bloodPressureSystolic, unit: "mmHg", valueFormatter: { "\(Int($0.rounded()))" })
@@ -243,15 +245,110 @@ struct VitalsScreen: View {
         .studioCard()
     }
 
+    /// The result/empty/failed state — kept separate from the in-progress
+    /// state below so only one of the two is ever on screen at once.
+    @ViewBuilder
+    private var bloodPressureReadout: some View {
+        if wearableManager.activeOnDemandMeasurement == .bloodPressure {
+            bloodPressureMeasuringView
+        } else if let systolic = wearableManager.latestMeasurements[.bloodPressureSystolic],
+                  let diastolic = wearableManager.latestMeasurements[.bloodPressureDiastolic] {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(Int(systolic.value.rounded()))/\(Int(diastolic.value.rounded()))")
+                    .font(StudioFont.hero(40, weight: .bold))
+                    .foregroundStyle(StudioColor.ink)
+                    .monospacedDigit()
+                Text("\(Self.dateTimeFormatter.string(from: systolic.recordedAt)) · band-estimated, not a diagnostic reading")
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
+        } else if bpMeasurementFailed {
+            Text("Measurement didn't complete — keep the band snug against your wrist, stay still, and try again.")
+                .font(StudioFont.body(13))
+                .foregroundStyle(StudioColor.inkFaint)
+        } else {
+            Text("No measurement yet.")
+                .font(StudioFont.body(13))
+                .foregroundStyle(StudioColor.inkFaint)
+        }
+    }
+
+    /// A genuinely live, in-progress hardware operation (the band is
+    /// actively taking a PPG reading right now) — a breathing dot, not a
+    /// generic spinner, mirroring the restraint of the live-HR "BPM ·
+    /// LIVE" treatment above rather than a borrowed loading affordance.
+    private var bloodPressureMeasuringView: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(StudioColor.accentInk)
+                .frame(width: 7, height: 7)
+                .opacity(bpMeasuringPulse ? 1 : 0.3)
+            Text("Measuring — keep still")
+                .font(StudioFont.body(16, weight: .medium))
+                .foregroundStyle(StudioColor.inkSoft)
+        }
+        .onAppear {
+            bpMeasuringPulse = false
+            guard !reduceMotion else { return }
+            withAnimation(StudioMotion.tick) { bpMeasuringPulse = true }
+        }
+        .onDisappear { bpMeasuringPulse = false }
+    }
+
+    private var measureBPButton: some View {
+        Button {
+            bpMeasurementFailed = false
+            Task {
+                let result = await wearableManager.measureNow(.bloodPressure)
+                if result?.systolicMmHg == nil || result?.diastolicMmHg == nil {
+                    bpMeasurementFailed = true
+                }
+            }
+        } label: {
+            Text(measureBPButtonLabel)
+        }
+        .buttonStyle(.outlineCTA)
+        .disabled(wearableManager.activeOnDemandMeasurement != nil || wearableManager.displayState != .connected)
+    }
+
+    private var measureBPButtonLabel: String {
+        if wearableManager.activeOnDemandMeasurement == .bloodPressure { return "Measuring…" }
+        switch wearableManager.displayState {
+        case .connected:
+            return wearableManager.latestMeasurements[.bloodPressureSystolic] == nil ? "Measure Now" : "Measure Again"
+        case .notPaired, .disconnected, .error, .unavailable:
+            return "Band not connected"
+        case .searching, .connecting, .reconnecting, .syncing:
+            // Genuinely transient — the button stays disabled (see
+            // `measureBPButton`) rather than inviting a tap that would
+            // race an in-flight `sync()`'s own BLE commands.
+            return "One moment…"
+        }
+    }
+
     // MARK: - Activity
+
+    // Steps/distance/active calories are the band's cumulative-since-
+    // midnight counters — day-scoped via `latestMeasurementForToday` so a
+    // total from a day the band was never re-synced can't silently keep
+    // displaying as "today's" (see that method's own doc comment on
+    // `WearableManager`).
+    private var stepsToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.steps) }
+    private var distanceToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.distanceMeters) }
+    private var activeCaloriesToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.activeCalories) }
 
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader("ACTIVITY")
             HStack(spacing: 24) {
-                MetricView(label: "Steps", value: activityText(.steps, format: { "\(Int($0.rounded()))" }), unit: nil)
-                MetricView(label: "Distance", value: activityText(.distanceMeters, format: { String(format: "%.1f", $0 / 1000) }), unit: wearableManager.latestMeasurements[.distanceMeters] == nil ? nil : "km")
-                MetricView(label: "Active Calories", value: activityText(.activeCalories, format: { "\(Int($0.rounded()))" }), unit: wearableManager.latestMeasurements[.activeCalories] == nil ? nil : "kcal")
+                MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
+                MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
+                MetricView(
+                    label: "Active Calories",
+                    value: activeCaloriesToday.map { "\(Int($0.value.rounded()))" } ?? "—",
+                    unit: activeCaloriesToday == nil ? nil : "kcal",
+                    caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"
+                )
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Steps").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
@@ -259,10 +356,6 @@ struct VitalsScreen: View {
             }
         }
         .studioCard()
-    }
-
-    private func activityText(_ type: WearableMetricType, format: (Double) -> String) -> String {
-        wearableManager.latestMeasurements[type].map { format($0.value) } ?? "—"
     }
 
     // MARK: - Sleep

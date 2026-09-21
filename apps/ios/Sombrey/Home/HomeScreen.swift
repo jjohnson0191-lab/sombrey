@@ -367,9 +367,14 @@ struct HomeScreen: View {
                         MetricView(label: "SpO2", value: metricText(.spo2, format: { "\(Int($0.rounded()))" }), unit: spo2 == nil ? nil : "%")
                         MetricView(label: "Temperature", value: metricText(.skinTemperature, format: { String(format: "%.1f", $0) }), unit: temperature == nil ? nil : "°C")
                         MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
-                        MetricView(label: "Steps", value: metricText(.steps, format: { "\(Int($0.rounded()))" }), unit: nil)
-                        MetricView(label: "Distance", value: metricText(.distanceMeters, format: { String(format: "%.1f", $0 / 1000) }), unit: distance == nil ? nil : "km")
-                        MetricView(label: "Active Calories", value: metricText(.activeCalories, format: { "\(Int($0.rounded()))" }), unit: activeCalories == nil ? nil : "kcal")
+                        MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
+                        MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
+                        MetricView(
+                            label: "Active Calories",
+                            value: activeCaloriesToday.map { "\(Int($0.value.rounded()))" } ?? "—",
+                            unit: activeCaloriesToday == nil ? nil : "kcal",
+                            caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"
+                        )
                     }
                 }
             }
@@ -387,8 +392,13 @@ struct HomeScreen: View {
     private var heartRate: WearableMeasurement? { wearableManager.latestMeasurements[.heartRate] }
     private var spo2: WearableMeasurement? { wearableManager.latestMeasurements[.spo2] }
     private var temperature: WearableMeasurement? { wearableManager.latestMeasurements[.skinTemperature] }
-    private var distance: WearableMeasurement? { wearableManager.latestMeasurements[.distanceMeters] }
-    private var activeCalories: WearableMeasurement? { wearableManager.latestMeasurements[.activeCalories] }
+    /// Steps/distance/active calories are the band's cumulative-since-
+    /// midnight counters — day-scoped via `latestMeasurementForToday` so
+    /// a total from a day the band was never re-synced can't silently
+    /// keep displaying as "today's" (see that method's own doc comment).
+    private var stepsToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.steps) }
+    private var distanceToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.distanceMeters) }
+    private var activeCaloriesToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.activeCalories) }
 
     /// Today's minimum real heart-rate reading — the same legitimate
     /// proxy `convex/readiness.ts`'s cardiovascular component already

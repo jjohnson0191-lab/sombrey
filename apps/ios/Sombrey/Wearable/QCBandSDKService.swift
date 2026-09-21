@@ -216,9 +216,22 @@ final class QCBandSDKService: NSObject, QCBandService {
         let now = Date()
 
         if let sport = try? await currentSport() {
-            emit(deviceId: deviceId, type: .steps, value: Double(sport.totalStepCount), unit: "steps", at: now)
-            emit(deviceId: deviceId, type: .activeCalories, value: sport.calories, unit: "kcal", at: now)
-            emit(deviceId: deviceId, type: .distanceMeters, value: Double(sport.distance), unit: "m", at: now)
+            // `getCurrentSportSucess` is documented (QCSDKCmdCreator.h)
+            // as returning "the summary statistics of the day" — a
+            // genuine device-reported cumulative-since-midnight total,
+            // not a fabricated or estimated value. But it must be tagged
+            // with the day it actually applies to, not the moment this
+            // sync happened to run: `sport.happenDate`, when the SDK
+            // populates it, is that day; falling back to `now` only when
+            // it's absent/unparseable preserves today's existing
+            // behavior rather than silently dropping the reading.
+            // `isFromToday` (used by every read site) is what actually
+            // keeps a stale day's total from displaying as current — see
+            // `WearableManager.latestMeasurementForToday(_:)`.
+            let sportDate = Self.sdkDateFormatter.date(from: sport.happenDate) ?? now
+            emit(deviceId: deviceId, type: .steps, value: Double(sport.totalStepCount), unit: "steps", at: sportDate)
+            emit(deviceId: deviceId, type: .activeCalories, value: sport.calories, unit: "kcal", at: sportDate)
+            emit(deviceId: deviceId, type: .distanceMeters, value: Double(sport.distance), unit: "m", at: sportDate)
             synced += 3
         } else {
             anyFailed = true
@@ -412,7 +425,24 @@ final class QCBandSDKService: NSObject, QCBandService {
         case .bodyTemperature:
             result.temperatureC = doubleValue(raw)
         case .bloodPressure:
-            if let dict = raw as? [String: Any] {
+            // The vendor demo (`QCBandSDKDemo/ViewController.m`) never
+            // exercises `startToMeasuringWithOperateType:` for BP
+            // specifically (its own `getBloodPressure` only demonstrates
+            // the scheduled/manual *history* APIs), so this exact
+            // completion shape isn't directly demonstrated there. But
+            // every one-shot measurement type the demo DOES show a result
+            // for (raw HR, three-value temperature) hands back the
+            // vendor's own model class, never a plain dictionary — and
+            // `QCBloodPressureModel` is that same vendor class used by
+            // every other BP API in this SDK (`QCSDKCmdCreator`'s
+            // schedule/manual/history calls). Casting to it first matches
+            // that established SDK idiom; the dictionary form is kept
+            // only as a documented fallback for a shape no known
+            // SDK/firmware combination has been confirmed to send.
+            if let model = raw as? QCBloodPressureModel {
+                result.systolicMmHg = Int(model.systolicPressure)
+                result.diastolicMmHg = Int(model.diastolicPressure)
+            } else if let dict = raw as? [String: Any] {
                 result.systolicMmHg = intValue(dict["sbp"])
                 result.diastolicMmHg = intValue(dict["dbp"])
             }
