@@ -38,12 +38,7 @@ struct WearableDiagnosticsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(runtime.discoveredDeviceLog) { device in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(device.name).font(.footnote.weight(.medium))
-                                Text("id=\(device.id) rssi=\(device.rssi.map(String.init) ?? "?") \(device.passedFilter ? "✓ passed filter" : "✗ \(device.filterReason ?? "filtered")")")
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .foregroundStyle(device.passedFilter ? .secondary : .red)
-                            }
+                            deviceRow(device)
                         }
                     }
                 }
@@ -174,6 +169,24 @@ struct WearableDiagnosticsView: View {
             Text(label).foregroundStyle(.secondary)
             Spacer()
             Text(value).font(.system(.footnote, design: .monospaced)).multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// Pulled out of the `ForEach` body and built from plain, pre-computed
+    /// `String`s rather than one compound interpolated expression — the
+    /// inline version failed a real Codemagic build ("the compiler is
+    /// unable to type-check this expression in reasonable time"), a
+    /// well-known Swift type-checker limit for deeply nested string
+    /// interpolation, not a logic bug.
+    private func deviceRow(_ device: WearableRuntimeDiagnostics.DiscoveredDeviceInfo) -> some View {
+        let rssiText = device.rssi.map(String.init) ?? "?"
+        let filterText = device.passedFilter ? "✓ passed filter" : "✗ \(device.filterReason ?? "filtered")"
+        let detailText = "id=\(device.id) rssi=\(rssiText) \(filterText)"
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(device.name).font(.footnote.weight(.medium))
+            Text(detailText)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(device.passedFilter ? .secondary : .red)
         }
     }
 
