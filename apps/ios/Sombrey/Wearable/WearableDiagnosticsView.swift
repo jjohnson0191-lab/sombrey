@@ -186,7 +186,7 @@ struct WearableDiagnosticsView: View {
             Text(device.name).font(.footnote.weight(.medium))
             Text(detailText)
                 .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(device.passedFilter ? .secondary : .red)
+                .foregroundStyle(device.passedFilter ? Color.secondary : Color.red)
         }
     }
 
