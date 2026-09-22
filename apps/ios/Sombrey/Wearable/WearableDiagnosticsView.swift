@@ -23,7 +23,37 @@ struct WearableDiagnosticsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Bluetooth / Connection") {
+                Section("Bluetooth") {
+                    diagnosticRow("Authorization / state", runtime.bluetoothAuthorization)
+                    diagnosticRow("Powered on", runtime.bluetoothPoweredOn.map(String.init) ?? "unknown")
+                }
+                Section("Discovery (BLE scan)") {
+                    diagnosticRow("Started / stopped", "\(runtime.discoveryStartedAt.map(Self.timeString) ?? "never") / \(runtime.discoveryStoppedAt.map(Self.timeString) ?? "never")")
+                    diagnosticRow("Duration", runtime.discoveryDuration.map { String(format: "%.1fs", $0) } ?? "—")
+                    diagnosticRow("Devices matching filter", "\(runtime.sdkDiscoveryDeviceCount)")
+                    diagnosticRow("Filter criteria", "peripheral.name non-nil and non-empty")
+                    if runtime.discoveredDeviceLog.isEmpty {
+                        Text("No peripherals seen this session (CoreBluetooth callback never fired, or no scan has run yet).")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(runtime.discoveredDeviceLog) { device in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(device.name).font(.footnote.weight(.medium))
+                                Text("id=\(device.id) rssi=\(device.rssi.map(String.init) ?? "?") \(device.passedFilter ? "✓ passed filter" : "✗ \(device.filterReason ?? "filtered")")")
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(device.passedFilter ? .secondary : .red)
+                            }
+                        }
+                    }
+                }
+                Section("Pairing") {
+                    diagnosticRow("Attempt started", runtime.pairingAttemptStartedAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Selected device", runtime.pairingSelectedDeviceId ?? "none")
+                    diagnosticRow("Result", runtime.pairingResult ?? "none this session")
+                    diagnosticRow("Error detail", runtime.pairingErrorDetail ?? "none")
+                }
+                Section("Connection") {
                     diagnosticRow("Paired device", wearableManager.pairedDevice != nil ? wearableManager.pairedDevice!.id : "none")
                     diagnosticRow("Device name", runtime.currentDeviceName ?? "unknown")
                     diagnosticRow("Connection state", "\(wearableManager.displayState)")
@@ -33,6 +63,11 @@ struct WearableDiagnosticsView: View {
                     diagnosticRow("Last disconnected at", runtime.lastDisconnectedAt.map(Self.timeString) ?? "never")
                     diagnosticRow("Last successful connection", runtime.lastSuccessfulConnectionAt.map(Self.timeString) ?? "never")
                     diagnosticRow("Reconnect attempts", "\(runtime.reconnectAttemptCount) (success \(runtime.reconnectSuccessCount) / failure \(runtime.reconnectFailureCount))")
+                    if wearableManager.pairedDevice != nil {
+                        Text("Sombrey believes a device IS paired (pairedDeviceID set). If you're seeing the scan/pairing screen instead of a reconnect option, that's a UI-state mismatch worth reporting.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 Section("Band capabilities (from setTime:)") {
                     if wearableManager.bandCapabilities.isEmpty {

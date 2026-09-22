@@ -82,6 +82,87 @@ final class WearableRuntimeDiagnostics {
         log("reconnect: \(success ? "succeeded" : "failed") \(error.map { "(\($0))" } ?? "")")
     }
 
+    // MARK: - Bluetooth authorization / power state
+
+    private(set) var bluetoothAuthorization: String = "unknown"
+    private(set) var bluetoothPoweredOn: Bool?
+
+    /// `state` is CoreBluetooth's own `CBManagerState.rawValue` description
+    /// (e.g. "poweredOn", "unauthorized") — never inferred, always exactly
+    /// what `centralManagerDidUpdateState` reported.
+    func recordBluetoothState(_ state: String, poweredOn: Bool) {
+        bluetoothAuthorization = state
+        bluetoothPoweredOn = poweredOn
+        log("bluetooth: state=\(state) poweredOn=\(poweredOn)")
+    }
+
+    // MARK: - Discovery (BLE scan)
+
+    struct DiscoveredDeviceInfo: Identifiable {
+        let id: String
+        let name: String
+        let rssi: Int?
+        let passedFilter: Bool
+        let filterReason: String?
+        let firstSeenAt: Date
+        var lastSeenAt: Date
+    }
+    private(set) var discoveryStartedAt: Date?
+    private(set) var discoveryStoppedAt: Date?
+    private(set) var discoveryDuration: TimeInterval?
+    private(set) var discoveredDeviceLog: [DiscoveredDeviceInfo] = []
+    private(set) var sdkDiscoveryDeviceCount = 0
+
+    func recordDiscoveryStarted() {
+        discoveryStartedAt = Date()
+        discoveryStoppedAt = nil
+        discoveredDeviceLog.removeAll()
+        log("discovery: started")
+    }
+
+    func recordDiscoveryStopped(deviceCount: Int) {
+        discoveryStoppedAt = Date()
+        discoveryDuration = discoveryStartedAt.map { discoveryStoppedAt!.timeIntervalSince($0) }
+        sdkDiscoveryDeviceCount = deviceCount
+        log("discovery: stopped duration=\(discoveryDuration.map { String(format: "%.1fs", $0) } ?? "?") devices=\(deviceCount)")
+    }
+
+    /// Records every raw `centralManager(_:didDiscover:...)` callback,
+    /// even ones Sombrey's own filter (currently: `peripheral.name` must
+    /// be non-nil and non-empty — no service-UUID or name-content filter
+    /// exists) rejects — so "CoreBluetooth never saw the band at all"
+    /// can be told apart from "it was seen and filtered out."
+    func recordDiscoveredPeripheral(id: String, name: String?, rssi: Int?, passedFilter: Bool, filterReason: String?) {
+        let now = Date()
+        if let idx = discoveredDeviceLog.firstIndex(where: { $0.id == id }) {
+            discoveredDeviceLog[idx].lastSeenAt = now
+        } else {
+            discoveredDeviceLog.append(DiscoveredDeviceInfo(id: id, name: name ?? "(no name)", rssi: rssi, passedFilter: passedFilter, filterReason: filterReason, firstSeenAt: now, lastSeenAt: now))
+            log("discovery: peripheral id=\(id) name=\(name ?? "nil") rssi=\(rssi.map(String.init) ?? "?") passedFilter=\(passedFilter) \(filterReason.map { "reason=\($0)" } ?? "")")
+        }
+    }
+
+    // MARK: - Pairing
+
+    private(set) var pairingAttemptStartedAt: Date?
+    private(set) var pairingSelectedDeviceId: String?
+    private(set) var pairingResult: String?
+    private(set) var pairingErrorDetail: String?
+
+    func recordPairingAttempt(deviceId: String) {
+        pairingAttemptStartedAt = Date()
+        pairingSelectedDeviceId = deviceId
+        pairingResult = nil
+        pairingErrorDetail = nil
+        log("pairing: attempt started for \(deviceId)")
+    }
+
+    func recordPairingResult(success: Bool, error: String? = nil) {
+        pairingResult = success ? "success" : "failed"
+        pairingErrorDetail = error
+        log("pairing: \(success ? "succeeded" : "failed") \(error.map { "(\($0))" } ?? "")")
+    }
+
     func recordDeviceName(_ name: String?) {
         currentDeviceName = name
     }
@@ -342,6 +423,29 @@ final class WearableRuntimeDiagnostics {
         lines.append("  lastDisconnectedAt: \(fmt(lastDisconnectedAt))")
         lines.append("  lastSuccessfulConnectionAt: \(fmt(lastSuccessfulConnectionAt))")
         lines.append("  reconnectAttempts: \(reconnectAttemptCount) (success=\(reconnectSuccessCount) failure=\(reconnectFailureCount))")
+        lines.append("")
+        lines.append("BLUETOOTH")
+        lines.append("  authorization/state: \(bluetoothAuthorization)")
+        lines.append("  poweredOn: \(bluetoothPoweredOn.map(String.init) ?? "unknown")")
+        lines.append("")
+        lines.append("DISCOVERY")
+        lines.append("  started: \(fmt(discoveryStartedAt))  stopped: \(fmt(discoveryStoppedAt))")
+        lines.append("  duration: \(discoveryDuration.map { String(format: "%.1fs", $0) } ?? "—")")
+        lines.append("  sdkDeviceCount (raw CoreBluetooth callbacks): \(sdkDiscoveryDeviceCount)")
+        lines.append("  filtering criteria: peripheral.name must be non-nil and non-empty (no service-UUID or name-content filter)")
+        if discoveredDeviceLog.isEmpty {
+            lines.append("  no peripherals seen this session")
+        } else {
+            for d in discoveredDeviceLog {
+                lines.append("  - id=\(d.id) name=\(d.name) rssi=\(d.rssi.map(String.init) ?? "?") passedFilter=\(d.passedFilter) \(d.filterReason.map { "reason=\($0)" } ?? "") firstSeen=\(fmt(d.firstSeenAt)) lastSeen=\(fmt(d.lastSeenAt))")
+            }
+        }
+        lines.append("")
+        lines.append("PAIRING")
+        lines.append("  attemptStartedAt: \(fmt(pairingAttemptStartedAt))")
+        lines.append("  selectedDeviceId: \(pairingSelectedDeviceId ?? "none")")
+        lines.append("  result: \(pairingResult ?? "none this session")")
+        lines.append("  errorDetail: \(pairingErrorDetail ?? "none")")
         lines.append("")
         lines.append("SYNC")
         lines.append("  lastSuccessfulSyncAt: \(fmt(lastSuccessfulSyncAt))")

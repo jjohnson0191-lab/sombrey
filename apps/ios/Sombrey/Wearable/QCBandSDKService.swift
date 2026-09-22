@@ -95,10 +95,12 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     func scanForDevices() async throws -> [SombreyDevice] {
         guard centralManager.state == .poweredOn else {
+            WearableDiagnostics.error("scanForDevices: Bluetooth not powered on, state=\(centralManager.state.rawValue)")
             throw WearableSDKError.bluetoothUnavailable
         }
         stopScanIfNeeded()
         discoveredPeripherals.removeAll()
+        WearableRuntimeDiagnostics.shared.recordDiscoveryStarted()
 
         return await withCheckedContinuation { (continuation: CheckedContinuation<[SombreyDevice], Never>) in
             scanContinuation = continuation
@@ -125,14 +127,17 @@ final class QCBandSDKService: NSObject, QCBandService {
         let devices = discoveredPeripherals.map { id, peripheral in
             SombreyDevice(id: id, serial: "", model: peripheral.name ?? "Sombrey Band", nickname: peripheral.name, firmwareVersion: nil)
         }
+        WearableRuntimeDiagnostics.shared.recordDiscoveryStopped(deviceCount: devices.count)
         scanContinuation?.resume(returning: devices)
         scanContinuation = nil
     }
 
     func pairDevice(_ deviceId: DeviceID) async throws {
         guard let peripheral = discoveredPeripherals[deviceId] else {
+            WearableDiagnostics.error("pairDevice: \(deviceId) not in discoveredPeripherals (\(discoveredPeripherals.count) known)")
             throw WearableSDKError.deviceNotFound
         }
+        WearableRuntimeDiagnostics.shared.recordPairingAttempt(deviceId: deviceId)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             pairContinuation = continuation
             centralManager.connect(
@@ -923,8 +928,24 @@ final class QCBandSDKService: NSObject, QCBandService {
 // MARK: - CBCentralManagerDelegate
 
 extension QCBandSDKService: CBCentralManagerDelegate {
+    /// Never guessed — a direct, exhaustive mapping of Apple's own
+    /// `CBManagerState` cases, for the diagnostics report's "Bluetooth
+    /// authorization/state" line.
+    private static func stateDescription(_ state: CBManagerState) -> String {
+        switch state {
+        case .unknown: return "unknown"
+        case .resetting: return "resetting"
+        case .unsupported: return "unsupported"
+        case .unauthorized: return "unauthorized"
+        case .poweredOff: return "poweredOff"
+        case .poweredOn: return "poweredOn"
+        @unknown default: return "unrecognized(\(state.rawValue))"
+        }
+    }
+
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
+            WearableRuntimeDiagnostics.shared.recordBluetoothState(Self.stateDescription(central.state), poweredOn: central.state == .poweredOn)
             if central.state != .poweredOn {
                 self.stopScanIfNeeded()
                 self.scanContinuation?.resume(returning: [])
@@ -936,8 +957,21 @@ extension QCBandSDKService: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         Task { @MainActor in
-            guard let name = peripheral.name, !name.isEmpty else { return }
-            self.discoveredPeripherals[peripheral.identifier.uuidString] = peripheral
+            // The ONLY filter applied, currently: `peripheral.name` must
+            // be non-nil and non-empty. No service-UUID filter, no
+            // name-content/substring match against "Sombrey" — recorded
+            // either way so a physical test can see exactly what
+            // CoreBluetooth actually saw, not just what passed.
+            let id = peripheral.identifier.uuidString
+            let name = peripheral.name
+            let passedFilter = name != nil && !(name?.isEmpty ?? true)
+            WearableRuntimeDiagnostics.shared.recordDiscoveredPeripheral(
+                id: id, name: name, rssi: RSSI.intValue,
+                passedFilter: passedFilter,
+                filterReason: passedFilter ? nil : "peripheral.name is nil or empty"
+            )
+            guard passedFilter else { return }
+            self.discoveredPeripherals[id] = peripheral
         }
     }
 
@@ -950,9 +984,11 @@ extension QCBandSDKService: CBCentralManagerDelegate {
                         self.connectedPeripheral = peripheral
                         self.activeDeviceId = peripheral.identifier.uuidString
                         self.connectionStateContinuation?.yield(.connected)
+                        WearableRuntimeDiagnostics.shared.recordPairingResult(success: true)
                         self.pairContinuation?.resume()
                     } else {
                         self.connectionStateContinuation?.yield(.error)
+                        WearableRuntimeDiagnostics.shared.recordPairingResult(success: false, error: "QCSDKManager.add(peripheral:) reported failure")
                         self.pairContinuation?.resume(throwing: WearableSDKError.connectFailed)
                     }
                     self.pairContinuation = nil
@@ -964,6 +1000,7 @@ extension QCBandSDKService: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
             self.connectionStateContinuation?.yield(.error)
+            WearableRuntimeDiagnostics.shared.recordPairingResult(success: false, error: String(describing: error))
             self.pairContinuation?.resume(throwing: error ?? WearableSDKError.connectFailed)
             self.pairContinuation = nil
         }

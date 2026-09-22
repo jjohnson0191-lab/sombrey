@@ -20,6 +20,13 @@ struct SettingsScreen: View {
     @State private var selectedGoalCategory: GoalCategory = .generalFitness
     @State private var showingNotificationSettings = false
     @State private var showingVitals = false
+    /// Temporary, explicit entry point for this diagnostic build only —
+    /// the existing long-press-on-Home's-band-card path wasn't
+    /// reachable/discoverable for a physical-device test where the band
+    /// wasn't even paired (no band card to long-press). Remove or hide
+    /// again before consumer release; see `WearableDiagnosticsView`'s
+    /// own header for why this panel exists at all.
+    @State private var showingDeveloperDiagnostics = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -44,6 +51,7 @@ struct SettingsScreen: View {
                 goalSection
                 coachingModeSection
                 notificationsRow
+                developerDiagnosticsRow
 
                 Spacer()
 
@@ -81,6 +89,9 @@ struct SettingsScreen: View {
         .fullScreenCover(isPresented: $showingVitals) {
             VitalsScreen()
         }
+        .sheet(isPresented: $showingDeveloperDiagnostics) {
+            WearableDiagnosticsView()
+        }
     }
 
     private var vitalsRow: some View {
@@ -89,6 +100,27 @@ struct SettingsScreen: View {
         } label: {
             HStack {
                 Text("Vitals")
+                    .font(StudioFont.body(14, weight: .medium))
+                    .foregroundStyle(StudioColor.ink)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
+            .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Deliberately visible (not hidden/gestured) for this diagnostic
+    /// build only, per explicit instruction — clearly labeled so it
+    /// reads as a temporary developer surface, not a consumer feature.
+    private var developerDiagnosticsRow: some View {
+        Button {
+            showingDeveloperDiagnostics = true
+        } label: {
+            HStack {
+                Text("Developer Diagnostics")
                     .font(StudioFont.body(14, weight: .medium))
                     .foregroundStyle(StudioColor.ink)
                 Spacer()
