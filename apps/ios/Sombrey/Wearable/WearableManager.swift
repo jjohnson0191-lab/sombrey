@@ -211,6 +211,23 @@ final class WearableManager {
                     // Home/Vitals never shows a stale reading as current.
                     await self.service.stopLiveHeartRate(deviceId)
                     self.latestMeasurements[.heartRate] = nil
+                    // Steps/active calories/distance are the band's own
+                    // cumulative-since-midnight counters — genuinely
+                    // accurate for whatever period the band WAS worn
+                    // today, but Sombrey has no way to tell "still being
+                    // worn" from "was worn earlier, now off the wrist"
+                    // (the vendor SDK exposes no real-time wear/skin-
+                    // contact signal outside of sleep-stage data). Once
+                    // the connection itself is gone, though, that's a
+                    // fact Sombrey CAN verify — and showing a same-day
+                    // total with no live connection backing it is
+                    // exactly "a value even when not wearing the band."
+                    // Clearing here matches heart rate's own precedent
+                    // above; the next reconnect+sync legitimately
+                    // repopulates these from the band itself.
+                    self.latestMeasurements[.activeCalories] = nil
+                    self.latestMeasurements[.steps] = nil
+                    self.latestMeasurements[.distanceMeters] = nil
                 }
                 // Only notify on a real transition — never the initial
                 // state a fresh subscription happens to start on, and

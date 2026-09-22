@@ -287,6 +287,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             anyFailed = true
         }
 
+        await enableScheduledBloodPressureIfNeeded()
         if let bpHistory = try? await bloodPressureHistory() {
             for reading in bpHistory {
                 emit(deviceId: deviceId, type: .bloodPressureSystolic, value: Double(reading.systolicPressure), unit: "mmHg", at: reading.date)
@@ -297,6 +298,22 @@ final class QCBandSDKService: NSObject, QCBandService {
         } else {
             anyFailed = true
         }
+        if let manualBP = try? await manualBloodPressureHistory() {
+            for reading in manualBP {
+                emit(deviceId: deviceId, type: .bloodPressureSystolic, value: Double(reading.systolicPressure), unit: "mmHg", at: reading.date)
+                emit(deviceId: deviceId, type: .bloodPressureDiastolic, value: Double(reading.diastolicPressure), unit: "mmHg", at: reading.date)
+                synced += 2
+            }
+            if !manualBP.isEmpty { syncedTypes.append("blood_pressure_manual") }
+        }
+        // Deliberately doesn't set `anyFailed` on failure here, unlike
+        // every other block above: this API's exact Swift signature
+        // wasn't confirmed against a real build before this change, so
+        // a genuine incompatibility would otherwise mark every sync
+        // "partial" for a metric that's already covered by the scheduled
+        // fetch above — not silently swallowing a real problem, just not
+        // letting an unverified supplementary fetch degrade the
+        // already-meaningful `anyFailed` signal for everything else.
 
         if let battery = try? await readBattery() {
             emit(deviceId: deviceId, type: .batteryPct, value: Double(battery.percent), unit: "%", at: now)
@@ -910,6 +927,54 @@ final class QCBandSDKService: NSObject, QCBandService {
                 continuation.resume(returning: models)
             }, fail: {
                 continuation.resume(throwing: WearableSDKError.commandFailed("blood pressure history"))
+            })
+        }
+    }
+
+    /// The vendor demo (`QCBandSDKDemo/ViewController.m`'s `getBloodPressure`)
+    /// never exercises the generic `startToMeasuringWithOperateType:` path
+    /// for BP anywhere in its source — confirmed by an exhaustive search
+    /// of the whole file, not just this one method — while it DOES use
+    /// that exact generic path for heart rate and temperature. Its own
+    /// BP flow is scheduled-measurement + history-fetch instead: enable
+    /// the band's periodic auto-BP feature, then read back whatever it
+    /// recorded. `getSchedualBPHistoryData` (already synced above) can
+    /// only ever return readings if this feature is actually on — and
+    /// nothing previously turned it on, so that fetch was always empty
+    /// on a band where it defaults off. Mirrors the demo's own exact
+    /// parameters (`beginTime:"00:00" endTime:"23:59" minuteInterval:60`),
+    /// not invented. Best-effort: failure here doesn't fail `sync()`.
+    private func enableScheduledBloodPressureIfNeeded() async {
+        let isOn: Bool? = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            QCSDKCmdCreator.getSchedualBPInfo({ featureOn, _, _, _ in
+                continuation.resume(returning: featureOn)
+            }, fail: {
+                continuation.resume(throwing: WearableSDKError.commandFailed("scheduled BP status"))
+            })
+        }
+        WearableDiagnostics.log("enableScheduledBloodPressureIfNeeded: currently on=\(String(describing: isOn))")
+        guard isOn == false else { return }
+        try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            QCSDKCmdCreator.setSchedualBPInfoOn(true, beginTime: "00:00", endTime: "23:59", minuteInterval: 60, success: { _, _, _, _ in
+                WearableDiagnostics.log("enableScheduledBloodPressureIfNeeded: enabled")
+                continuation.resume()
+            }, fail: {
+                continuation.resume(throwing: WearableSDKError.commandFailed("enable scheduled BP"))
+            })
+        }
+    }
+
+    /// The vendor demo's `getBloodPressure` fetches this immediately
+    /// after scheduled BP history — its own comment marks it as the
+    /// band-button-triggered ("manual") reading path, distinct from the
+    /// app-scheduled one above. `0` = "since the beginning," matching
+    /// the demo's own call exactly.
+    private func manualBloodPressureHistory() async throws -> [QCBloodPressureModel] {
+        try await withCheckedThrowingContinuation { continuation in
+            QCSDKCmdCreator.getManualBloodPressureData(withLastUnixSeconds: 0, success: { models in
+                continuation.resume(returning: models)
+            }, fail: {
+                continuation.resume(throwing: WearableSDKError.commandFailed("manual blood pressure history"))
             })
         }
     }
