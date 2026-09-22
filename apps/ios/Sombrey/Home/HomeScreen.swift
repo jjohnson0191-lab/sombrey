@@ -369,8 +369,25 @@ struct HomeScreen: View {
                         MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
                         MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
                         MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
+                        // Labeled "Calories", not "Active Calories": the
+                        // source field (QCSportModel.calories, via
+                        // getCurrentSportSucess) is the vendor SDK's own
+                        // generic, unqualified "卡路里" (calories) — the
+                        // same field the SDK's daily-goal API
+                        // (getStepTargetInfo's calorieTarget) treats as a
+                        // general daily figure, not an exercise-only one.
+                        // The SDK's genuinely exercise-scoped calorie
+                        // concept lives in a completely different
+                        // structure (Sport+ session summaries,
+                        // OdmGeneralExerciseSummaryModel/
+                        // OdmSportPlusModels' own `calorie`), which this
+                        // tile doesn't read from. Calling it "Active"
+                        // claimed a precision the data doesn't support —
+                        // this fixes the label, not the value: still the
+                        // exact number the band reports, still never
+                        // estimated.
                         MetricView(
-                            label: "Active Calories",
+                            label: "Calories",
                             value: activeCaloriesToday.map { "\(Int($0.value.rounded()))" } ?? "—",
                             unit: activeCaloriesToday == nil ? nil : "kcal",
                             caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"

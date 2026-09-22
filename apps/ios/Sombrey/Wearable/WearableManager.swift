@@ -476,6 +476,16 @@ final class WearableManager {
         activeOnDemandMeasurement = metric
         defer { activeOnDemandMeasurement = nil }
         await service.stopLiveHeartRate(device.id)
+        // `stopLiveHeartRate` only submits the BLE "End" write — it
+        // doesn't wait for the band to actually process/release the PPG
+        // sensor before returning. Sending a new measurement command
+        // immediately afterward risks the band still being mid-teardown
+        // of the previous mode. A brief settling pause is a standard,
+        // low-risk BLE safeguard (not a confirmed fix for the BP report
+        // this mutual-exclusion was originally added for — that report
+        // persisted across the prior build with no delay at all, which
+        // is itself evidence worth logging, not hiding).
+        try? await Task.sleep(for: .milliseconds(400))
         defer {
             WearableDiagnostics.log("measureNow(\(metric.rawValue)): finished, resuming live HR")
             Task { await self.service.startLiveHeartRate(device.id) }

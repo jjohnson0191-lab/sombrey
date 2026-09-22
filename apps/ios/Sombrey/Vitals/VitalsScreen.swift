@@ -349,8 +349,11 @@ struct VitalsScreen: View {
             HStack(spacing: 24) {
                 MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
                 MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
+                // See HomeScreen's identical tile for why this is
+                // "Calories," not "Active Calories" — the vendor field
+                // is a generic daily figure, not an exercise-only one.
                 MetricView(
-                    label: "Active Calories",
+                    label: "Calories",
                     value: activeCaloriesToday.map { "\(Int($0.value.rounded()))" } ?? "—",
                     unit: activeCaloriesToday == nil ? nil : "kcal",
                     caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"
