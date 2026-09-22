@@ -133,6 +133,7 @@ final class WearableManager {
         do {
             try await service.pairDevice(device.id)
             pairedDevice = device
+            WearableRuntimeDiagnostics.shared.recordDeviceName(device.nickname ?? device.model)
             UserDefaults.standard.set(device.id, forKey: Self.lastDeviceIdKey)
             subscribeToMeasurements(deviceId: device.id)
             subscribeToConnectionState(deviceId: device.id)
@@ -152,6 +153,7 @@ final class WearableManager {
     func reconnect() async {
         guard let device = pairedDevice else { return }
         lastError = nil
+        WearableRuntimeDiagnostics.shared.recordReconnectAttempt()
         status = WearableDeviceStatus(deviceId: device.id, connectionState: .reconnecting, batteryPct: status?.batteryPct, lastSeenAt: nil)
         do {
             try await service.reconnectDevice(device.id)
@@ -159,10 +161,12 @@ final class WearableManager {
             subscribeToConnectionState(deviceId: device.id)
             await refreshStatus()
             await persistDeviceState(deviceId: device.id, model: nil, nickname: nil, connected: true, synced: false)
+            WearableRuntimeDiagnostics.shared.recordReconnectResult(success: true)
             await sync()
         } catch {
             status = WearableDeviceStatus(deviceId: device.id, connectionState: .disconnected, batteryPct: status?.batteryPct, lastSeenAt: nil)
             lastError = String(describing: error)
+            WearableRuntimeDiagnostics.shared.recordReconnectResult(success: false, error: String(describing: error))
         }
     }
 
@@ -187,6 +191,7 @@ final class WearableManager {
             for await state in self.service.connectionStateUpdates(for: deviceId) {
                 guard !Task.isCancelled else { return }
                 WearableDiagnostics.log("connectionStateUpdates: \(state.rawValue)")
+                WearableRuntimeDiagnostics.shared.recordConnectionState(state, deviceId: deviceId)
                 self.status = WearableDeviceStatus(
                     deviceId: deviceId,
                     connectionState: state,
@@ -479,6 +484,15 @@ final class WearableManager {
             // same validity gate every other metric goes through before
             // either is even considered, rather than letting one half
             // silently persist without its pair.
+            if metric == .bloodPressure {
+                let bothPresent = result.systolicMmHg != nil && result.diastolicMmHg != nil
+                let bothPlausible = result.systolicMmHg.map { WearableMetricType.bloodPressureSystolic.isPhysicallyPlausible(Double($0)) } ?? false
+                    && result.diastolicMmHg.map { WearableMetricType.bloodPressureDiastolic.isPhysicallyPlausible(Double($0)) } ?? false
+                WearableRuntimeDiagnostics.shared.recordBPValidation(
+                    passed: bothPresent && bothPlausible,
+                    reason: !bothPresent ? "missing systolic or diastolic" : (!bothPlausible ? "value out of physically plausible range" : "")
+                )
+            }
             if let systolic = result.systolicMmHg, let diastolic = result.diastolicMmHg,
                WearableMetricType.bloodPressureSystolic.isPhysicallyPlausible(Double(systolic)),
                WearableMetricType.bloodPressureDiastolic.isPhysicallyPlausible(Double(diastolic)) {
@@ -486,6 +500,7 @@ final class WearableManager {
                 readings.append(WearableMeasurement(deviceId: device.id, metricType: .bloodPressureDiastolic, value: Double(diastolic), unit: "mmHg", recordedAt: now))
             }
             let validReadings = readings.filter { $0.metricType.isPhysicallyPlausible($0.value) }
+            WearableRuntimeDiagnostics.shared.recordMeasurementsRejectedClientSide(readings.count - validReadings.count)
             for reading in validReadings { recordAsLatestIfNewer(reading) }
             if !validReadings.isEmpty {
                 await persistMeasurements(deviceId: device.id, measurements: validReadings)
@@ -661,6 +676,7 @@ final class WearableManager {
 
     private func persistMeasurements(deviceId: DeviceID, measurements: [WearableMeasurement]) async {
         guard !measurements.isEmpty else { return }
+        WearableRuntimeDiagnostics.shared.recordMeasurementsQueued(measurements.count)
         let payload: [ConvexEncodable?] = measurements.map { WearableMeasurementPayload($0) as ConvexEncodable? }
         do {
             try await ConvexClientProvider.client.mutation("wearable:recordMeasurements", with: [
@@ -668,12 +684,14 @@ final class WearableManager {
                 "measurements": payload,
             ])
             lastSuccessfulUploadAt = Date()
+            WearableRuntimeDiagnostics.shared.recordUploadResult(success: true, count: measurements.count)
         } catch {
             // Non-fatal: local state already reflects the reading, and
             // the next successful sync's batch will include it again if
             // it's still within the device's own history window.
             WearableDiagnostics.error("persistMeasurements: threw \(String(describing: error)) for \(measurements.count) reading(s)")
             lastError = String(describing: error)
+            WearableRuntimeDiagnostics.shared.recordUploadResult(success: false, count: measurements.count, error: String(describing: error))
         }
     }
 

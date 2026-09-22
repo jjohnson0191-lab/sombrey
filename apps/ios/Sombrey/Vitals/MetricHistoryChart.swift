@@ -91,11 +91,13 @@ struct MetricHistoryChart: View {
         .onChange(of: measurements.isLoading) { _, isLoading in
             guard !isLoading else { return }
             WearableDiagnostics.log("MetricHistoryChart(\(metricType.rawValue)): resolved, points=\(measurements.value?.count ?? -1) error=\(measurements.errorMessage ?? "nil")")
+            WearableRuntimeDiagnostics.shared.recordQueryResult(metricType: metricType.rawValue, recordCount: measurements.value?.count, error: measurements.errorMessage)
         }
     }
 
     private func subscribe() {
         WearableDiagnostics.log("MetricHistoryChart(\(metricType.rawValue)): subscribing, range=\(range.rawValue) sinceMs=\(range.sinceMs)")
+        WearableRuntimeDiagnostics.shared.recordQuery(metricType: metricType.rawValue, rangeDays: range.days)
         measurements.subscribe(to: "wearable:getMeasurementsByRange", with: [
             "metricType": metricType.rawValue,
             "sinceMs": range.sinceMs,

@@ -1,27 +1,38 @@
 import SwiftUI
+import UIKit
 
-/// Developer-only diagnostic panel for the live-HR/wearable pipeline —
-/// reached via a long-press on Home's Sombrey Band card, never a visible
-/// button, so a normal user won't stumble into it. Every line here is a
-/// direct, unmodified read of `WearableManager`'s real state (no
-/// separate "diagnostics" data path, so this can never show a fake
-/// "successful" state that disagrees with what the rest of the app
-/// actually sees) — built specifically to answer, from a physical
-/// device, exactly where the pipeline stops if live HR still doesn't
-/// appear: Bluetooth connection → HR subscription → HR callback →
-/// measurement received → published state.
+/// Developer-only diagnostic panel for the wearable pipeline — reached
+/// via a long-press on Home's Sombrey Band card, never a visible button,
+/// so a normal user won't stumble into it. Combines two sources, both
+/// direct, unmodified reads of real state (never a separate "diagnostics"
+/// data path that could disagree with what the rest of the app sees):
+/// `WearableManager`'s current published state, and `WearableRuntimeDiagnostics`'
+/// command/callback-level event history — added after a physical-device
+/// regression where live HR, BP, calories, and historical graphs all
+/// stopped working at once, specifically so the next physical test
+/// produces evidence instead of another guess. "Copy Report" exports
+/// everything below as plain text (no tokens/keys/credentials — only
+/// metric values, counts, and timestamps already visible elsewhere in
+/// the app) for sharing without needing Console.app.
 struct WearableDiagnosticsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(WearableManager.self) private var wearableManager
+    private var runtime: WearableRuntimeDiagnostics { WearableRuntimeDiagnostics.shared }
+    @State private var didCopy = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Bluetooth / Connection") {
                     diagnosticRow("Paired device", wearableManager.pairedDevice != nil ? wearableManager.pairedDevice!.id : "none")
+                    diagnosticRow("Device name", runtime.currentDeviceName ?? "unknown")
                     diagnosticRow("Connection state", "\(wearableManager.displayState)")
                     diagnosticRow("Battery received", wearableManager.status?.batteryPct.map { "\(Int($0.rounded()))%" } ?? "not yet")
                     diagnosticRow("Last seen", wearableManager.status?.lastSeenAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Last connected at", runtime.lastConnectedAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Last disconnected at", runtime.lastDisconnectedAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Last successful connection", runtime.lastSuccessfulConnectionAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Reconnect attempts", "\(runtime.reconnectAttemptCount) (success \(runtime.reconnectSuccessCount) / failure \(runtime.reconnectFailureCount))")
                 }
                 Section("Band capabilities (from setTime:)") {
                     if wearableManager.bandCapabilities.isEmpty {
@@ -34,46 +45,78 @@ struct WearableDiagnosticsView: View {
                         }
                     }
                 }
+                Section("Sync") {
+                    diagnosticRow("Last successful sync", runtime.lastSuccessfulSyncAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Last failed sync", runtime.lastFailedSyncAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Success / failure counts", "\(runtime.successfulSyncCount) / \(runtime.failedSyncCount)")
+                    diagnosticRow("Last sync duration", runtime.lastSyncDuration.map { String(format: "%.1fs", $0) } ?? "—")
+                    diagnosticRow("Last sync metric types", runtime.lastSyncMetricTypes.isEmpty ? "none" : runtime.lastSyncMetricTypes.joined(separator: ", "))
+                    diagnosticRow("Last sync error", runtime.lastSyncError ?? "none")
+                }
                 Section("Live heart rate") {
-                    diagnosticRow("HR callback subscribed", wearableManager.displayState == .connected ? "yes (started on connect)" : "no — not connected")
-                    diagnosticRow("Last HR received", wearableManager.latestMeasurements[.heartRate].map { "\(Int($0.value.rounded())) BPM" } ?? "none this session")
-                    diagnosticRow("Last HR timestamp", wearableManager.latestMeasurements[.heartRate].map { Self.timeString($0.recordedAt) } ?? "—")
+                    diagnosticRow("Stream active (Sombrey's belief)", runtime.hrStreamActive ? "yes" : "no")
+                    diagnosticRow("Start command sent", runtime.hrStartSentAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Last Hold sent", "\(runtime.hrLastHoldSentAt.map(Self.timeString) ?? "never") (count: \(runtime.hrHoldCount))")
+                    diagnosticRow("Stop command sent", runtime.hrStopSentAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Callbacks received", "\(runtime.hrCallbackCount)")
+                    diagnosticRow("Last callback", "\(runtime.hrLastCallbackAt.map(Self.timeString) ?? "never") raw=\(runtime.hrLastRawCallbackValue.map(String.init) ?? "—")")
+                    diagnosticRow("Last accepted BPM", wearableManager.latestMeasurements[.heartRate].map { "\(Int($0.value.rounded()))" } ?? "none this session")
+                    diagnosticRow("Last accepted timestamp", wearableManager.latestMeasurements[.heartRate].map { Self.timeString($0.recordedAt) } ?? "—")
                 }
                 Section("Blood pressure") {
+                    diagnosticRow("Capability", runtime.bpCapability.rawValue)
                     diagnosticRow("Measurement in progress", wearableManager.activeOnDemandMeasurement == .bloodPressure ? "yes" : "no")
-                    diagnosticRow("Unsupported by this band", wearableManager.lastMeasurementUnsupportedByDevice ? "yes" : "no")
+                    diagnosticRow("Command sent", runtime.bpCommandSentAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Callback received", runtime.bpCallbackAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Raw result type", runtime.bpRawResultType ?? "—")
+                    diagnosticRow("Parsed systolic/diastolic", "\(runtime.bpParsedSystolic.map(String.init) ?? "—") / \(runtime.bpParsedDiastolic.map(String.init) ?? "—")")
+                    diagnosticRow("Validation result", runtime.bpValidationResult ?? "—")
+                    diagnosticRow("Failure reason", runtime.bpFailureReason ?? "none")
                     if let systolic = wearableManager.latestMeasurements[.bloodPressureSystolic],
                        let diastolic = wearableManager.latestMeasurements[.bloodPressureDiastolic] {
-                        diagnosticRow("Last accepted result", "\(Int(systolic.value.rounded()))/\(Int(diastolic.value.rounded())) mmHg")
-                        diagnosticRow("Last result timestamp", Self.timeString(systolic.recordedAt))
+                        diagnosticRow("Last accepted result", "\(Int(systolic.value.rounded()))/\(Int(diastolic.value.rounded())) mmHg at \(Self.timeString(systolic.recordedAt))")
                     } else {
                         diagnosticRow("Last accepted result", "none this session")
                     }
                 }
-                Section("Active calories / Steps / Distance") {
-                    diagnosticRow("Last accepted calories", wearableManager.latestMeasurements[.activeCalories].map { "\(Int($0.value.rounded())) kcal" } ?? "none")
-                    diagnosticRow("Calories timestamp", wearableManager.latestMeasurements[.activeCalories].map { Self.timeString($0.recordedAt) } ?? "—")
-                    diagnosticRow("Counted as today?", wearableManager.latestMeasurementForToday(.activeCalories) != nil ? "yes" : "no")
-                    diagnosticRow("Last accepted steps", wearableManager.latestMeasurements[.steps].map { "\(Int($0.value.rounded()))" } ?? "none")
-                    diagnosticRow("Steps timestamp", wearableManager.latestMeasurements[.steps].map { Self.timeString($0.recordedAt) } ?? "—")
-                    diagnosticRow("Last accepted distance", wearableManager.latestMeasurements[.distanceMeters].map { "\(Int($0.value.rounded())) m" } ?? "none")
+                Section("Active calories / Steps / Distance (raw, pre-validation)") {
+                    diagnosticRow("Raw sport response at", runtime.lastRawSportResponseAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Raw calories", runtime.lastRawCalories.map { "\($0)" } ?? "none")
+                    diagnosticRow("Raw happenDate", runtime.lastRawHappenDate ?? "none")
+                    diagnosticRow("Raw steps / distance", "\(runtime.lastRawSteps.map(String.init) ?? "—") / \(runtime.lastRawDistance.map(String.init) ?? "—")")
+                    diagnosticRow("Accepted calories", wearableManager.latestMeasurements[.activeCalories].map { "\(Int($0.value.rounded())) kcal" } ?? "none")
+                    diagnosticRow("Calories counted as today?", wearableManager.latestMeasurementForToday(.activeCalories) != nil ? "yes" : "no")
+                    diagnosticRow("Accepted steps", wearableManager.latestMeasurements[.steps].map { "\(Int($0.value.rounded()))" } ?? "none")
                 }
                 Section("Temperature / SpO2") {
-                    diagnosticRow("Last temperature", wearableManager.latestMeasurements[.skinTemperature].map { String(format: "%.1f°C", $0.value) } ?? "none")
+                    diagnosticRow("Last temperature (raw / accepted)", "\(wearableManager.latestMeasurements[.skinTemperature].map { String(format: "%.1f°C", $0.value) } ?? "none")")
                     diagnosticRow("Temperature timestamp", wearableManager.latestMeasurements[.skinTemperature].map { Self.timeString($0.recordedAt) } ?? "—")
-                    diagnosticRow("Last SpO2", wearableManager.latestMeasurements[.spo2].map { "\(Int($0.value.rounded()))%" } ?? "none")
+                    diagnosticRow("Last SpO2 (raw / accepted)", "\(wearableManager.latestMeasurements[.spo2].map { "\(Int($0.value.rounded()))%" } ?? "none")")
                     diagnosticRow("SpO2 timestamp", wearableManager.latestMeasurements[.spo2].map { Self.timeString($0.recordedAt) } ?? "—")
                 }
-                Section("Sync / Convex") {
-                    diagnosticRow("Last historical sync", wearableManager.lastSyncAt.map(Self.timeString) ?? "never")
-                    diagnosticRow("Last sync result", wearableManager.lastSyncResult.map { "\($0.status) · \($0.recordsSynced) record(s)" } ?? "—")
-                    diagnosticRow("Measurements received (session)", "\(wearableManager.measurementsReceivedCount)")
-                    diagnosticRow("Last successful Convex upload", wearableManager.lastSuccessfulUploadAt.map(Self.timeString) ?? "never this session")
+                Section("Convex") {
+                    diagnosticRow("Last successful upload", runtime.lastSuccessfulUploadAt.map(Self.timeString) ?? "never this session")
+                    diagnosticRow("Last failed upload", "\(runtime.lastFailedUploadAt.map(Self.timeString) ?? "never") \(runtime.lastUploadError.map { "(\($0))" } ?? "")")
+                    diagnosticRow("Queued / persisted / client-rejected", "\(runtime.measurementsQueuedCount) / \(runtime.measurementsPersistedCount) / \(runtime.measurementsRejectedCount)")
+                    diagnosticRow("Last query", "\(runtime.lastQueryMetricType ?? "none") · \(runtime.lastQueryRecordCount.map(String.init) ?? "—") record(s)")
+                    diagnosticRow("Last query error", runtime.lastQueryError ?? "none")
                 }
                 Section("Last error") {
                     Text(wearableManager.lastError ?? "none")
                         .font(.system(.footnote, design: .monospaced))
                         .foregroundStyle(wearableManager.lastError == nil ? Color.secondary : Color.red)
+                }
+                Section {
+                    Button {
+                        UIPasteboard.general.string = runtime.generateReport()
+                        didCopy = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            didCopy = false
+                        }
+                    } label: {
+                        Text(didCopy ? "Copied ✓" : "Copy Full Diagnostic Report")
+                    }
                 }
                 Section {
                     Text("Full command/callback-level logs are also written to Console.app (subsystem \"com.sombrey.app\", category \"wearable\") when this device is connected to a Mac.")

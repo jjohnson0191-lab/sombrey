@@ -35,6 +35,7 @@
 		00000000000000000000005A /* MockQCBandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001A /* MockQCBandService.swift */; };
 		00000000000000000000005B /* QCBandSDKService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001B /* QCBandSDKService.swift */; };
 		0000000000000000000000F9 /* WearableDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F8 /* WearableDiagnostics.swift */; };
+		0000000000000000000000FB /* WearableRuntimeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000FA /* WearableRuntimeDiagnostics.swift */; };
 		00000000000000000000005C /* WearableModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001C /* WearableModels.swift */; };
 		00000000000000000000005D /* AuthenticatedRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001D /* AuthenticatedRootView.swift */; };
 		00000000000000000000005E /* ComingSoonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001E /* ComingSoonView.swift */; };
@@ -140,6 +141,7 @@
 		00000000000000000000001A /* MockQCBandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MockQCBandService.swift"; sourceTree = "<group>"; };
 		00000000000000000000001B /* QCBandSDKService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QCBandSDKService.swift"; sourceTree = "<group>"; };
 		0000000000000000000000F8 /* WearableDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableDiagnostics.swift"; sourceTree = "<group>"; };
+		0000000000000000000000FA /* WearableRuntimeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableRuntimeDiagnostics.swift"; sourceTree = "<group>"; };
 		00000000000000000000001C /* WearableModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableModels.swift"; sourceTree = "<group>"; };
 		00000000000000000000001D /* AuthenticatedRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AuthenticatedRootView.swift"; sourceTree = "<group>"; };
 		00000000000000000000001E /* ComingSoonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ComingSoonView.swift"; sourceTree = "<group>"; };
@@ -380,6 +382,7 @@
 			00000000000000000000001A /* MockQCBandService.swift */,
 			00000000000000000000001B /* QCBandSDKService.swift */,
 			0000000000000000000000F8 /* WearableDiagnostics.swift */,
+			0000000000000000000000FA /* WearableRuntimeDiagnostics.swift */,
 			0000000000000000000000C3 /* WearablePersistencePayloads.swift */,
 			0000000000000000000000D0 /* SombreySportType.swift */,
 			0000000000000000000000D2 /* GPSTracker.swift */,
@@ -764,6 +767,7 @@
 				00000000000000000000005A /* MockQCBandService.swift */,
 				00000000000000000000005B /* QCBandSDKService.swift */,
 				0000000000000000000000F9 /* WearableDiagnostics.swift */,
+				0000000000000000000000FB /* WearableRuntimeDiagnostics.swift */,
 				00000000000000000000005C /* WearableModels.swift */,
 				00000000000000000000005D /* AuthenticatedRootView.swift */,
 				00000000000000000000005E /* ComingSoonView.swift */,
@@ -897,7 +901,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -928,7 +932,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -953,7 +957,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -979,7 +983,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1001,7 +1005,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1026,7 +1030,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

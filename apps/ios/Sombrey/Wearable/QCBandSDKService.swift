@@ -214,10 +214,12 @@ final class QCBandSDKService: NSObject, QCBandService {
         guard connectedPeripheral?.identifier.uuidString == deviceId else {
             throw WearableSDKError.noConnectedDevice
         }
+        WearableRuntimeDiagnostics.shared.recordSyncStarted()
         try? await setDeviceTime()
 
         var synced = 0
         var anyFailed = false
+        var syncedTypes: [String] = []
         let now = Date()
 
         if let sport = try? await currentSport() {
@@ -226,7 +228,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             // evidence needed to tell apart "the band's own counter
             // isn't advancing" from "Sombrey is receiving updated data
             // but failing to display it."
-            WearableDiagnostics.log("sync: raw QCSportModel calories=\(sport.calories) totalStepCount=\(sport.totalStepCount) distance=\(sport.distance) happenDate=\(sport.happenDate)")
+            WearableRuntimeDiagnostics.shared.recordRawSportResponse(calories: sport.calories, steps: sport.totalStepCount, distance: sport.distance, happenDate: sport.happenDate)
             // `getCurrentSportSucess` is documented (QCSDKCmdCreator.h)
             // as returning "the summary statistics of the day" — a
             // genuine device-reported cumulative-since-midnight total,
@@ -244,14 +246,18 @@ final class QCBandSDKService: NSObject, QCBandService {
             emit(deviceId: deviceId, type: .activeCalories, value: sport.calories, unit: "kcal", at: sportDate)
             emit(deviceId: deviceId, type: .distanceMeters, value: Double(sport.distance), unit: "m", at: sportDate)
             synced += 3
+            syncedTypes.append(contentsOf: ["steps", "active_calories", "distance_meters"])
         } else {
             anyFailed = true
         }
 
         if let heartRateDays = try? await scheduledHeartRate(dayIndexes: Array(0...6)) {
+            var count = 0
             for day in heartRateDays {
-                synced += emitHeartRate(deviceId: deviceId, model: day)
+                count += emitHeartRate(deviceId: deviceId, model: day)
             }
+            synced += count
+            if count > 0 { syncedTypes.append("heart_rate") }
         } else {
             anyFailed = true
         }
@@ -261,6 +267,7 @@ final class QCBandSDKService: NSObject, QCBandService {
                 emit(deviceId: deviceId, type: .spo2, value: Double(reading.soa2), unit: "%", at: reading.date)
                 synced += 1
             }
+            if !spo2.isEmpty { syncedTypes.append("spo2") }
         } else {
             anyFailed = true
         }
@@ -270,6 +277,7 @@ final class QCBandSDKService: NSObject, QCBandService {
                 emit(deviceId: deviceId, type: .skinTemperature, value: Double(reading.temperature), unit: "°C", at: reading.time)
                 synced += 1
             }
+            if !temps.isEmpty { syncedTypes.append("skin_temperature") }
         } else {
             anyFailed = true
         }
@@ -280,6 +288,7 @@ final class QCBandSDKService: NSObject, QCBandService {
                 emit(deviceId: deviceId, type: .bloodPressureDiastolic, value: Double(reading.diastolicPressure), unit: "mmHg", at: reading.date)
                 synced += 2
             }
+            if !bpHistory.isEmpty { syncedTypes.append("blood_pressure") }
         } else {
             anyFailed = true
         }
@@ -287,10 +296,16 @@ final class QCBandSDKService: NSObject, QCBandService {
         if let battery = try? await readBattery() {
             emit(deviceId: deviceId, type: .batteryPct, value: Double(battery.percent), unit: "%", at: now)
             synced += 1
+            syncedTypes.append("battery_pct")
         } else {
             anyFailed = true
         }
 
+        WearableRuntimeDiagnostics.shared.recordSyncCompleted(
+            success: synced > 0,
+            metricTypes: syncedTypes,
+            error: anyFailed ? "One or more metrics weren't available from this band." : nil
+        )
         return WearableSyncResult(
             status: synced > 0 ? (anyFailed ? .partial : .success) : .failed,
             recordsSynced: synced,
@@ -406,9 +421,22 @@ final class QCBandSDKService: NSObject, QCBandService {
         // report the flag at all) never blocks the attempt. This never
         // fabricates a "not supported" verdict; it only ever repeats
         // what the band itself already told us.
-        if let key = Self.capabilityKey(for: metric), capabilities[key] == false {
+        let capabilityKey = Self.capabilityKey(for: metric)
+        let isBP = metric == .bloodPressure
+        if let key = capabilityKey, capabilities[key] == false {
             WearableDiagnostics.error("measureNow(\(metric.rawValue)): band does not advertise \(key) support (capabilities=\(capabilities))")
+            if isBP { WearableRuntimeDiagnostics.shared.recordBPCapability(.unsupported) }
             throw WearableSDKError.unsupportedByDevice(metric.rawValue)
+        }
+        if isBP {
+            let status: WearableRuntimeDiagnostics.CapabilityStatus
+            if let key = capabilityKey {
+                status = capabilities[key] == true ? .supported : .unknown
+            } else {
+                status = .unknown
+            }
+            WearableRuntimeDiagnostics.shared.recordBPCapability(status)
+            WearableRuntimeDiagnostics.shared.recordBPCommandSent()
         }
         WearableDiagnostics.log("measureNow(\(metric.rawValue)): sending startToMeasuring, qcRawValue=\(metric.qcRawValue), capabilities=\(capabilities)")
         // Parsed inside the completion handler, before crossing the
@@ -433,10 +461,47 @@ final class QCBandSDKService: NSObject, QCBandService {
                     // the dynamic type of `result` — rather than
                     // continuing to assume `QCBloodPressureModel` (or
                     // the dictionary fallback) is correct.
-                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): completedHandle isSuccess=\(isSuccess) resultType=\(String(describing: type(of: result as Any))) resultIsNil=\(result == nil) error=\(error?.localizedDescription ?? "nil")")
+                    //
+                    // Every string here is extracted synchronously,
+                    // before crossing into the `Task { @MainActor in }`
+                    // below: this ObjC completion handler isn't provably
+                    // MainActor-isolated (unlike the vendor's live-push
+                    // callbacks elsewhere in this file, which are called
+                    // from inside `Task { @MainActor in }` closures
+                    // created directly in MainActor-isolated methods),
+                    // so `WearableRuntimeDiagnostics` (a `@MainActor`
+                    // type) can't be touched directly from here — and
+                    // `result` itself (`Any?`) can't cross that boundary
+                    // at all, same reasoning as `parseMeasurementResult`
+                    // being called synchronously below, not inside the
+                    // Task (confirmed by a real Codemagic build: "sending
+                    // 'result' risks causing data races").
+                    let rawType = String(describing: type(of: result as Any))
+                    let resultDescription = String(describing: result)
+                    let errorDescription = error?.localizedDescription
+                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): completedHandle isSuccess=\(isSuccess) resultType=\(rawType) resultIsNil=\(result == nil) error=\(errorDescription ?? "nil")")
+                    if isBP {
+                        Task { @MainActor in
+                            WearableRuntimeDiagnostics.shared.recordBPCallback(isSuccess: isSuccess, rawType: rawType, rawDescription: resultDescription, error: errorDescription)
+                        }
+                    }
                     if isSuccess {
-                        continuation.resume(returning: Self.parseMeasurementResult(result, metric: metric))
+                        let parsed = Self.parseMeasurementResult(result, metric: metric)
+                        if isBP {
+                            Task { @MainActor in
+                                WearableRuntimeDiagnostics.shared.recordBPParsed(systolic: parsed.systolicMmHg, diastolic: parsed.diastolicMmHg)
+                                if parsed.systolicMmHg == nil || parsed.diastolicMmHg == nil {
+                                    WearableRuntimeDiagnostics.shared.recordBPFailure("SDK reported success but result didn't parse into systolic+diastolic (rawType=\(rawType))")
+                                }
+                            }
+                        }
+                        continuation.resume(returning: parsed)
                     } else {
+                        if isBP {
+                            Task { @MainActor in
+                                WearableRuntimeDiagnostics.shared.recordBPFailure(errorDescription ?? "SDK completedHandle reported failure with no NSError")
+                            }
+                        }
                         continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
                     }
                 }
@@ -523,12 +588,14 @@ final class QCBandSDKService: NSObject, QCBandService {
             return
         }
         WearableDiagnostics.log("startLiveHeartRate: sending Start command")
+        WearableRuntimeDiagnostics.shared.recordHRStartCommand()
         QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdStart), finished: nil)
         liveHeartRateTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.realTimeHRHoldInterval))
                 guard !Task.isCancelled, let self else { return }
                 WearableDiagnostics.log("startLiveHeartRate: sending Hold command")
+                WearableRuntimeDiagnostics.shared.recordHRHoldCommand()
                 QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdHold), finished: nil)
             }
         }
@@ -540,6 +607,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             return
         }
         WearableDiagnostics.log("stopLiveHeartRate: sending End command")
+        WearableRuntimeDiagnostics.shared.recordHRStopCommand()
         liveHeartRateTask?.cancel()
         liveHeartRateTask = nil
         QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdEnd), finished: nil)
@@ -593,6 +661,7 @@ final class QCBandSDKService: NSObject, QCBandService {
                 // dropped) — the two look identical from the UI alone
                 // (both show live HR stuck on "Measuring…").
                 WearableDiagnostics.log("realTimeHeartRate callback fired: hr=\(hr)")
+                WearableRuntimeDiagnostics.shared.recordHRCallback(raw: Int(hr))
                 guard let self, let deviceId = self.activeDeviceId, hr > 0 else { return }
                 self.emit(deviceId: deviceId, type: .heartRate, value: Double(hr), unit: "bpm", at: Date())
             }
@@ -622,8 +691,10 @@ final class QCBandSDKService: NSObject, QCBandService {
     private func emit(deviceId: DeviceID, type: WearableMetricType, value: Double, unit: String, at date: Date) {
         guard type.isPhysicallyPlausible(value) else {
             WearableDiagnostics.log("emit: rejected \(type.rawValue)=\(value) as not physically plausible")
+            WearableRuntimeDiagnostics.shared.recordMetricEmit(type: type, value: value, accepted: false)
             return
         }
+        WearableRuntimeDiagnostics.shared.recordMetricEmit(type: type, value: value, accepted: true)
         measurementContinuation?.yield(WearableMeasurement(deviceId: deviceId, metricType: type, value: value, unit: unit, recordedAt: date))
     }
 
