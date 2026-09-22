@@ -36,6 +36,19 @@ struct WearableManagerTests {
         #expect(manager.status == nil)
         #expect(manager.lastSyncResult == nil)
     }
+
+    /// `bandCapabilities` is a direct pass-through of
+    /// `QCBandService.lastKnownCapabilities` — added after a physical-
+    /// device regression investigation found Sombrey was discarding the
+    /// vendor SDK's `setTime:` feature-support flags entirely. No real
+    /// band has ever answered in a unit test, so this stays empty —
+    /// never fabricated, matching `MockQCBandService`'s own convention.
+    @Test func bandCapabilitiesIsEmptyRatherThanFabricatedWithoutARealBand() {
+        let manager = WearableManager(service: MockQCBandService())
+        #expect(manager.bandCapabilities.isEmpty)
+        #expect(manager.lastMeasurementUnsupportedByDevice == false)
+        #expect(manager.lastSuccessfulUploadAt == nil)
+    }
 }
 
 /// `MockQCBandService`'s own contract — the "explicit sample data, never

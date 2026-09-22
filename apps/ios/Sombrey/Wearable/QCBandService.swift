@@ -103,4 +103,13 @@ protocol QCBandService: AnyObject {
     func setTargets(_ deviceId: DeviceID, steps: Int?, sleepMinutes: Int?, activeCalories: Int?) async throws
     func vibrate(_ deviceId: DeviceID) async throws
     func findBand(_ deviceId: DeviceID) async throws
+
+    /// The band's own advertised feature-support flags (e.g.
+    /// `QCBandFeatureBloodPressure`), captured from the vendor SDK's
+    /// `setTime:success:` callback — per the vendor demo, every
+    /// feature-gated measurement checks this dictionary first rather
+    /// than assuming support. Empty until the first successful sync.
+    /// Developer-diagnostics only (`WearableDiagnosticsView`) — never
+    /// read by consumer-facing UI.
+    var lastKnownCapabilities: [String: Bool] { get }
 }

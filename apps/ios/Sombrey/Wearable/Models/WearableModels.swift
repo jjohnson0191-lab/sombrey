@@ -263,4 +263,9 @@ enum WearableSDKError: Error {
     /// The SDK's own completion handler reported failure with no
     /// `NSError` attached.
     case commandFailed(String)
+    /// The connected band's own `setTime:` feature list explicitly
+    /// reports this on-demand metric as unsupported — never inferred or
+    /// guessed, only ever thrown from a positive "false" flag the SDK
+    /// itself returned (see `QCBandSDKService.measureNow`).
+    case unsupportedByDevice(String)
 }

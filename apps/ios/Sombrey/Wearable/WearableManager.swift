@@ -46,6 +46,21 @@ final class WearableManager {
     /// command) and as the UI's one source of truth for a "Measuring…"
     /// state (see `VitalsScreen`'s blood-pressure section).
     private(set) var activeOnDemandMeasurement: OnDemandMetric?
+    /// Whether the most recent `measureNow(_:)` failure was because the
+    /// band itself reported this metric unsupported (`.unsupportedByDevice`)
+    /// rather than a transient/generic failure — lets the UI show an
+    /// honest "this band doesn't support X" instead of a retry prompt
+    /// that would just fail the same way again.
+    private(set) var lastMeasurementUnsupportedByDevice = false
+    /// The band's own advertised feature-support flags — see
+    /// `QCBandService.lastKnownCapabilities`.
+    var bandCapabilities: [String: Bool] { service.lastKnownCapabilities }
+    /// Wall-clock time of the most recent successful Convex write from
+    /// this session (a measurement batch or a device-state upsert) —
+    /// developer-diagnostics only (`WearableDiagnosticsView`), distinct
+    /// from `lastSyncAt` (which only reflects the band's own historical
+    /// `sync()`, not every incremental upload).
+    private(set) var lastSuccessfulUploadAt: Date?
 
     /// The Sport+ session currently running on the band, if any — set by
     /// `startSportSession(type:)`, cleared by `stopSportSession()`.
@@ -340,15 +355,25 @@ final class WearableManager {
 
         let liveUpdate = active.liveUpdate
         do {
-            try await ConvexClientProvider.client.mutation("sportPlusSessions:finishSession", with: [
+            // Same explicit-null-vs-omitted-key issue fixed in
+            // `persistDeviceState` above — these five fields are
+            // `v.optional(v.number())` on the Convex side, which rejects
+            // literal `null`. Previously sent as `nil` whenever no live
+            // Sport+ tick ever arrived before the session stopped,
+            // throwing and silently dropping the whole `finishSession`
+            // call (caught below).
+            var args: [String: ConvexEncodable?] = [
                 "sessionId": active.convexSessionId,
                 "endedAt": Date().timeIntervalSince1970 * 1000,
-                "durationSeconds": liveUpdate.map { Double($0.durationSeconds) },
-                "distanceMeters": liveUpdate.map { Double($0.distanceMeters) },
-                "calories": liveUpdate.map { Double($0.calories) },
-                "averageHeartRate": liveUpdate.map { Double($0.heartRate) },
-                "steps": liveUpdate.map { Double($0.steps) },
-            ])
+            ]
+            if let liveUpdate {
+                args["durationSeconds"] = Double(liveUpdate.durationSeconds)
+                args["distanceMeters"] = Double(liveUpdate.distanceMeters)
+                args["calories"] = Double(liveUpdate.calories)
+                args["averageHeartRate"] = Double(liveUpdate.heartRate)
+                args["steps"] = Double(liveUpdate.steps)
+            }
+            try await ConvexClientProvider.client.mutation("sportPlusSessions:finishSession", with: args)
         } catch {
             lastError = String(describing: error)
         }
@@ -425,6 +450,7 @@ final class WearableManager {
         }
         WearableDiagnostics.log("measureNow(\(metric.rawValue)): starting, pausing live HR first")
         lastError = nil
+        lastMeasurementUnsupportedByDevice = false
         activeOnDemandMeasurement = metric
         defer { activeOnDemandMeasurement = nil }
         await service.stopLiveHeartRate(device.id)
@@ -467,6 +493,9 @@ final class WearableManager {
             return result
         } catch {
             WearableDiagnostics.error("measureNow(\(metric.rawValue)): threw \(String(describing: error))")
+            if case WearableSDKError.unsupportedByDevice = error {
+                lastMeasurementUnsupportedByDevice = true
+            }
             lastError = String(describing: error)
             return nil
         }
@@ -638,24 +667,42 @@ final class WearableManager {
                 "deviceId": deviceId,
                 "measurements": payload,
             ])
+            lastSuccessfulUploadAt = Date()
         } catch {
             // Non-fatal: local state already reflects the reading, and
             // the next successful sync's batch will include it again if
             // it's still within the device's own history window.
+            WearableDiagnostics.error("persistMeasurements: threw \(String(describing: error)) for \(measurements.count) reading(s)")
             lastError = String(describing: error)
         }
     }
 
     private func persistDeviceState(deviceId: DeviceID, model: String?, nickname: String?, connected: Bool, synced: Bool) async {
         do {
-            try await ConvexClientProvider.client.mutation("wearable:upsertDevice", with: [
+            // Confirmed via a real production call (`npx convex run
+            // wearable:upsertDevice ... --prod`) that Convex's argument
+            // validator for `v.optional(v.string())` rejects an explicit
+            // JSON `null` outright (`ArgumentValidationError`) — it only
+            // accepts the field being omitted. Every call from `sync()`/
+            // `reconnect()` passes `model: nil, nickname: nil`, which
+            // silently threw here every time (caught below, only ever
+            // surfacing as `lastError`) — this is why `wearableDevices`
+            // was empty in production despite `wearableMeasurements`
+            // having real rows. Matches the existing, established
+            // pattern elsewhere in this codebase (see
+            // `MealScheduleView.save()`) for exactly this situation:
+            // only set a key when the value is actually present.
+            var args: [String: ConvexEncodable?] = [
                 "deviceId": deviceId,
-                "model": model,
-                "nickname": nickname,
                 "connected": connected,
                 "synced": synced,
-            ])
+            ]
+            if let model { args["model"] = model }
+            if let nickname { args["nickname"] = nickname }
+            try await ConvexClientProvider.client.mutation("wearable:upsertDevice", with: args)
+            lastSuccessfulUploadAt = Date()
         } catch {
+            WearableDiagnostics.error("persistDeviceState: threw \(String(describing: error))")
             lastError = String(describing: error)
         }
     }

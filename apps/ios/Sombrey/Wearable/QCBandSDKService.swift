@@ -48,6 +48,11 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// data (steps/battery ticks) has no device id of its own, so this is
     /// what tags those events for `measurements(for:)`.
     private var activeDeviceId: DeviceID?
+    /// The band's own feature-support flags, from the most recent
+    /// successful `setDeviceTime()` call. See `QCBandService`'s own doc
+    /// comment on `lastKnownCapabilities`.
+    private var capabilities: [String: Bool] = [:]
+    var lastKnownCapabilities: [String: Bool] { capabilities }
 
     private var scanContinuation: CheckedContinuation<[SombreyDevice], Never>?
     private var scanTimeoutTask: Task<Void, Never>?
@@ -216,6 +221,12 @@ final class QCBandSDKService: NSObject, QCBandService {
         let now = Date()
 
         if let sport = try? await currentSport() {
+            // Logged raw, before any parsing/transformation — this is
+            // exactly the "compare against the previous response"
+            // evidence needed to tell apart "the band's own counter
+            // isn't advancing" from "Sombrey is receiving updated data
+            // but failing to display it."
+            WearableDiagnostics.log("sync: raw QCSportModel calories=\(sport.calories) totalStepCount=\(sport.totalStepCount) distance=\(sport.distance) happenDate=\(sport.happenDate)")
             // `getCurrentSportSucess` is documented (QCSDKCmdCreator.h)
             // as returning "the summary statistics of the day" — a
             // genuine device-reported cumulative-since-midnight total,
@@ -389,7 +400,17 @@ final class QCBandSDKService: NSObject, QCBandService {
         guard let qcType = QCMeasuringType(rawValue: metric.qcRawValue) else {
             throw WearableSDKError.commandFailed("unsupported measurement type")
         }
-        WearableDiagnostics.log("measureNow(\(metric.rawValue)): sending startToMeasuring, qcRawValue=\(metric.qcRawValue)")
+        // Only blocks on POSITIVE evidence (the band's own `setTime:`
+        // feature list explicitly says this key is `false`) — an absent
+        // key (no sync has completed yet, or this SDK/firmware doesn't
+        // report the flag at all) never blocks the attempt. This never
+        // fabricates a "not supported" verdict; it only ever repeats
+        // what the band itself already told us.
+        if let key = Self.capabilityKey(for: metric), capabilities[key] == false {
+            WearableDiagnostics.error("measureNow(\(metric.rawValue)): band does not advertise \(key) support (capabilities=\(capabilities))")
+            throw WearableSDKError.unsupportedByDevice(metric.rawValue)
+        }
+        WearableDiagnostics.log("measureNow(\(metric.rawValue)): sending startToMeasuring, qcRawValue=\(metric.qcRawValue), capabilities=\(capabilities)")
         // Parsed inside the completion handler, before crossing the
         // continuation boundary: `Any?` (what the ObjC callback actually
         // hands back — an NSNumber or NSDictionary depending on metric)
@@ -542,8 +563,15 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     private func configureLiveCallbacks() {
         let manager = QCSDKManager.shareInstance()
-        manager.currentStepInfo = { [weak self] step, calorie, _ in
+        manager.currentStepInfo = { [weak self] step, calorie, distance in
             Task { @MainActor in
+                // Logged unconditionally, before the emit()/plausibility
+                // gate — this is the ONLY passive source of live
+                // calorie/step updates between explicit `sync()` calls;
+                // if this callback stops firing, calories/steps will
+                // display the last accepted value indefinitely, which
+                // looks identical to "stuck" from the UI alone.
+                WearableDiagnostics.log("currentStepInfo callback fired: step=\(step) calorie=\(calorie) distance=\(distance)")
                 guard let self, let deviceId = self.activeDeviceId else { return }
                 let now = Date()
                 self.emit(deviceId: deviceId, type: .steps, value: Double(step), unit: "steps", at: now)
@@ -705,13 +733,54 @@ final class QCBandSDKService: NSObject, QCBandService {
         }
     }
 
+    /// The vendor demo (`QCBandSDKDemo/ViewController.m`) gates every
+    /// feature-specific measurement (BP, SpO2, temperature, blood
+    /// glucose, "app manual" one-shot mode) behind the `featureList`
+    /// dictionary this call's success handler returns — e.g.
+    /// `getBloodPressure`'s own comment: "Some watches support it, and
+    /// setting the time will return the status of whether it is
+    /// supported." Sombrey previously discarded this dictionary
+    /// entirely; it's now captured into `capabilities` so `measureNow`
+    /// can tell "this band doesn't support X" apart from "the command
+    /// failed for some other reason" — see `capabilityKey(for:)`.
     private func setDeviceTime() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            QCSDKCmdCreator.setTime(Date(), success: { _ in
+            QCSDKCmdCreator.setTime(Date(), success: { [weak self] featureList in
+                self?.capabilities = Self.parseCapabilities(featureList)
+                WearableDiagnostics.log("setDeviceTime: capabilities=\(self?.capabilities ?? [:])")
                 continuation.resume()
             }, failed: {
+                WearableDiagnostics.error("setDeviceTime: failed")
                 continuation.resume(throwing: WearableSDKError.commandFailed("set device time"))
             })
+        }
+    }
+
+    private static func parseCapabilities(_ featureList: [AnyHashable: Any]) -> [String: Bool] {
+        var result: [String: Bool] = [:]
+        for (rawKey, rawValue) in featureList {
+            guard let key = rawKey as? String else { continue }
+            if let str = rawValue as? String {
+                result[key] = str == "1"
+            } else if let num = rawValue as? NSNumber {
+                result[key] = num.boolValue
+            }
+        }
+        return result
+    }
+
+    /// The `QCBandFeatureXXX` key that documents support for a given
+    /// on-demand metric, per the vendor header's `setTime:success:` doc
+    /// comment. `nil` for metrics the vendor demo never gates this way
+    /// (real-time/one-shot heart rate isn't feature-flagged anywhere in
+    /// the demo) — those are never blocked here, only ones we have an
+    /// actual documented flag for.
+    private static func capabilityKey(for metric: OnDemandMetric) -> String? {
+        switch metric {
+        case .bloodPressure: return "QCBandFeatureBloodPressure"
+        case .spo2: return "QCBandFeatureBloodOxygen"
+        case .bodyTemperature: return "QCBandFeatureTemperature"
+        case .heartRate: return nil
         }
     }
 

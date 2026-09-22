@@ -20,6 +20,10 @@ final class MockQCBandService: QCBandService {
         firmwareVersion: "0.0.0-mock"
     )
 
+    // Empty, not fabricated — no real band has ever been asked, matching
+    // this conformer's honest-absence convention everywhere else.
+    var lastKnownCapabilities: [String: Bool] { [:] }
+
     func scanForDevices() async throws -> [SombreyDevice] {
         [mockDevice]
     }

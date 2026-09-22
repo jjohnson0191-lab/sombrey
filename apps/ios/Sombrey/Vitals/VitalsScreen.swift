@@ -263,7 +263,13 @@ struct VitalsScreen: View {
                     .foregroundStyle(StudioColor.inkFaint)
             }
         } else if bpMeasurementFailed {
-            Text("Measurement didn't complete — keep the band snug against your wrist, stay still, and try again.")
+            // Distinguishes "the band itself told us it doesn't support
+            // this" (a real, positive fact from the SDK's own feature
+            // list — never guessed) from a transient failure, which is
+            // the one case actually worth suggesting a retry for.
+            Text(wearableManager.lastMeasurementUnsupportedByDevice
+                 ? "This Sombrey Band doesn't support blood pressure measurement."
+                 : "Measurement didn't complete — keep the band snug against your wrist, stay still, and try again.")
                 .font(StudioFont.body(13))
                 .foregroundStyle(StudioColor.inkFaint)
         } else {
