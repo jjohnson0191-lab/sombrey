@@ -550,19 +550,24 @@ struct PlanEditorView: View {
     private func save() {
         isSaving = true
         saveError = nil
-        let payload: [ConvexEncodable?] = days.map { day in
-            PlanDayPayload(
-                name: day.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Day" : day.name,
-                weekday: day.weekday,
-                exercises: day.items.map { PlanItemPayload(exerciseId: $0.exerciseId, sets: $0.sets, reps: $0.reps, restSeconds: $0.restSeconds) }
-            ) as ConvexEncodable?
-        }
+        // Only plain values cross into the Task; the Convex payload (not
+        // Sendable) is built inside it.
+        let planId = plan?.id
+        let planName = name
+        let editedDays = days
         Task {
+            let payload: [ConvexEncodable?] = editedDays.map { day in
+                PlanDayPayload(
+                    name: day.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Day" : day.name,
+                    weekday: day.weekday,
+                    exercises: day.items.map { PlanItemPayload(exerciseId: $0.exerciseId, sets: $0.sets, reps: $0.reps, restSeconds: $0.restSeconds) }
+                ) as ConvexEncodable?
+            }
             do {
-                if let plan {
-                    try await ConvexClientProvider.client.mutation("trainingPlans:update", with: ["planId": plan.id, "name": name, "days": payload])
+                if let planId {
+                    try await ConvexClientProvider.client.mutation("trainingPlans:update", with: ["planId": planId, "name": planName, "days": payload])
                 } else {
-                    let _: String = try await ConvexClientProvider.client.mutation("trainingPlans:create", with: ["name": name, "days": payload])
+                    let _: String = try await ConvexClientProvider.client.mutation("trainingPlans:create", with: ["name": planName, "days": payload])
                 }
                 dismiss()
             } catch {
@@ -721,19 +726,27 @@ struct LogWorkoutView: View {
     private func save() {
         isSaving = true
         saveError = nil
-        var args: [String: ConvexEncodable?] = [
-            "name": name.trimmingCharacters(in: .whitespaces).isEmpty ? kind.title : name,
-            "activityType": kind.rawValue,
-            "startedAt": startedAt.timeIntervalSince1970 * 1000,
-            "durationSeconds": Double(durationMinutes * 60),
-        ]
-        if kind.hasDistance, let km = Double(distanceKm.replacingOccurrences(of: ",", with: ".")), km > 0 {
-            args["distanceMeters"] = km * 1000
-        }
-        if let kcal = Double(calories), kcal > 0 { args["userReportedCalories"] = kcal }
+        // Only plain values cross into the Task; the Convex arguments (not
+        // Sendable) are built inside it.
+        let workoutName = name.trimmingCharacters(in: .whitespaces).isEmpty ? kind.title : name
+        let activityType = kind.rawValue
+        let startedAtMs = startedAt.timeIntervalSince1970 * 1000
+        let durationSeconds = Double(durationMinutes * 60)
+        let distanceMeters: Double? = kind.hasDistance
+            ? Double(distanceKm.replacingOccurrences(of: ",", with: ".")).flatMap { $0 > 0 ? $0 * 1000 : nil }
+            : nil
+        let reportedCalories: Double? = Double(calories).flatMap { $0 > 0 ? $0 : nil }
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedNotes.isEmpty { args["notes"] = trimmedNotes }
         Task {
+            var args: [String: ConvexEncodable?] = [
+                "name": workoutName,
+                "activityType": activityType,
+                "startedAt": startedAtMs,
+                "durationSeconds": durationSeconds,
+            ]
+            if let distanceMeters { args["distanceMeters"] = distanceMeters }
+            if let reportedCalories { args["userReportedCalories"] = reportedCalories }
+            if !trimmedNotes.isEmpty { args["notes"] = trimmedNotes }
             do {
                 let _: String = try await ConvexClientProvider.client.mutation("sombreyWorkouts:logManualWorkout", with: args)
                 dismiss()
