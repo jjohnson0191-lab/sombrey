@@ -39,6 +39,12 @@ final class WearableManager {
     /// Most recent reading per metric — what `HomeScreen`'s activity row
     /// reads for "— steps / — active cal / HR —" once real data exists.
     private(set) var latestMeasurements: [WearableMetricType: WearableMeasurement] = [:]
+    /// The band's real-time heart-rate samples from this connection, oldest
+    /// first — only readings the band itself streamed live (never synced
+    /// history), bounded by `LiveHeartRateTrace`. Powers the LIVE range of
+    /// the Vitals heart-rate instrument; cleared when the band disconnects,
+    /// exactly like `latestMeasurements[.heartRate]`.
+    private(set) var liveHeartRateTrace: [WearableMeasurement] = []
     /// The on-demand metric a `measureNow(_:)` call is currently
     /// mid-flight for, if any — `nil` the rest of the time. Doubles as
     /// the single duplicate-request guard (a second tap while one is
@@ -216,6 +222,7 @@ final class WearableManager {
                     // Home/Vitals never shows a stale reading as current.
                     await self.service.stopLiveHeartRate(deviceId)
                     self.latestMeasurements[.heartRate] = nil
+                    self.liveHeartRateTrace.removeAll()
                     // Steps/active calories/distance are the band's own
                     // cumulative-since-midnight counters — genuinely
                     // accurate for whatever period the band WAS worn
@@ -660,6 +667,7 @@ final class WearableManager {
         gpsTracker.stopTracking()
         pendingMeasurements.removeAll()
         latestMeasurements.removeAll()
+        liveHeartRateTrace.removeAll()
         measurementsReceivedCount = 0
         pairedDevice = nil
         status = nil
@@ -678,6 +686,9 @@ final class WearableManager {
             for await measurement in self.service.measurements(for: deviceId) {
                 guard !Task.isCancelled else { return }
                 self.recordAsLatestIfNewer(measurement)
+                if measurement.sdkSource == LiveHeartRateTrace.sdkSource {
+                    self.liveHeartRateTrace = LiveHeartRateTrace.appending(measurement, to: self.liveHeartRateTrace)
+                }
                 self.measurementsReceivedCount += 1
                 self.pendingMeasurements.append(measurement)
                 if self.pendingMeasurements.count >= 20 {

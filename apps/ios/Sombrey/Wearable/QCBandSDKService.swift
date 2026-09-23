@@ -706,7 +706,7 @@ final class QCBandSDKService: NSObject, QCBandService {
                 WearableDiagnostics.log("realTimeHeartRate callback fired: hr=\(hr)")
                 WearableRuntimeDiagnostics.shared.recordHRCallback(raw: Int(hr))
                 guard let self, let deviceId = self.activeDeviceId, hr > 0 else { return }
-                self.emit(deviceId: deviceId, type: .heartRate, value: Double(hr), unit: "bpm", at: Date())
+                self.emit(deviceId: deviceId, type: .heartRate, value: Double(hr), unit: "bpm", at: Date(), sdkSource: LiveHeartRateTrace.sdkSource)
             }
         }
         manager.currentSportInfo = { [weak self] sportInfo in

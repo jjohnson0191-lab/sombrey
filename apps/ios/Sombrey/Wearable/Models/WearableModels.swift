@@ -150,6 +150,25 @@ enum BandCalorieUnits {
     }
 }
 
+/// Bounds for `WearableManager.liveHeartRateTrace`: the last few minutes of
+/// the band's real-time stream, enough to show a live signal without
+/// holding an unbounded session in memory. Pure so the windowing rule is
+/// testable on its own.
+enum LiveHeartRateTrace {
+    /// Tag `QCBandSDKService` puts on real-time heart-rate readings, so a
+    /// live sample can be told apart from synced history downstream.
+    static let sdkSource = "realTimeHeartRate"
+    static let window: TimeInterval = 5 * 60
+    static let maxSamples = 600
+
+    static func appending(_ sample: WearableMeasurement, to trace: [WearableMeasurement]) -> [WearableMeasurement] {
+        let cutoff = sample.recordedAt.addingTimeInterval(-window)
+        var next = trace.filter { $0.recordedAt >= cutoff && $0.recordedAt < sample.recordedAt }
+        next.append(sample)
+        return Array(next.suffix(maxSamples))
+    }
+}
+
 struct WearableMeasurement {
     let deviceId: DeviceID
     let metricType: WearableMetricType

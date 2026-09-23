@@ -49,6 +49,16 @@ enum StudioMotion {
     /// (set completed, rest skipped).
     static let release = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.35)
 
+    /// An instrument opening or closing in place (`MetricInstrument`):
+    /// the same card grows to reveal its history, so the curve is
+    /// weighted like `bloomOnce` but short enough to feel direct.
+    static let unfold = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.5)
+
+    /// A chart re-scaling between LIVE / TODAY / 7D / 30D — the scale
+    /// and marks travel to their new positions rather than being
+    /// swapped, so the range change reads as the same signal re-framed.
+    static let rangeMorph = Animation.timingCurve(0.3, 0.7, 0.3, 1, duration: 0.55)
+
     /// Very slow, low-amplitude idle evolution (CTA idle illumination).
     /// Never call without checking reduced motion — this is the token
     /// most likely to read as "excessive" if misused.
@@ -120,5 +130,26 @@ extension View {
     /// offset the content settles in from.
     func studioReveal(index: Int = 0, distance: CGFloat = 6) -> some View {
         modifier(StudioReveal(delay: StudioMotion.staggerDelay(index), distance: distance))
+    }
+}
+
+/// A number that changes in place (a live reading, a new measurement)
+/// rolls its digits to the new value instead of snapping — the reading
+/// visibly updating, not the view re-rendering. With Reduce Motion the
+/// new value simply appears.
+struct StudioNumericTransition: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let value: Double
+
+    func body(content: Content) -> some View {
+        content
+            .contentTransition(reduceMotion ? .identity : .numericText(value: value))
+            .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: value)
+    }
+}
+
+extension View {
+    func studioNumericTransition(_ value: Double) -> some View {
+        modifier(StudioNumericTransition(value: value))
     }
 }

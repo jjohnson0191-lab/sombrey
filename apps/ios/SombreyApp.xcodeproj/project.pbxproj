@@ -12,6 +12,7 @@
 		000000000000000000000043 /* Color+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000003 /* Color+Studio.swift */; };
 		000000000000000000000044 /* Font+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000004 /* Font+Studio.swift */; };
 		000000000000000000000045 /* Motion+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000005 /* Motion+Studio.swift */; };
+		000000000000000000000101 /* Haptics+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000100 /* Haptics+Studio.swift */; };
 		000000000000000000000046 /* StudioScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000006 /* StudioScene.swift */; };
 		000000000000000000000047 /* EnvironmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000007 /* EnvironmentView.swift */; };
 		000000000000000000000048 /* ScreenContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000008 /* ScreenContainer.swift */; };
@@ -87,6 +88,8 @@
 		0000000000000000000000EC /* VitalsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000EB /* VitalsScreen.swift */; };
 		0000000000000000000000EE /* MetricHistoryChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000ED /* MetricHistoryChart.swift */; };
 		0000000000000000000000F0 /* StudioCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000EF /* StudioCard.swift */; };
+		000000000000000000000103 /* MetricInstrument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000102 /* MetricInstrument.swift */; };
+		000000000000000000000105 /* InstrumentChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000104 /* InstrumentChart.swift */; };
 		0000000000000000000000F2 /* WearableDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F1 /* WearableDiagnosticsView.swift */; };
 		0000000000000000000000DF /* NotificationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DE /* NotificationModels.swift */; };
 		0000000000000000000000E1 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E0 /* NotificationManager.swift */; };
@@ -118,6 +121,7 @@
 		000000000000000000000003 /* Color+Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Studio.swift"; sourceTree = "<group>"; };
 		000000000000000000000004 /* Font+Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Font+Studio.swift"; sourceTree = "<group>"; };
 		000000000000000000000005 /* Motion+Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Motion+Studio.swift"; sourceTree = "<group>"; };
+		000000000000000000000100 /* Haptics+Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Haptics+Studio.swift"; sourceTree = "<group>"; };
 		000000000000000000000006 /* StudioScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StudioScene.swift"; sourceTree = "<group>"; };
 		000000000000000000000007 /* EnvironmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EnvironmentView.swift"; sourceTree = "<group>"; };
 		000000000000000000000008 /* ScreenContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScreenContainer.swift"; sourceTree = "<group>"; };
@@ -200,6 +204,8 @@
 		0000000000000000000000EB /* VitalsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VitalsScreen.swift"; sourceTree = "<group>"; };
 		0000000000000000000000ED /* MetricHistoryChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetricHistoryChart.swift"; sourceTree = "<group>"; };
 		0000000000000000000000EF /* StudioCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StudioCard.swift"; sourceTree = "<group>"; };
+		000000000000000000000102 /* MetricInstrument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetricInstrument.swift"; sourceTree = "<group>"; };
+		000000000000000000000104 /* InstrumentChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "InstrumentChart.swift"; sourceTree = "<group>"; };
 		0000000000000000000000F1 /* WearableDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableDiagnosticsView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -285,7 +291,8 @@
 			children = (
 			000000000000000000000003 /* Color+Studio.swift */,
 			000000000000000000000004 /* Font+Studio.swift */,
-			000000000000000000000005 /* Motion+Studio.swift */
+			000000000000000000000005 /* Motion+Studio.swift */,
+			000000000000000000000100 /* Haptics+Studio.swift */
 			);
 			name = "Tokens";
 			path = "Tokens";
@@ -314,7 +321,9 @@
 			00000000000000000000000F /* AiDisclosureBadge.swift */,
 			000000000000000000000010 /* IlluminatedCTAButtonStyle.swift */,
 			00000000000000000000001E /* ComingSoonView.swift */,
-			0000000000000000000000EF /* StudioCard.swift */
+			0000000000000000000000EF /* StudioCard.swift */,
+			000000000000000000000102 /* MetricInstrument.swift */,
+			000000000000000000000104 /* InstrumentChart.swift */
 			);
 			name = "Components";
 			path = "Components";
@@ -744,6 +753,7 @@
 				000000000000000000000043 /* Color+Studio.swift */,
 				000000000000000000000044 /* Font+Studio.swift */,
 				000000000000000000000045 /* Motion+Studio.swift */,
+				000000000000000000000101 /* Haptics+Studio.swift */,
 				000000000000000000000046 /* StudioScene.swift */,
 				000000000000000000000047 /* EnvironmentView.swift */,
 				000000000000000000000048 /* ScreenContainer.swift */,
@@ -798,6 +808,8 @@
 				0000000000000000000000EC /* VitalsScreen.swift */,
 				0000000000000000000000EE /* MetricHistoryChart.swift */,
 				0000000000000000000000F0 /* StudioCard.swift */,
+				000000000000000000000103 /* MetricInstrument.swift */,
+				000000000000000000000105 /* InstrumentChart.swift */,
 				0000000000000000000000F2 /* WearableDiagnosticsView.swift */,
 				0000000000000000000000E1 /* NotificationManager.swift */,
 				0000000000000000000000E3 /* NotificationSettingsView.swift */,
@@ -901,7 +913,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -932,7 +944,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -957,7 +969,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -983,7 +995,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1005,7 +1017,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1030,7 +1042,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

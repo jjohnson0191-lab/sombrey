@@ -32,6 +32,10 @@ struct VitalsScreen: View {
     /// hardware operation, which is exactly what `StudioMotion.tick` is
     /// reserved for (see its own doc comment).
     @State private var bpMeasuringPulse = false
+    /// Haptic triggers for a finished on-demand BP measurement — counters
+    /// so every outcome fires, including two identical ones in a row.
+    @State private var bpCompletedCount = 0
+    @State private var bpFailedCount = 0
 
     var body: some View {
         @Bindable var appState = appState
@@ -77,24 +81,19 @@ struct VitalsScreen: View {
         todayHeartRate.value?.map(\.value).min()
     }
 
-    private var todayHeartRateRange: (min: Double, max: Double)? {
-        guard let values = todayHeartRate.value?.map(\.value), !values.isEmpty else { return nil }
-        return (values.min()!, values.max()!)
-    }
-
     private var liveHeartRate: WearableMeasurement? { wearableManager.latestMeasurements[.heartRate] }
 
     private var heartRateSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("HEART RATE")
-
-            HStack(alignment: .top, spacing: 32) {
+        MetricInstrument(title: "HEART RATE") {
+            HStack(alignment: .center, spacing: 14) {
+                LivePulseMark(bpm: liveHeartRate?.value)
                 VStack(alignment: .leading, spacing: 2) {
                     if let live = liveHeartRate {
                         Text("\(Int(live.value.rounded()))")
                             .font(StudioFont.hero(48, weight: .bold))
                             .foregroundStyle(StudioColor.ink)
                             .monospacedDigit()
+                            .studioNumericTransition(live.value.rounded())
                         Text("BPM · LIVE")
                             .font(StudioFont.body(11, weight: .semibold))
                             .tracking(1.1)
@@ -112,8 +111,8 @@ struct VitalsScreen: View {
                             .foregroundStyle(StudioColor.inkFaint)
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
+                Spacer(minLength: 12)
+                VStack(alignment: .trailing, spacing: 2) {
                     Text("RESTING")
                         .font(StudioFont.body(10, weight: .semibold))
                         .tracking(1.1)
@@ -135,49 +134,42 @@ struct VitalsScreen: View {
                             .foregroundStyle(StudioColor.inkFaint)
                     }
                 }
-
-                if let range = todayHeartRateRange {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("TODAY")
-                            .font(StudioFont.body(10, weight: .semibold))
-                            .tracking(1.1)
-                            .foregroundStyle(StudioColor.inkSoft)
-                        Text("Min \(Int(range.min.rounded()))")
-                            .font(StudioFont.body(12))
-                            .foregroundStyle(StudioColor.ink)
-                        Text("Max \(Int(range.max.rounded()))")
-                            .font(StudioFont.body(12))
-                            .foregroundStyle(StudioColor.ink)
-                    }
-                }
             }
-
-            MetricHistoryChart(metricType: .heartRate, unit: "BPM", valueFormatter: { "\(Int($0.rounded()))" })
+        } detail: {
+            InstrumentHistoryChart(
+                metric: .heartRate,
+                unit: "BPM",
+                format: { "\(Int($0.rounded()))" },
+                ranges: [.live, .today, .sevenDays, .thirtyDays],
+                livePoints: InstrumentSeries.live(wearableManager.liveHeartRateTrace),
+                liveAvailable: wearableManager.displayState == .connected
+            )
         }
-        .studioCard()
     }
 
     // MARK: - Blood Oxygen
 
     private var bloodOxygenSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("BLOOD OXYGEN")
-            if let spo2 = wearableManager.latestMeasurements[.spo2] {
-                Text("\(Int(spo2.value.rounded()))%")
-                    .font(StudioFont.hero(40, weight: .bold))
-                    .foregroundStyle(StudioColor.ink)
-                    .monospacedDigit()
-                Text("Training readiness signal, not a diagnostic measurement.")
-                    .font(StudioFont.body(11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                Text("No recent measurement.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
+        MetricInstrument(title: "BLOOD OXYGEN") {
+            VStack(alignment: .leading, spacing: 4) {
+                if let spo2 = wearableManager.latestMeasurements[.spo2] {
+                    Text("\(Int(spo2.value.rounded()))%")
+                        .font(StudioFont.hero(40, weight: .bold))
+                        .foregroundStyle(StudioColor.ink)
+                        .monospacedDigit()
+                        .studioNumericTransition(spo2.value.rounded())
+                    Text("Training readiness signal, not a diagnostic measurement.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                } else {
+                    Text("No recent measurement.")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
             }
-            MetricHistoryChart(metricType: .spo2, unit: "%", valueFormatter: { "\(Int($0.rounded()))" })
+        } detail: {
+            InstrumentHistoryChart(metric: .spo2, unit: "%", format: { "\(Int($0.rounded()))" })
         }
-        .studioCard()
     }
 
     // MARK: - Temperature
@@ -189,60 +181,74 @@ struct VitalsScreen: View {
     }
 
     private var temperatureSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("TEMPERATURE")
-            if let latest = wearableManager.latestMeasurements[.skinTemperature] {
-                if let baseline = temperatureBaseline {
-                    let delta = latest.value - baseline
-                    Text(String(format: "%+.1f°", delta))
-                        .font(StudioFont.hero(40, weight: .bold))
-                        .foregroundStyle(StudioColor.ink)
-                        .monospacedDigit()
-                    Text("vs. your recent baseline")
-                        .font(StudioFont.body(12))
-                        .foregroundStyle(StudioColor.inkSoft)
+        MetricInstrument(title: "TEMPERATURE") {
+            VStack(alignment: .leading, spacing: 6) {
+                if let latest = wearableManager.latestMeasurements[.skinTemperature] {
+                    if let baseline = temperatureBaseline {
+                        let delta = latest.value - baseline
+                        Text(String(format: "%+.1f°", delta))
+                            .font(StudioFont.hero(40, weight: .bold))
+                            .foregroundStyle(StudioColor.ink)
+                            .monospacedDigit()
+                            .studioNumericTransition((delta * 10).rounded())
+                        FieldDeviationMark(deviation: delta)
+                        Text("vs. your recent baseline")
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.inkSoft)
+                    } else {
+                        Text(String(format: "%.1f°C", latest.value))
+                            .font(StudioFont.hero(40, weight: .bold))
+                            .foregroundStyle(StudioColor.ink)
+                            .monospacedDigit()
+                        Text("Building your baseline")
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    }
+                    Text("Skin temperature, not core body temperature.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
                 } else {
-                    Text(String(format: "%.1f°C", latest.value))
-                        .font(StudioFont.hero(40, weight: .bold))
-                        .foregroundStyle(StudioColor.ink)
-                        .monospacedDigit()
-                    Text("Building your baseline")
-                        .font(StudioFont.body(12))
+                    Text("No recent measurement.")
+                        .font(StudioFont.body(13))
                         .foregroundStyle(StudioColor.inkFaint)
                 }
-                Text("Skin temperature, not core body temperature.")
-                    .font(StudioFont.body(11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                Text("No recent measurement.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
             }
-            MetricHistoryChart(metricType: .skinTemperature, unit: "°C", valueFormatter: { String(format: "%.1f", $0) })
+        } detail: {
+            InstrumentHistoryChart(
+                metric: .skinTemperature,
+                unit: "°C",
+                format: { String(format: "%.1f", $0) },
+                baseline: temperatureBaseline.map { InstrumentHistoryChart.Baseline(value: $0, label: "30-day median") }
+            )
         }
-        .studioCard()
     }
 
     // MARK: - Blood Pressure
 
     private var bloodPressureSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center) {
-                sectionHeader("BLOOD PRESSURE")
-                Spacer()
-                measureBPButton
+        MetricInstrument(title: "BLOOD PRESSURE") {
+            measureBPButton
+        } readout: {
+            HStack(alignment: .center, spacing: 16) {
+                RangeGaugeMark(
+                    systolic: wearableManager.latestMeasurements[.bloodPressureSystolic]?.value,
+                    diastolic: wearableManager.latestMeasurements[.bloodPressureDiastolic]?.value
+                )
+                bloodPressureReadout
+                Spacer(minLength: 0)
             }
-            bloodPressureReadout
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Systolic").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
-                MetricHistoryChart(metricType: .bloodPressureSystolic, unit: "mmHg", valueFormatter: { "\(Int($0.rounded()))" })
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Diastolic").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
-                MetricHistoryChart(metricType: .bloodPressureDiastolic, unit: "mmHg", valueFormatter: { "\(Int($0.rounded()))" })
-            }
+        } detail: {
+            InstrumentHistoryChart(
+                metric: .bloodPressureSystolic,
+                lowMetric: .bloodPressureDiastolic,
+                style: .range,
+                unit: "mmHg",
+                format: { "\(Int($0.rounded()))" },
+                minimumReadings: 1
+            )
         }
-        .studioCard()
+        .sensoryFeedback(StudioHaptic.measurementComplete, trigger: bpCompletedCount)
+        .sensoryFeedback(StudioHaptic.measurementFailed, trigger: bpFailedCount)
     }
 
     /// The result/empty/failed state — kept separate from the in-progress
@@ -309,6 +315,9 @@ struct VitalsScreen: View {
                 let result = await wearableManager.measureNow(.bloodPressure)
                 if result?.systolicMmHg == nil || result?.diastolicMmHg == nil {
                     bpMeasurementFailed = true
+                    bpFailedCount += 1
+                } else {
+                    bpCompletedCount += 1
                 }
             }
         } label: {
