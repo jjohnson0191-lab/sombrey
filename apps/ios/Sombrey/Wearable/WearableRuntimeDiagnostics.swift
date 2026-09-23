@@ -291,7 +291,7 @@ final class WearableRuntimeDiagnostics {
         lastRawDistance = distance
         lastRawHappenDate = happenDate
         lastRawSportResponseAt = Date()
-        log("sport: raw calories=\(calories) steps=\(steps) distance=\(distance) happenDate=\(happenDate)")
+        log("sport: raw calories(cal)=\(calories) steps=\(steps) distance=\(distance) happenDate=\(happenDate)")
     }
 
     // MARK: - Blood pressure (and other on-demand metrics) command lifecycle
@@ -468,7 +468,7 @@ final class WearableRuntimeDiagnostics {
         lines.append("")
         lines.append("ACTIVE CALORIES / STEPS / DISTANCE")
         lines.append("  rawSportResponseAt: \(fmt(lastRawSportResponseAt))")
-        lines.append("  rawCalories: \(lastRawCalories.map { "\($0)" } ?? "none")  rawHappenDate: \(lastRawHappenDate ?? "none")")
+        lines.append("  rawCalories (cal): \(lastRawCalories.map { "\($0)" } ?? "none")  rawHappenDate: \(lastRawHappenDate ?? "none")")
         lines.append("  rawSteps: \(lastRawSteps.map(String.init) ?? "none")  rawDistance: \(lastRawDistance.map(String.init) ?? "none")")
         if let calState = metricStates[.activeCalories] {
             lines.append("  calories accepted/rejected: \(calState.acceptedCount)/\(calState.rejectedCount)  lastAccepted: \(calState.lastAcceptedValue.map { "\($0)" } ?? "none") at \(fmt(calState.lastAcceptedAt))")

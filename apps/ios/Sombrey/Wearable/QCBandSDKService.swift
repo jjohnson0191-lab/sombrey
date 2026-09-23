@@ -228,6 +228,10 @@ final class QCBandSDKService: NSObject, QCBandService {
         let now = Date()
 
         if let sport = try? await currentSport() {
+            // Stamped when the band's answer arrives, not when `sync()`
+            // started — so a response straddling midnight can't tag one
+            // day's since-midnight total with the other day.
+            let receivedAt = Date()
             // Logged raw, before any parsing/transformation — this is
             // exactly the "compare against the previous response"
             // evidence needed to tell apart "the band's own counter
@@ -235,21 +239,18 @@ final class QCBandSDKService: NSObject, QCBandService {
             // but failing to display it."
             WearableRuntimeDiagnostics.shared.recordRawSportResponse(calories: sport.calories, steps: sport.totalStepCount, distance: sport.distance, happenDate: sport.happenDate)
             // `getCurrentSportSucess` is documented (QCSDKCmdCreator.h)
-            // as returning "the summary statistics of the day" — a
-            // genuine device-reported cumulative-since-midnight total,
-            // not a fabricated or estimated value. But it must be tagged
-            // with the day it actually applies to, not the moment this
-            // sync happened to run: `sport.happenDate`, when the SDK
-            // populates it, is that day; falling back to `now` only when
-            // it's absent/unparseable preserves today's existing
-            // behavior rather than silently dropping the reading.
-            // `isFromToday` (used by every read site) is what actually
-            // keeps a stale day's total from displaying as current — see
+            // as returning "the summary statistics of the day" — the
+            // band's own cumulative-since-midnight counters, not an
+            // estimate. `sport.happenDate` is NOT a device timestamp:
+            // the SDK binary fills it from the phone's `[NSDate date]`
+            // as "yyyy-MM-dd" when the response is parsed, so the
+            // receipt time above is the same information with a time of
+            // day. `isFromToday` (used by every read site) is what keeps
+            // a stale day's total from displaying as current — see
             // `WearableManager.latestMeasurementForToday(_:)`.
-            let sportDate = Self.sdkDateFormatter.date(from: sport.happenDate) ?? now
-            emit(deviceId: deviceId, type: .steps, value: Double(sport.totalStepCount), unit: "steps", at: sportDate)
-            emit(deviceId: deviceId, type: .activeCalories, value: sport.calories, unit: "kcal", at: sportDate)
-            emit(deviceId: deviceId, type: .distanceMeters, value: Double(sport.distance), unit: "m", at: sportDate)
+            emit(deviceId: deviceId, type: .steps, value: Double(sport.totalStepCount), unit: "steps", at: receivedAt, sdkSource: "getCurrentSportSucess")
+            emitActiveCalories(deviceId: deviceId, bandCalories: sport.calories, at: receivedAt, sdkSource: "getCurrentSportSucess")
+            emit(deviceId: deviceId, type: .distanceMeters, value: Double(sport.distance), unit: "m", at: receivedAt, sdkSource: "getCurrentSportSucess")
             synced += 3
             syncedTypes.append(contentsOf: ["steps", "active_calories", "distance_meters"])
         } else {
@@ -664,8 +665,8 @@ final class QCBandSDKService: NSObject, QCBandService {
                 WearableDiagnostics.log("currentStepInfo callback fired: step=\(step) calorie=\(calorie) distance=\(distance)")
                 guard let self, let deviceId = self.activeDeviceId else { return }
                 let now = Date()
-                self.emit(deviceId: deviceId, type: .steps, value: Double(step), unit: "steps", at: now)
-                self.emit(deviceId: deviceId, type: .activeCalories, value: Double(calorie), unit: "kcal", at: now)
+                self.emit(deviceId: deviceId, type: .steps, value: Double(step), unit: "steps", at: now, sdkSource: "currentStepInfo")
+                self.emitActiveCalories(deviceId: deviceId, bandCalories: Double(calorie), at: now, sdkSource: "currentStepInfo")
             }
         }
         manager.currentBatteryInfo = { [weak self] battery, _ in
@@ -698,10 +699,33 @@ final class QCBandSDKService: NSObject, QCBandService {
                     heartRate: sportInfo.hr,
                     steps: sportInfo.step,
                     distanceMeters: sportInfo.distance,
-                    calories: sportInfo.calorie
+                    // Raw cal, like every live band calorie counter —
+                    // the vendor demo logs this exact field as
+                    // "calorie(unit:calorie)" (see `BandCalorieUnits`).
+                    // Only the post-session Sport+ summary
+                    // (`sportSessionHistory`) arrives already in kcal.
+                    calories: BandCalorieUnits.kilocalories(fromBandCalories: Double(sportInfo.calorie))
                 ))
             }
         }
+    }
+
+    /// The band's pedometer calorie counter arrives in raw cal (see
+    /// `BandCalorieUnits` for the vendor evidence); this is the one place
+    /// it's converted to kcal, with the untouched raw number carried
+    /// along for provenance. Every calorie path into `emit` goes through
+    /// here so the two can never drift apart.
+    private func emitActiveCalories(deviceId: DeviceID, bandCalories: Double, at date: Date, sdkSource: String) {
+        emit(
+            deviceId: deviceId,
+            type: .activeCalories,
+            value: BandCalorieUnits.kilocalories(fromBandCalories: bandCalories),
+            unit: "kcal",
+            at: date,
+            sdkSource: sdkSource,
+            deviceRawValue: bandCalories,
+            deviceRawUnit: BandCalorieUnits.rawUnit
+        )
     }
 
     /// The single choke point every reading passes through — live
@@ -710,14 +734,14 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// whole pipeline (`WearableManager`, Convex persistence, graphs,
     /// readiness) uniformly, rather than each call site needing its own
     /// guard. See `isValid(metricType:value:)` for why.
-    private func emit(deviceId: DeviceID, type: WearableMetricType, value: Double, unit: String, at date: Date) {
+    private func emit(deviceId: DeviceID, type: WearableMetricType, value: Double, unit: String, at date: Date, sdkSource: String? = nil, deviceRawValue: Double? = nil, deviceRawUnit: String? = nil) {
         guard type.isPhysicallyPlausible(value) else {
             WearableDiagnostics.log("emit: rejected \(type.rawValue)=\(value) as not physically plausible")
             WearableRuntimeDiagnostics.shared.recordMetricEmit(type: type, value: value, accepted: false)
             return
         }
         WearableRuntimeDiagnostics.shared.recordMetricEmit(type: type, value: value, accepted: true)
-        measurementContinuation?.yield(WearableMeasurement(deviceId: deviceId, metricType: type, value: value, unit: unit, recordedAt: date))
+        measurementContinuation?.yield(WearableMeasurement(deviceId: deviceId, metricType: type, value: value, unit: unit, recordedAt: date, deviceRawValue: deviceRawValue, deviceRawUnit: deviceRawUnit, sdkSource: sdkSource))
     }
 
     /// Each `QCSchedualHeartRateModel` covers one calendar day's worth of

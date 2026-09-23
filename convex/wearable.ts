@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 // Sombrey Band (QCBandSDK) persistence — added for the native iOS Phase 3
@@ -95,6 +95,9 @@ export const recordMeasurements = mutation({
       value: v.number(),
       unit: v.string(),
       recordedAt: v.number(),
+      rawValue: v.optional(v.number()),
+      rawUnit: v.optional(v.string()),
+      sdkSource: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
@@ -127,6 +130,9 @@ export const recordMeasurements = mutation({
         unit: m.unit,
         recordedAt: m.recordedAt,
         source: "sombrey_band",
+        rawValue: m.rawValue,
+        rawUnit: m.rawUnit,
+        sdkSource: m.sdkSource,
       });
       inserted += 1;
     }
@@ -211,6 +217,43 @@ export const getMeasurementsByRange = query({
       .order("asc")
       .take(args.limit ?? 5000);
     return rows.filter((r) => isValidMeasurement(r.metricType, r.value));
+  },
+});
+
+// One-time correction for active_calories rows written before the native
+// client converted the band's calorie counter from its raw unit. Every
+// such row came from QCSportModel.calories (sync) or the currentStepInfo
+// live callback — the only two writers — both of which the vendor SDK
+// reports in small calories (cal), yet they were stored verbatim with
+// unit "kcal" (a 30,040 cal reading showed as 30,040 kcal). See
+// `BandCalorieUnits` in apps/ios/Sombrey/Wearable/Models/WearableModels.swift
+// for the vendor evidence. This is a unit relabel, not an estimate: the
+// band's original number is kept in `rawValue`, and a row that already
+// carries `rawUnit` is never touched, so re-running is a no-op.
+export const correctLegacyActiveCaloriesUnit = internalMutation({
+  args: { dryRun: v.boolean() },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("wearableMeasurements")
+      .filter((q) => q.eq(q.field("metricType"), "active_calories"))
+      .collect();
+    const legacy = rows.filter((r) => r.rawUnit === undefined);
+    if (!args.dryRun) {
+      for (const r of legacy) {
+        await ctx.db.patch(r._id, {
+          value: r.value / 1000,
+          unit: "kcal",
+          rawValue: r.value,
+          rawUnit: "cal",
+        });
+      }
+    }
+    return {
+      dryRun: args.dryRun,
+      activeCalorieRows: rows.length,
+      corrected: legacy.length,
+      largestRawValue: legacy.reduce((max, r) => Math.max(max, r.value), 0),
+    };
   },
 });
 

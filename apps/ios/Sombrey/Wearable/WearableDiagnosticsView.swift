@@ -111,10 +111,10 @@ struct WearableDiagnosticsView: View {
                 }
                 Section("Active calories / Steps / Distance (raw, pre-validation)") {
                     diagnosticRow("Raw sport response at", runtime.lastRawSportResponseAt.map(Self.timeString) ?? "never")
-                    diagnosticRow("Raw calories", runtime.lastRawCalories.map { "\($0)" } ?? "none")
+                    diagnosticRow("Raw calories (band, cal)", runtime.lastRawCalories.map { "\($0)" } ?? "none")
                     diagnosticRow("Raw happenDate", runtime.lastRawHappenDate ?? "none")
                     diagnosticRow("Raw steps / distance", "\(runtime.lastRawSteps.map(String.init) ?? "—") / \(runtime.lastRawDistance.map(String.init) ?? "—")")
-                    diagnosticRow("Accepted calories", wearableManager.latestMeasurements[.activeCalories].map { "\(Int($0.value.rounded())) kcal" } ?? "none")
+                    diagnosticRow("Accepted calories", wearableManager.latestMeasurements[.activeCalories].map { "\(String(format: "%.3f", $0.value)) kcal (\($0.sdkSource ?? "?"))" } ?? "none")
                     diagnosticRow("Calories counted as today?", wearableManager.latestMeasurementForToday(.activeCalories) != nil ? "yes" : "no")
                     diagnosticRow("Accepted steps", wearableManager.latestMeasurements[.steps].map { "\(Int($0.value.rounded()))" } ?? "none")
                 }

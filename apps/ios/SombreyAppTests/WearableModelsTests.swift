@@ -41,6 +41,58 @@ struct WearableMeasurementFreshnessTests {
     }
 }
 
+/// The band reports pedometer calories in small calories (cal); see
+/// `BandCalorieUnits` for the vendor evidence. Values below are real
+/// production readings from the investigation into "30,040 kcal".
+struct BandCalorieUnitsTests {
+    @Test func rawBandCaloriesConvertToKilocalories() {
+        // 1,126 steps → band reported 30040 → 30.04 kcal, not 30,040.
+        #expect(BandCalorieUnits.kilocalories(fromBandCalories: 30040) == 30.04)
+        // 79 steps → band reported 2070 → 2.07 kcal.
+        #expect(BandCalorieUnits.kilocalories(fromBandCalories: 2070) == 2.07)
+        #expect(BandCalorieUnits.rawUnit == "cal")
+    }
+
+    @Test func zeroStillRejectedAfterConversion() {
+        let kcal = BandCalorieUnits.kilocalories(fromBandCalories: 0)
+        #expect(WearableMetricType.activeCalories.isPhysicallyPlausible(kcal) == false)
+        // The smallest real band reading (1 cal) stays a real reading.
+        #expect(WearableMetricType.activeCalories.isPhysicallyPlausible(BandCalorieUnits.kilocalories(fromBandCalories: 1)))
+    }
+
+    @Test func smallKilocalorieValuesAreNotRoundedToZero() {
+        #expect(HomeScreen.kilocalorieText(0.288) == "0.3")
+        #expect(HomeScreen.kilocalorieText(2.07) == "2.1")
+        #expect(HomeScreen.kilocalorieText(30.04) == "30")
+    }
+}
+
+struct WearableMeasurementPayloadTests {
+    @Test func convertedCaloriesCarryRawDeviceValueAndSource() throws {
+        let measurement = WearableMeasurement(
+            deviceId: "d1", metricType: .activeCalories, value: 30.04, unit: "kcal", recordedAt: Date(),
+            deviceRawValue: 30040, deviceRawUnit: "cal", sdkSource: "getCurrentSportSucess"
+        )
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WearableMeasurementPayload(measurement))) as! [String: Any]
+        #expect(json["value"] as? Double == 30.04)
+        #expect(json["unit"] as? String == "kcal")
+        #expect(json["rawValue"] as? Double == 30040)
+        #expect(json["rawUnit"] as? String == "cal")
+        #expect(json["sdkSource"] as? String == "getCurrentSportSucess")
+    }
+
+    /// Convex's `v.optional` rejects an explicit `null`, so absent
+    /// provenance must be an absent key.
+    @Test func unconvertedMetricsOmitProvenanceKeys() throws {
+        let measurement = WearableMeasurement(deviceId: "d1", metricType: .heartRate, value: 62, unit: "bpm", recordedAt: Date())
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WearableMeasurementPayload(measurement))) as! [String: Any]
+        #expect(json["rawValue"] == nil)
+        #expect(json["rawUnit"] == nil)
+        #expect(json["sdkSource"] == nil)
+        #expect(json.keys.contains("rawValue") == false)
+    }
+}
+
 // A `QCBandSDKService.parseMeasurementResult` test for the blood-pressure
 // vendor-model-vs-dictionary fix was deliberately left out here: it would
 // need `import QCBandSDK`, and `SombreyAppTests`' build settings don't

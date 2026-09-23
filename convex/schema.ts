@@ -1146,6 +1146,15 @@ export default defineSchema({
     unit: v.string(),
     recordedAt: v.number(),                // epoch ms, device-reported when available
     source: v.string(),                    // e.g. "sombrey_band"
+    // Present only when `value` is a unit conversion of the band's own
+    // number (active_calories: band reports cal, `value` is kcal) — the
+    // untouched device value, so provenance is never lost.
+    rawValue: v.optional(v.number()),
+    rawUnit: v.optional(v.string()),
+    // SDK entry point that produced the reading, e.g.
+    // "getCurrentSportSucess" (sync summary) or "currentStepInfo" (live
+    // push). Absent on rows written before this field existed.
+    sdkSource: v.optional(v.string()),
   }).index("by_user", ["userId"])
     .index("by_user_and_metric", ["userId", "metricType"])
     .index("by_device_and_recordedAt", ["deviceId", "recordedAt"])

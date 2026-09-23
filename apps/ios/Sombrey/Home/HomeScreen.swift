@@ -369,26 +369,15 @@ struct HomeScreen: View {
                         MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
                         MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
                         MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
-                        // Labeled "Calories", not "Active Calories": the
-                        // source field (QCSportModel.calories, via
-                        // getCurrentSportSucess) is the vendor SDK's own
-                        // generic, unqualified "卡路里" (calories) — the
-                        // same field the SDK's daily-goal API
-                        // (getStepTargetInfo's calorieTarget) treats as a
-                        // general daily figure, not an exercise-only one.
-                        // The SDK's genuinely exercise-scoped calorie
-                        // concept lives in a completely different
-                        // structure (Sport+ session summaries,
-                        // OdmGeneralExerciseSummaryModel/
-                        // OdmSportPlusModels' own `calorie`), which this
-                        // tile doesn't read from. Calling it "Active"
-                        // claimed a precision the data doesn't support —
-                        // this fixes the label, not the value: still the
-                        // exact number the band reports, still never
-                        // estimated.
+                        // "Active Calories": the band's pedometer
+                        // calorie counter — rises only with steps (0 cal
+                        // at 0 steps hours after midnight in production
+                        // data), so it excludes resting energy. Value is
+                        // kcal converted from the band's raw cal; see
+                        // `BandCalorieUnits`.
                         MetricView(
-                            label: "Calories",
-                            value: activeCaloriesToday.map { "\(Int($0.value.rounded()))" } ?? "—",
+                            label: "Active Calories",
+                            value: activeCaloriesToday.map { Self.kilocalorieText($0.value) } ?? "—",
                             unit: activeCaloriesToday == nil ? nil : "kcal",
                             caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"
                         )
@@ -398,6 +387,13 @@ struct HomeScreen: View {
         }
         .buttonStyle(.plain)
         .studioCard()
+    }
+
+    /// One decimal below 10 kcal so an early-day reading (the band
+    /// counts ~0.025 kcal per step) doesn't round a real, positive value
+    /// down to a misleading "0".
+    static func kilocalorieText(_ kcal: Double) -> String {
+        kcal < 10 ? String(format: "%.1f", kcal) : "\(Int(kcal.rounded()))"
     }
 
     private static let timeOnlyFormatter: DateFormatter = {
@@ -515,7 +511,7 @@ struct HomeScreen: View {
                     if let update = active.liveUpdate {
                         Text(durationText(seconds: update.durationSeconds))
                         Text("\(update.heartRate) BPM")
-                        Text("\(update.calories) kcal")
+                        Text("\(Int(update.calories.rounded())) kcal")
                     } else {
                         Text(durationText(seconds: Int(Date().timeIntervalSince(active.startedAt))))
                     }

@@ -67,6 +67,12 @@ export interface WearableMeasurement {
   value: number;
   unit: string;
   recordedAt: number; // epoch ms, device-reported when available
+  /** The band's own number when `value` is a unit conversion of it
+   * (active_calories: band reports cal, `value` is kcal). */
+  rawValue?: number;
+  rawUnit?: string;
+  /** SDK entry point that produced the reading. */
+  sdkSource?: string;
 }
 
 export interface SleepStage {

@@ -9,12 +9,20 @@ struct WearableMeasurementPayload: Encodable, ConvexEncodable {
     let value: Double
     let unit: String
     let recordedAt: Double // epoch ms
+    // Optional provenance — synthesized `Encodable` omits these keys when
+    // nil (never an explicit `null`, which Convex's `v.optional` rejects).
+    let rawValue: Double?
+    let rawUnit: String?
+    let sdkSource: String?
 
     init(_ measurement: WearableMeasurement) {
         metricType = measurement.metricType.rawValue
         value = measurement.value
         unit = measurement.unit
         recordedAt = measurement.recordedAt.timeIntervalSince1970 * 1000
+        rawValue = measurement.deviceRawValue
+        rawUnit = measurement.deviceRawUnit
+        sdkSource = measurement.sdkSource
     }
 }
 

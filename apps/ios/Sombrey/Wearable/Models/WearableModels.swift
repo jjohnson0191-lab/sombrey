@@ -98,16 +98,17 @@ enum WearableMetricType: String {
     /// states.
     ///
     /// Active calories is the one deliberate exception to "0 is a real
-    /// reading here": `QCSportModel.calories` (and the matching
-    /// `currentStepInfo` live-callback field) is a cumulative
-    /// since-midnight device counter with no documented distinction
+    /// reading here": the band's pedometer calorie counter
+    /// (`QCSportModel.calories` / the `currentStepInfo` live callback) is
+    /// a cumulative since-midnight counter with no documented distinction
     /// between "band genuinely recorded zero effort today" and "the SDK
     /// hasn't produced a real reading for today yet" — both surface as
     /// the same `0`. Per explicit product decision, Sombrey never shows
     /// a numeric `0 kcal`, since a user reading that value can't tell
     /// those two states apart; the UI shows "—" (`WearableManager` /
     /// `HomeScreen` / `VitalsScreen`) until a real, positive reading
-    /// exists for today instead.
+    /// exists for today instead. `value` here is already in kcal (see
+    /// `BandCalorieUnits`), but the rule is unit-independent.
     func isPhysicallyPlausible(_ value: Double) -> Bool {
         switch self {
         case .heartRate, .restingHeartRate, .spo2, .skinTemperature,
@@ -119,12 +120,52 @@ enum WearableMetricType: String {
     }
 }
 
+/// The band reports every calorie counter except Sport+ session
+/// summaries in small calories (cal), not kilocalories. Established
+/// from the vendor's own material, not inferred from the magnitude:
+///
+/// - `QCSDKManager.h` documents `currentStepInfo`'s calorie as "unit:
+///   calorie", `QCSDKCmdCreator.h` documents `calorieTarget` as "unit:
+///   cal", and `QCExerciseModel.h` annotates its calories "单位卡" (cal) —
+///   while `OdmSportPlusModels.h` explicitly marks the Sport+ summary's
+///   `calorie` as "单位大卡" (kcal). The vendor distinguishes the two.
+/// - The SDK binary's Sport+ V2 parser divides the band's raw calorie
+///   integer by 1000.0 before storing that kcal value; the pedometer
+///   parser (`OdmBandGetCurrentSportInfo`, command 0x48) stores its
+///   3-byte raw integer into `QCSportModel.calories` unscaled.
+/// - The vendor demo logs both live callbacks as
+///   "calorie(unit:calorie)".
+/// - Production readings rise ~23–29 units per step (e.g. 1126 steps →
+///   30040): ~0.027 kcal/step as cal, impossible as kcal.
+///
+/// Converting here is a documented unit change, not an estimate: the
+/// band's own number is preserved verbatim alongside it
+/// (`WearableMeasurement.deviceRawValue`/`deviceRawUnit`).
+enum BandCalorieUnits {
+    static let rawUnit = "cal"
+    static let smallCaloriesPerKilocalorie: Double = 1000
+
+    static func kilocalories(fromBandCalories raw: Double) -> Double {
+        raw / smallCaloriesPerKilocalorie
+    }
+}
+
 struct WearableMeasurement {
     let deviceId: DeviceID
     let metricType: WearableMetricType
     let value: Double
     let unit: String
     let recordedAt: Date
+    /// The value exactly as the SDK delivered it, when `value` had to be
+    /// unit-converted from it (currently only active calories: raw cal →
+    /// kcal). `nil` means `value` already is the SDK's own number.
+    var deviceRawValue: Double? = nil
+    var deviceRawUnit: String? = nil
+    /// Which SDK entry point produced this reading (e.g.
+    /// `getCurrentSportSucess` for the sync summary, `currentStepInfo` for
+    /// the live push) — provenance for readings where more than one
+    /// device path reports the same metric.
+    var sdkSource: String? = nil
 
     /// Whether `recordedAt` falls on today's calendar date, in the
     /// device's local time zone. The one check that keeps a
@@ -174,7 +215,8 @@ struct SportSessionLiveUpdate {
     let heartRate: Int
     let steps: Int
     let distanceMeters: Int
-    let calories: Int
+    /// kcal, converted from the band's raw cal (see `BandCalorieUnits`).
+    let calories: Double
 }
 
 /// A completed Sport+ session, from the band's own historical record

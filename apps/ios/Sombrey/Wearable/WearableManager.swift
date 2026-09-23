@@ -391,7 +391,7 @@ final class WearableManager {
             if let liveUpdate {
                 args["durationSeconds"] = Double(liveUpdate.durationSeconds)
                 args["distanceMeters"] = Double(liveUpdate.distanceMeters)
-                args["calories"] = Double(liveUpdate.calories)
+                args["calories"] = liveUpdate.calories
                 args["averageHeartRate"] = Double(liveUpdate.heartRate)
                 args["steps"] = Double(liveUpdate.steps)
             }

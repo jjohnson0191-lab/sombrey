@@ -42,7 +42,7 @@ struct TrainCompleteView: View {
                             MetricView(label: "Heart rate", value: "\(sportSummary.heartRate) bpm")
                         }
                         if sportSummary.calories > 0 {
-                            MetricView(label: "Calories", value: "\(sportSummary.calories) kcal")
+                            MetricView(label: "Calories", value: "\(Int(sportSummary.calories.rounded())) kcal")
                         }
                         if sportSummary.distanceMeters > 0 {
                             MetricView(label: "Distance", value: "\(sportSummary.distanceMeters) m")
