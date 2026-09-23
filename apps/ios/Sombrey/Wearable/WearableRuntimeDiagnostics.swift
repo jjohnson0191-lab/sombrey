@@ -322,6 +322,8 @@ final class WearableRuntimeDiagnostics {
         bpParsedDiastolic = nil
         bpValidationResult = nil
         bpFailureReason = nil
+        bpBandPush = nil
+        bpCompletion = nil
         log("bp: command sent")
     }
 
@@ -342,6 +344,24 @@ final class WearableRuntimeDiagnostics {
         bpValidationResult = passed ? "passed" : "failed: \(reason)"
         if !passed { bpFailureReason = reason }
         log("bp: validation \(bpValidationResult ?? "")")
+    }
+
+    /// The band's own real-time BP push (`measuringHandle`) — the only
+    /// genuine on-demand BP reading the SDK delivers.
+    private(set) var bpBandPush: String?
+    /// How the SDK's measurement window ended: its NSError code (-1 start
+    /// command failed, -2 end command failed, -3 band not worn properly,
+    /// -4 uncalibrated) and whether a band push arrived first.
+    private(set) var bpCompletion: String?
+
+    func recordBPBandPush(systolic: Int, diastolic: Int) {
+        bpBandPush = "\(systolic)/\(diastolic) at \(Date())"
+        log("BP: band pushed \(systolic)/\(diastolic)")
+    }
+
+    func recordBPCompletion(sdkErrorCode: Int?, bandPushReceived: Bool) {
+        bpCompletion = "sdkErrorCode=\(sdkErrorCode.map(String.init) ?? "none") bandPushReceived=\(bandPushReceived)"
+        log("BP: SDK window ended \(bpCompletion ?? "")")
     }
 
     func recordBPFailure(_ reason: String) {
@@ -479,6 +499,8 @@ final class WearableRuntimeDiagnostics {
         lines.append("  capability: \(bpCapability.rawValue)")
         lines.append("  commandSentAt: \(fmt(bpCommandSentAt))")
         lines.append("  callbackAt: \(fmt(bpCallbackAt))")
+        lines.append("  bandPush: \(bpBandPush ?? "none")")
+        lines.append("  sdkWindowEnd: \(bpCompletion ?? "none")")
         lines.append("  rawResultType: \(bpRawResultType ?? "none")")
         lines.append("  rawResultDescription: \(bpRawResultDescription ?? "none")")
         lines.append("  parsedSystolic: \(bpParsedSystolic.map(String.init) ?? "none")  parsedDiastolic: \(bpParsedDiastolic.map(String.init) ?? "none")")

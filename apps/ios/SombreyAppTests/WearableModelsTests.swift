@@ -93,6 +93,45 @@ struct WearableMeasurementPayloadTests {
     }
 }
 
+/// On-demand BP comes only from the band's own real-time push, which the
+/// SDK forwards to `measuringHandle` as `@{"sbp": n, "dbp": n}` — never
+/// from `completedHandle`'s value, which for BP is a bare systolic number
+/// (the SDK's hardcoded 120 when the band sent nothing).
+struct BandBloodPressurePushTests {
+    @Test func bandPushDictionaryParsesToPair() {
+        let tick: Any = NSDictionary(dictionary: ["sbp": NSNumber(value: 118), "dbp": NSNumber(value: 76)])
+        let pair = BandBloodPressurePush.pair(from: tick)
+        #expect(pair?.systolic == 118)
+        #expect(pair?.diastolic == 76)
+    }
+
+    @Test func completionStyleNumberIsNeverAReading() {
+        #expect(BandBloodPressurePush.pair(from: NSNumber(value: 120)) == nil)
+        #expect(BandBloodPressurePush.pair(from: nil) == nil)
+    }
+
+    @Test func missingOrZeroHalfIsNotAReading() {
+        #expect(BandBloodPressurePush.pair(from: ["sbp": NSNumber(value: 118)]) == nil)
+        #expect(BandBloodPressurePush.pair(from: ["sbp": NSNumber(value: 0), "dbp": NSNumber(value: 76)]) == nil)
+    }
+}
+
+@MainActor
+struct BloodPressureFailureDetailTests {
+    @Test func sdkErrorCodesMapToWhatTheBandReported() {
+        func sdkError(_ code: Int) -> NSError { NSError(domain: "QCEndMeasuringError", code: code) }
+        #expect(WearableManager.bloodPressureFailureDetail(for: sdkError(-3))?.contains("isn't being worn properly") == true)
+        #expect(WearableManager.bloodPressureFailureDetail(for: sdkError(-4))?.contains("calibrating") == true)
+        #expect(WearableManager.bloodPressureFailureDetail(for: sdkError(-1))?.contains("start-measurement") == true)
+        #expect(WearableManager.bloodPressureFailureDetail(for: WearableSDKError.bloodPressureNotReturnedByBand)?.contains("without returning") == true)
+    }
+
+    @Test func unknownCausesKeepTheGenericMessage() {
+        #expect(WearableManager.bloodPressureFailureDetail(for: NSError(domain: "x", code: 42)) == nil)
+        #expect(WearableManager.bloodPressureFailureDetail(for: WearableSDKError.noConnectedDevice) == nil)
+    }
+}
+
 // A `QCBandSDKService.parseMeasurementResult` test for the blood-pressure
 // vendor-model-vs-dictionary fix was deliberately left out here: it would
 // need `import QCBandSDK`, and `SombreyAppTests`' build settings don't

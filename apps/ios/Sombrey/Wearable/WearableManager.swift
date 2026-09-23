@@ -52,6 +52,11 @@ final class WearableManager {
     /// honest "this band doesn't support X" instead of a retry prompt
     /// that would just fail the same way again.
     private(set) var lastMeasurementUnsupportedByDevice = false
+    /// Why the last on-demand blood-pressure attempt produced no reading,
+    /// in the band's/SDK's own terms (see `bloodPressureFailureDetail`),
+    /// so Vitals doesn't collapse every cause into one generic retry
+    /// message. `nil` when the cause is unknown.
+    private(set) var lastBloodPressureFailureDetail: String?
     /// The band's own advertised feature-support flags — see
     /// `QCBandService.lastKnownCapabilities`.
     var bandCapabilities: [String: Bool] { service.lastKnownCapabilities }
@@ -473,6 +478,7 @@ final class WearableManager {
         WearableDiagnostics.log("measureNow(\(metric.rawValue)): starting, pausing live HR first")
         lastError = nil
         lastMeasurementUnsupportedByDevice = false
+        if metric == .bloodPressure { lastBloodPressureFailureDetail = nil }
         activeOnDemandMeasurement = metric
         defer { activeOnDemandMeasurement = nil }
         await service.stopLiveHeartRate(device.id)
@@ -538,8 +544,29 @@ final class WearableManager {
             if case WearableSDKError.unsupportedByDevice = error {
                 lastMeasurementUnsupportedByDevice = true
             }
+            if metric == .bloodPressure {
+                lastBloodPressureFailureDetail = Self.bloodPressureFailureDetail(for: error)
+            }
             lastError = String(describing: error)
             return nil
+        }
+    }
+
+    /// Maps the SDK's own `startToMeasuring` failure codes (header:
+    /// -1 start command failed, -2 end command failed, -3 not properly
+    /// worn, -4 uncalibrated — each confirmed as a literal in the SDK
+    /// binary) to what actually happened. Unknown causes return `nil` so
+    /// the UI keeps its generic message rather than guessing.
+    static func bloodPressureFailureDetail(for error: Error) -> String? {
+        if case WearableSDKError.bloodPressureNotReturnedByBand = error {
+            return "The band finished without returning a blood-pressure reading."
+        }
+        switch (error as NSError).code {
+        case -1: return "The band didn't accept the start-measurement command."
+        case -2: return "The band didn't confirm the end of the measurement."
+        case -3: return "The band reported it isn't being worn properly — wear it snug against your wrist and try again."
+        case -4: return "The band reported it needs calibrating before it can measure blood pressure."
+        default: return nil
         }
     }
 

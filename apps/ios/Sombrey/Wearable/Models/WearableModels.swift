@@ -259,6 +259,20 @@ enum OnDemandMetric: String, CaseIterable {
     }
 }
 
+/// The band's own real-time BP push, as the SDK forwards it to
+/// `startToMeasuring`'s `measuringHandle`: `@{"sbp": NSNumber, "dbp":
+/// NSNumber}` (keys confirmed in the SDK binary). The only source of a
+/// genuine on-demand BP reading — see `QCBandSDKService.measureNow`.
+enum BandBloodPressurePush {
+    static func pair(from tick: Any?) -> (systolic: Int, diastolic: Int)? {
+        guard let dict = tick as? [String: Any],
+              let systolic = (dict["sbp"] as? NSNumber)?.intValue,
+              let diastolic = (dict["dbp"] as? NSNumber)?.intValue,
+              systolic > 0, diastolic > 0 else { return nil }
+        return (systolic, diastolic)
+    }
+}
+
 struct OnDemandMeasurementResult {
     var heartRate: Int?
     var systolicMmHg: Int?
@@ -310,4 +324,11 @@ enum WearableSDKError: Error {
     /// guessed, only ever thrown from a positive "false" flag the SDK
     /// itself returned (see `QCBandSDKService.measureNow`).
     case unsupportedByDevice(String)
+    /// Blood pressure only: the SDK's measurement window ended without
+    /// the band itself pushing a systolic/diastolic pair. The SDK still
+    /// reports `isSuccess` here, with a single number that is its own
+    /// hardcoded default (120) whenever the band sent nothing — see
+    /// `QCBandSDKService.measureNow` — so this is never treated as a
+    /// reading.
+    case bloodPressureNotReturnedByBand
 }

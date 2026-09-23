@@ -98,6 +98,8 @@ struct WearableDiagnosticsView: View {
                     diagnosticRow("Measurement in progress", wearableManager.activeOnDemandMeasurement == .bloodPressure ? "yes" : "no")
                     diagnosticRow("Command sent", runtime.bpCommandSentAt.map(Self.timeString) ?? "never")
                     diagnosticRow("Callback received", runtime.bpCallbackAt.map(Self.timeString) ?? "never")
+                    diagnosticRow("Band BP push", runtime.bpBandPush ?? "none")
+                    diagnosticRow("SDK window end", runtime.bpCompletion ?? "—")
                     diagnosticRow("Raw result type", runtime.bpRawResultType ?? "—")
                     diagnosticRow("Parsed systolic/diastolic", "\(runtime.bpParsedSystolic.map(String.init) ?? "—") / \(runtime.bpParsedDiastolic.map(String.init) ?? "—")")
                     diagnosticRow("Validation result", runtime.bpValidationResult ?? "—")

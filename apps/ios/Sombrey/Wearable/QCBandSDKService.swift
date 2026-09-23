@@ -470,11 +470,32 @@ final class QCBandSDKService: NSObject, QCBandService {
         // Codemagic build ("sending 'result' risks causing data races").
         return try await withCheckedThrowingContinuation { continuation in
             var didResume = false
+            // Blood pressure's only genuine device reading. Established
+            // from the SDK binary (QCSDKManager / OdmBandNotifyCenter),
+            // since neither the header nor the vendor demo shows a BP
+            // one-shot result:
+            // - The band's real-time BP packet (SBP byte 4, DBP byte 5)
+            //   is posted only when both bytes are non-zero, and reaches
+            //   the app solely through this `measuringHandle`, as
+            //   `@{"sbp": n, "dbp": n}`.
+            // - `completedHandle` fires only when the SDK's own timer
+            //   expires. For BP it hands back a bare NSNumber (systolic
+            //   only), and if the band never pushed a value it first
+            //   substitutes a hardcoded 120/80 — then still reports
+            //   `isSuccess`. Its `result` must therefore never be read
+            //   as a BP reading.
+            var bandBloodPressure: (systolic: Int, diastolic: Int)?
             QCSDKManager.shareInstance().startToMeasuring(
                 withOperateType: qcType,
                 timeout: 30,
                 measuringHandle: { tick in
-                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): measuringHandle tick, type=\(String(describing: type(of: tick as Any)))")
+                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): measuringHandle tick, type=\(String(describing: type(of: tick as Any))) value=\(String(describing: tick))")
+                    if isBP, let pair = BandBloodPressurePush.pair(from: tick) {
+                        bandBloodPressure = pair
+                        Task { @MainActor in
+                            WearableRuntimeDiagnostics.shared.recordBPBandPush(systolic: pair.systolic, diastolic: pair.diastolic)
+                        }
+                    }
                 },
                 completedHandle: { isSuccess, result, error in
                     guard !didResume else { return }
@@ -508,23 +529,40 @@ final class QCBandSDKService: NSObject, QCBandService {
                             WearableRuntimeDiagnostics.shared.recordBPCallback(isSuccess: isSuccess, rawType: rawType, rawDescription: resultDescription, error: errorDescription)
                         }
                     }
-                    if isSuccess {
-                        let parsed = Self.parseMeasurementResult(result, metric: metric)
-                        if isBP {
-                            Task { @MainActor in
-                                WearableRuntimeDiagnostics.shared.recordBPParsed(systolic: parsed.systolicMmHg, diastolic: parsed.diastolicMmHg)
-                                if parsed.systolicMmHg == nil || parsed.diastolicMmHg == nil {
-                                    WearableRuntimeDiagnostics.shared.recordBPFailure("SDK reported success but result didn't parse into systolic+diastolic (rawType=\(rawType))")
-                                }
-                            }
+                    if isBP {
+                        let errorCode = (error as NSError?)?.code
+                        let bandPushReceived = bandBloodPressure != nil
+                        Task { @MainActor in
+                            WearableRuntimeDiagnostics.shared.recordBPCompletion(sdkErrorCode: errorCode, bandPushReceived: bandPushReceived)
                         }
-                        continuation.resume(returning: parsed)
-                    } else {
-                        if isBP {
+                        // -3 (not worn) / -4 (uncalibrated) are the band
+                        // flagging the attempt invalid, so an earlier push
+                        // isn't trusted then; -2 only means the end command
+                        // wasn't acknowledged after the band had reported.
+                        if let pair = bandBloodPressure, isSuccess || errorCode == -2 {
+                            var parsed = OnDemandMeasurementResult()
+                            parsed.systolicMmHg = pair.systolic
+                            parsed.diastolicMmHg = pair.diastolic
+                            Task { @MainActor in
+                                WearableRuntimeDiagnostics.shared.recordBPParsed(systolic: pair.systolic, diastolic: pair.diastolic)
+                            }
+                            continuation.resume(returning: parsed)
+                        } else if isSuccess {
+                            Task { @MainActor in
+                                WearableRuntimeDiagnostics.shared.recordBPFailure("SDK window ended with no band BP push; completion value \(resultDescription) discarded (SDK default when band sends nothing)")
+                            }
+                            continuation.resume(throwing: WearableSDKError.bloodPressureNotReturnedByBand)
+                        } else {
                             Task { @MainActor in
                                 WearableRuntimeDiagnostics.shared.recordBPFailure(errorDescription ?? "SDK completedHandle reported failure with no NSError")
                             }
+                            continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
                         }
+                        return
+                    }
+                    if isSuccess {
+                        continuation.resume(returning: Self.parseMeasurementResult(result, metric: metric))
+                    } else {
                         continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
                     }
                 }
@@ -542,27 +580,9 @@ final class QCBandSDKService: NSObject, QCBandService {
         case .bodyTemperature:
             result.temperatureC = doubleValue(raw)
         case .bloodPressure:
-            // The vendor demo (`QCBandSDKDemo/ViewController.m`) never
-            // exercises `startToMeasuringWithOperateType:` for BP
-            // specifically (its own `getBloodPressure` only demonstrates
-            // the scheduled/manual *history* APIs), so this exact
-            // completion shape isn't directly demonstrated there. But
-            // every one-shot measurement type the demo DOES show a result
-            // for (raw HR, three-value temperature) hands back the
-            // vendor's own model class, never a plain dictionary — and
-            // `QCBloodPressureModel` is that same vendor class used by
-            // every other BP API in this SDK (`QCSDKCmdCreator`'s
-            // schedule/manual/history calls). Casting to it first matches
-            // that established SDK idiom; the dictionary form is kept
-            // only as a documented fallback for a shape no known
-            // SDK/firmware combination has been confirmed to send.
-            if let model = raw as? QCBloodPressureModel {
-                result.systolicMmHg = Int(model.systolicPressure)
-                result.diastolicMmHg = Int(model.diastolicPressure)
-            } else if let dict = raw as? [String: Any] {
-                result.systolicMmHg = intValue(dict["sbp"])
-                result.diastolicMmHg = intValue(dict["dbp"])
-            }
+            // Never parsed from the completion value — see `measureNow`
+            // and `BandBloodPressurePush`.
+            break
         }
         return result
     }
@@ -894,7 +914,13 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// actual documented flag for.
     private static func capabilityKey(for metric: OnDemandMetric) -> String? {
         switch metric {
-        case .bloodPressure: return "QCBandFeatureBloodPressure"
+        // The SDK's own exported constant, not its symbol name as a
+        // literal: the feature dictionary is keyed by the constant's
+        // string value, "feature.bloodPressure" (confirmed in the SDK
+        // binary), so the literal "QCBandFeatureBloodPressure" never
+        // matched and BP support always read as unknown. The two lines
+        // below are unchanged on purpose — this pass is BP-only.
+        case .bloodPressure: return QCBandFeatureBloodPressure
         case .spo2: return "QCBandFeatureBloodOxygen"
         case .bodyTemperature: return "QCBandFeatureTemperature"
         case .heartRate: return nil
