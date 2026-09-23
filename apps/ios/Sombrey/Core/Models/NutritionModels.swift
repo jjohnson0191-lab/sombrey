@@ -15,6 +15,13 @@ struct NutritionProgress: Decodable {
     let fatsTarget: Double
     let totalMealsToday: Int
     let mealsCompleted: Int
+    /// "ai_plan" when the targets above are the user's own (from their
+    /// Sombrey plan); "none" when they're only legacy defaults. Optional
+    /// for older deployments, where it's treated as "none".
+    var targetsSource: String? = nil
+
+    /// Whether the target fields are genuinely this user's targets.
+    var hasRealTargets: Bool { targetsSource == "ai_plan" }
 }
 
 /// One entry from `getByDate`'s `foodsWithDetails` array — a real logged

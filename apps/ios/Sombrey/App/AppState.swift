@@ -35,12 +35,23 @@ final class AppState {
     }
 
     var selectedTab: SombreyTab = .home
-    /// Set by `AuthenticatedRootView` when a nutrition-category
-    /// notification is tapped. `HomeScreen` owns the nutrition
-    /// `fullScreenCover` (there's no dedicated Nutrition tab), so it
-    /// observes this independently after the tab switch to `.home` has
-    /// already happened, then resets it.
-    var pendingNutritionDeepLink = false
+    /// Which part of the AI tab is showing. Nutrition lives inside AI
+    /// (there is no Nutrition tab), so anything that means "go to
+    /// nutrition" — Home's nutrition card, a meal notification — sets
+    /// `.nutrition` and selects the AI tab.
+    var aiSection: AISection = .coach
+
+    enum AISection: String, CaseIterable, Identifiable {
+        case coach = "Coach"
+        case nutrition = "Nutrition"
+        var id: String { rawValue }
+    }
+
+    /// Opens AI › Nutrition from anywhere.
+    func openNutrition() {
+        aiSection = .nutrition
+        selectedTab = .aiCoach
+    }
     private(set) var authPhase: AuthPhase = .loading
     private(set) var currentUser: SombreyUser?
     private(set) var userLoadError: String?

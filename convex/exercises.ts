@@ -54,6 +54,18 @@ export const list = query({
   },
 });
 
+// Resolve a set of exercises by id (a training plan's, a workout's) without
+// loading the whole library. Missing ids (a since-removed exercise) are
+// simply absent from the result.
+export const getMany = query({
+  args: { ids: v.array(v.id("exercises")) },
+  handler: async (ctx, args) => {
+    const unique = Array.from(new Set(args.ids)).slice(0, 200);
+    const rows = await Promise.all(unique.map((id) => ctx.db.get(id)));
+    return rows.filter((row): row is NonNullable<typeof row> => row !== null);
+  },
+});
+
 export const get = query({
   args: { id: v.id("exercises") },
   handler: async (ctx, args) => {

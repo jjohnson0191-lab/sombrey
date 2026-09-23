@@ -1236,11 +1236,22 @@ export default defineSchema({
     startedAt: v.number(),                 // epoch ms
     completedAt: v.optional(v.number()),   // epoch ms — unset while in progress
     durationSeconds: v.optional(v.number()),
-    source: v.union(v.literal("user_created"), v.literal("ai_created"), v.literal("repeated")),
+    // "manual" = a workout the user performed outside Sombrey/Sport+ and
+    // entered afterwards — USER-ENTERED data, never device data.
+    source: v.union(v.literal("user_created"), v.literal("ai_created"), v.literal("repeated"), v.literal("manual"), v.literal("plan")),
     // The paired band activity for this session, if the user started one —
     // never required, never fabricated when absent.
     sportPlusSessionId: v.optional(v.id("sportPlusSessions")),
     notes: v.optional(v.string()),
+    // Manual logs: what kind of exercise ("gym", "run", "cycle", "walk",
+    // "swim", "other") and what the user reported. Calories here are the
+    // user's own figure (e.g. from another device), labelled as such.
+    activityType: v.optional(v.string()),
+    distanceMeters: v.optional(v.number()),
+    userReportedCalories: v.optional(v.number()),
+    // Set when the workout came from one of the user's training plans.
+    trainingPlanId: v.optional(v.id("trainingPlans")),
+    trainingPlanDayIndex: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_completedAt", ["userId", "completedAt"]),
@@ -1260,6 +1271,33 @@ export default defineSchema({
   }).index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseId"])
     .index("by_user_and_completedAt", ["userId", "completedAt"]),
+
+  // Training plans — the user's own, or Sombrey-generated, side by side.
+  // Sombrey-owned: exercises reference Sombrey's `exercises` table (whose
+  // content may come from an external provider behind the scenes), never a
+  // provider's own ids, so the provider can change without touching plans.
+  trainingPlans: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    source: v.union(v.literal("user"), v.literal("sombrey")),
+    days: v.array(v.object({
+      name: v.string(),
+      // 1 = Sunday … 7 = Saturday (Calendar weekday), when the plan is tied
+      // to days of the week; absent for "next day in sequence" plans.
+      weekday: v.optional(v.number()),
+      exercises: v.array(v.object({
+        exerciseId: v.id("exercises"),
+        sets: v.number(),
+        reps: v.number(),
+        restSeconds: v.optional(v.number()),
+      })),
+    })),
+    isCurrent: v.boolean(),
+    // Progress through the plan: the next day to train (index into days).
+    nextDayIndex: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 
   // ── Sombrey Readiness Score ───────────────────────────────────────────────
   // One row per user per local calendar day. `algorithmVersion` is stored

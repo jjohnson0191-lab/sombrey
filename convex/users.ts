@@ -1159,6 +1159,24 @@ export const deleteSelfAccount = mutation({
     await purgeDocs(ctx, await ctx.db.query("emailRateLimits").withIndex("by_user_and_date", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("aiChatMessages").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
 
+    // Sombrey-native data: the band's measurements, sleep and Sport+
+    // sessions, workouts and sets, training plans, readiness scores,
+    // schedules and notification preferences, and paired devices. Every
+    // piece of wearable/health data the user generated goes with the
+    // account.
+    await purgeDocs(ctx, await ctx.db.query("wearableMeasurements").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("wearableSleepSessions").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("sportPlusSessionDetails").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("sportPlusSessions").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("sombreyWorkoutSets").withIndex("by_user_and_completedAt", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("sombreyWorkouts").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("trainingPlans").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("readinessScores").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("mealSchedules").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("workoutSchedules").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("notificationPreferences").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("wearableDevices").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+
     // Coach-client messaging — excluded feature, but purge this user's
     // side of it regardless of role (sender or recipient).
     await purgeDocs(ctx, await ctx.db.query("messages").withIndex("by_sender", (q) => q.eq("senderId", userId)).collect());

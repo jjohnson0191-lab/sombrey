@@ -161,6 +161,16 @@ final class TrainingSessionManager {
         case userCreated = "user_created"
         case aiCreated = "ai_created"
         case repeated
+        /// Started from a day of one of the user's training plans.
+        case plan
+    }
+
+    /// What a training plan asks for on an exercise — the user's own
+    /// plan values, shown as the target and used for rest.
+    struct PlanTarget: Codable, Equatable {
+        let sets: Int
+        let reps: Int
+        let restSeconds: Int?
     }
 
     static let defaultRestSeconds = 60
@@ -183,6 +193,12 @@ final class TrainingSessionManager {
     // Rest — a wall-clock window, never a decrementing counter.
     private(set) var restStartedAt: Date?
     private(set) var restTargetSeconds = TrainingSessionManager.defaultRestSeconds
+
+    /// Set when the workout was started from a training-plan day.
+    private(set) var trainingPlanId: String?
+    private(set) var trainingPlanDayIndex: Int?
+    /// Plan targets by exercise id, for a plan-started workout.
+    private(set) var planTargets: [String: PlanTarget] = [:]
 
     /// The Sport+ session paired with this workout, if one was started.
     private(set) var sportPlusSessionId: String?
@@ -285,6 +301,17 @@ final class TrainingSessionManager {
         }
     }
 
+    /// Loads one day of a training plan: its exercises, in order, with the
+    /// plan's own targets.
+    func loadPlanDay(planId: String, planName: String, dayIndex: Int, dayName: String, exercises: [(Exercise, PlanTarget)]) {
+        selectedExercises = exercises.map { $0.0 }
+        planTargets = Dictionary(exercises.map { ($0.0.id, $0.1) }, uniquingKeysWith: { first, _ in first })
+        trainingPlanId = planId
+        trainingPlanDayIndex = dayIndex
+        workoutSource = .plan
+        workoutName = "\(planName) · \(dayName)"
+    }
+
     /// Preselects the most recent completed workout's exercises — real
     /// "repeat previous workout," not a template guess.
     func loadRepeatTemplate(name: String, exercises: [Exercise]) {
@@ -335,6 +362,9 @@ final class TrainingSessionManager {
             completedAt: Date()
         )
         completedSets.append(set)
+        if let planRest = planTargets[exercise.id]?.restSeconds, planRest > 0 {
+            restTargetSeconds = planRest
+        }
         restStartedAt = Date()
         save()
         Task { await flushPendingSets() }
@@ -436,7 +466,16 @@ final class TrainingSessionManager {
             try await ConvexClientProvider.client.mutation("sombreyWorkouts:finishWorkout", with: args)
             completionSaved = pendingUploadCount == 0
             persistError = completionSaved ? nil : "Some sets are still uploading."
-            if completionSaved { clearSnapshot() }
+            if completionSaved {
+                // Progress through the plan: the next day is up next time.
+                if let trainingPlanId, let trainingPlanDayIndex {
+                    try? await ConvexClientProvider.client.mutation("trainingPlans:completeDay", with: [
+                        "planId": trainingPlanId,
+                        "dayIndex": Double(trainingPlanDayIndex),
+                    ])
+                }
+                clearSnapshot()
+            }
         } catch {
             persistError = String(describing: error)
         }
@@ -477,6 +516,9 @@ final class TrainingSessionManager {
         persistError = nil
         completionSaved = false
         workoutSource = .userCreated
+        trainingPlanId = nil
+        trainingPlanDayIndex = nil
+        planTargets = [:]
         clearSnapshot()
     }
 
@@ -489,11 +531,14 @@ final class TrainingSessionManager {
     private func createWorkoutRowIfNeeded() async {
         guard convexWorkoutId == nil, let startedAt else { return }
         do {
-            let id: String = try await ConvexClientProvider.client.mutation("sombreyWorkouts:startWorkout", with: [
+            var args: [String: ConvexEncodable?] = [
                 "name": workoutName,
                 "startedAt": startedAt.timeIntervalSince1970 * 1000,
                 "source": workoutSource.rawValue,
-            ])
+            ]
+            if let trainingPlanId { args["trainingPlanId"] = trainingPlanId }
+            if let trainingPlanDayIndex { args["trainingPlanDayIndex"] = Double(trainingPlanDayIndex) }
+            let id: String = try await ConvexClientProvider.client.mutation("sombreyWorkouts:startWorkout", with: args)
             convexWorkoutId = id
             persistError = nil
             save()
@@ -568,6 +613,10 @@ final class TrainingSessionManager {
         let convexWorkoutId: String?
         /// Last moment the app was known to be running this workout.
         let savedAt: Date
+        // Optional so snapshots saved by earlier builds still restore.
+        let trainingPlanId: String?
+        let trainingPlanDayIndex: Int?
+        let planTargets: [String: PlanTarget]?
     }
 
     private func save() {
@@ -578,7 +627,8 @@ final class TrainingSessionManager {
             startedAt: startedAt, finishedAt: finishedAt, pausedAt: pausedAt, pausedSeconds: pausedSeconds,
             restStartedAt: restStartedAt, restTargetSeconds: restTargetSeconds,
             sportPlusSessionId: sportPlusSessionId, sportSummary: sportSummary, convexWorkoutId: convexWorkoutId,
-            savedAt: Date()
+            savedAt: Date(),
+            trainingPlanId: trainingPlanId, trainingPlanDayIndex: trainingPlanDayIndex, planTargets: planTargets
         )
         if let data = try? JSONEncoder().encode(snapshot) {
             defaults.set(data, forKey: Self.snapshotKey)
@@ -611,6 +661,9 @@ final class TrainingSessionManager {
         sportPlusSessionId = snapshot.sportPlusSessionId
         sportSummary = snapshot.sportSummary
         convexWorkoutId = snapshot.convexWorkoutId
+        trainingPlanId = snapshot.trainingPlanId
+        trainingPlanDayIndex = snapshot.trainingPlanDayIndex
+        planTargets = snapshot.planTargets ?? [:]
         // A killed app can't have kept running: from the last saved
         // moment on, the workout is paused — that gap never counts as
         // training time — and the user resumes it deliberately.

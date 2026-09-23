@@ -56,6 +56,7 @@ struct ActiveWorkoutView: View {
                         exerciseCount: session.selectedExercises.count,
                         sets: session.currentExerciseSets,
                         lastTime: lastTime,
+                        planTarget: session.planTargets[exercise.id],
                         justLoggedID: justLoggedID,
                         onEditSet: { editingSet = $0 }
                     )
@@ -232,6 +233,12 @@ struct ActiveWorkoutView: View {
             reps = last.reps
             weightKg = last.weightKg
             prefilledFor = exercise.id
+        } else if let target = session.planTargets[exercise.id], history.value != nil {
+            // The user's own plan sets the reps; load still comes only
+            // from what they actually lifted last time.
+            reps = target.reps
+            weightKg = lastTime?.lastSet?.weightKg
+            prefilledFor = exercise.id
         } else if let previous = lastTime?.lastSet {
             reps = previous.reps
             weightKg = previous.weightKg
@@ -392,6 +399,7 @@ private struct ExerciseStage: View {
     let exerciseCount: Int
     let sets: [CompletedSet]
     let lastTime: ExerciseHistory.LastSession?
+    let planTarget: TrainingSessionManager.PlanTarget?
     let justLoggedID: UUID?
     let onEditSet: (CompletedSet) -> Void
 
@@ -408,6 +416,11 @@ private struct ExerciseStage: View {
                 .foregroundStyle(StudioColor.ink)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
+            if let planTarget {
+                Text("Plan · \(planTarget.sets) × \(planTarget.reps)\(planTarget.restSeconds.map { " · rest \(TrainingMath.clock($0))" } ?? "")")
+                    .font(StudioFont.body(12, weight: .medium))
+                    .foregroundStyle(StudioColor.ink)
+            }
             if let lastTime {
                 Text("Last time · \(lastTime.summary)")
                     .font(StudioFont.body(12))

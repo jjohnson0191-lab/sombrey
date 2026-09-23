@@ -22,6 +22,7 @@ struct ProgressScreen: View {
     @State private var recentSportSessions = ConvexQuery<[SportSessionSummaryDTO]>()
     @State private var recentWorkouts = ConvexQuery<[SombreyWorkoutSummaryDTO]>()
     @State private var readinessHistory = ConvexQuery<[ReadinessResultDTO]>()
+    @State private var showingVitals = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -32,6 +33,7 @@ struct ProgressScreen: View {
                     .foregroundStyle(StudioColor.ink)
                     .padding(.top, 20)
 
+                vitalsEntry
                 weightSection
                 photosSection
                 readinessTrendSection
@@ -53,6 +55,35 @@ struct ProgressScreen: View {
     }
 
     @ViewBuilder
+    /// Vitals is Progress's deep biometric history — every band metric's
+    /// instrument with LIVE/TODAY/7D/30D history, sleep and activity.
+    private var vitalsEntry: some View {
+        Button {
+            showingVitals = true
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("VITALS")
+                        .font(StudioFont.body(11, weight: .semibold))
+                        .tracking(1.3)
+                        .foregroundStyle(StudioColor.inkSoft)
+                    Text("Heart rate, SpO2, temperature, blood pressure, activity and sleep — full history")
+                        .font(StudioFont.body(14, weight: .medium))
+                        .foregroundStyle(StudioColor.ink)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .studioCard()
+        .fullScreenCover(isPresented: $showingVitals) { VitalsScreen() }
+    }
+
     private var weightSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("WEIGHT")

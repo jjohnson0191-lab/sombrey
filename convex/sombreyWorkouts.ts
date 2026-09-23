@@ -23,15 +23,65 @@ export const startWorkout = mutation({
   args: {
     name: v.string(),
     startedAt: v.number(),
-    source: v.union(v.literal("user_created"), v.literal("ai_created"), v.literal("repeated")),
+    source: v.union(v.literal("user_created"), v.literal("ai_created"), v.literal("repeated"), v.literal("plan")),
+    trainingPlanId: v.optional(v.id("trainingPlans")),
+    trainingPlanDayIndex: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
+    if (args.trainingPlanId) {
+      const plan = await ctx.db.get(args.trainingPlanId);
+      if (!plan || plan.userId !== user._id) {
+        throw new ConvexError({ code: "NOT_FOUND", message: "Training plan not found" });
+      }
+    }
     return await ctx.db.insert("sombreyWorkouts", {
       userId: user._id,
       name: args.name,
       startedAt: args.startedAt,
       source: args.source,
+      trainingPlanId: args.trainingPlanId,
+      trainingPlanDayIndex: args.trainingPlanDayIndex,
+    });
+  },
+});
+
+// A workout done outside Sombrey/Sport+ (gym, run, ride, walk, swim…),
+// entered afterwards. Stored as a completed Sombrey workout with source
+// "manual" so it sits in the same history the AI and future training-load
+// systems read — always identifiable as USER-ENTERED, never device data.
+export const logManualWorkout = mutation({
+  args: {
+    name: v.string(),
+    activityType: v.union(
+      v.literal("gym"), v.literal("run"), v.literal("cycle"),
+      v.literal("walk"), v.literal("swim"), v.literal("other"),
+    ),
+    startedAt: v.number(),
+    durationSeconds: v.number(),
+    distanceMeters: v.optional(v.number()),
+    userReportedCalories: v.optional(v.number()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    if (args.durationSeconds <= 0 || args.durationSeconds > 24 * 3600) {
+      throw new ConvexError({ code: "BAD_REQUEST", message: "Duration must be between 1 second and 24 hours" });
+    }
+    if (args.startedAt > Date.now() + 60_000) {
+      throw new ConvexError({ code: "BAD_REQUEST", message: "A logged workout can't start in the future" });
+    }
+    return await ctx.db.insert("sombreyWorkouts", {
+      userId: user._id,
+      name: args.name,
+      startedAt: args.startedAt,
+      completedAt: args.startedAt + args.durationSeconds * 1000,
+      durationSeconds: args.durationSeconds,
+      source: "manual",
+      activityType: args.activityType,
+      distanceMeters: args.distanceMeters,
+      userReportedCalories: args.userReportedCalories,
+      notes: args.notes,
     });
   },
 });

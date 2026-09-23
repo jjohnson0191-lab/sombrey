@@ -27,7 +27,6 @@ struct HomeScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
     @Environment(TrainingSessionManager.self) private var trainingSession
-    @State private var showingNutrition = false
     @State private var showingBandPairing = false
     @State private var showingVitals = false
     @State private var showingDiagnostics = false
@@ -102,9 +101,6 @@ struct HomeScreen: View {
                     .studioReveal(index: 6)
             }
         }
-        .fullScreenCover(isPresented: $showingNutrition) {
-            NutritionScreen()
-        }
         .fullScreenCover(isPresented: $showingBandPairing) {
             BandPairingView { showingBandPairing = false }
         }
@@ -121,21 +117,6 @@ struct HomeScreen: View {
                 "metricType": "heart_rate",
                 "sinceMs": Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000,
             ])
-        }
-        .onChange(of: appState.pendingNutritionDeepLink) { _, pending in
-            guard pending else { return }
-            showingNutrition = true
-            appState.pendingNutritionDeepLink = false
-        }
-        .onAppear {
-            // `.onChange` above only fires on a value transition, but
-            // this view is recreated (`.id(appState.selectedTab)`) after
-            // the flag is already set to true by the deep-link handler,
-            // so the initial-appear case needs its own check too.
-            if appState.pendingNutritionDeepLink {
-                showingNutrition = true
-                appState.pendingNutritionDeepLink = false
-            }
         }
     }
 
@@ -257,14 +238,16 @@ struct HomeScreen: View {
         }
         .buttonStyle(.plain)
         .studioCard()
-        // Developer-only diagnostics — long-press, never a visible
-        // button, so a normal user won't stumble into it.
+        // Developer diagnostics exist only in debug builds — never in a
+        // production (TestFlight / App Store) build.
+        #if DEBUG
         .onLongPressGesture(minimumDuration: 1.2) {
             showingDiagnostics = true
         }
         .sheet(isPresented: $showingDiagnostics) {
             WearableDiagnosticsView()
         }
+        #endif
     }
 
     private var bandStatusText: String {
@@ -567,33 +550,48 @@ struct HomeScreen: View {
 
     // MARK: - Nutrition
 
+    /// Today's nutrition at a glance — the depth lives in AI › Nutrition,
+    /// one tap away (the whole card opens it).
     private var nutritionCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("NUTRITION")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.nutrition)
+        Button {
+            appState.openNutrition()
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("NUTRITION")
+                        .font(StudioFont.body(11, weight: .semibold))
+                        .tracking(1.3)
+                        .foregroundStyle(StudioColor.nutrition)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
 
-            if let progress = nutritionProgress.value, progress.mealsCompleted > 0 {
-                Text("\(Int(progress.caloriesConsumed.rounded())) kcal")
-                    .font(StudioFont.hero(22, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .monospacedDigit()
-                Text("\(Int(progress.proteinConsumed.rounded()))g protein · \(progress.mealsCompleted) meal\(progress.mealsCompleted == 1 ? "" : "s") logged")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkSoft)
-                    .monospacedDigit()
-            } else {
-                Text("No meals logged yet today.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-                Button("Log your first meal") { showingNutrition = true }
-                    .font(StudioFont.body(13, weight: .medium))
-                    .foregroundStyle(StudioColor.accentInk)
-                    .padding(.top, 2)
+                if let progress = nutritionProgress.value, progress.caloriesConsumed > 0 || progress.mealsCompleted > 0 {
+                    Text("\(Int(progress.caloriesConsumed.rounded())) kcal")
+                        .font(StudioFont.hero(22, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                        .monospacedDigit()
+                    Text("\(Int(progress.proteinConsumed.rounded()))g protein\(progress.mealsCompleted > 0 ? " · \(progress.mealsCompleted) meal\(progress.mealsCompleted == 1 ? "" : "s") logged" : "")")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkSoft)
+                        .monospacedDigit()
+                } else {
+                    Text("No meals logged yet today.")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkFaint)
+                    Text("Log a meal")
+                        .font(StudioFont.body(13, weight: .medium))
+                        .foregroundStyle(StudioColor.accentInk)
+                        .padding(.top, 2)
+                }
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .studioCard()
+        .accessibilityHint("Opens Nutrition in AI")
     }
 
     // MARK: - Daily insight

@@ -25,38 +25,55 @@ struct AICoachScreen: View {
         @Bindable var appState = appState
         ScreenContainer(scene: .aiCoach, scrolls: false, selection: $appState.selectedTab) {
             VStack(spacing: 0) {
-                Text("Sombrey Coach")
-                    .font(StudioFont.hero(28, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 20)
-
-                AiDisclosureBadge()
-                    .padding(.top, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        if messages.isEmpty {
-                            emptyState
-                        }
-                        ForEach(messages) { message in
-                            MessageBubble(message: message)
-                        }
-                        if isSending {
-                            ProgressView().tint(StudioColor.ink)
-                        }
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(StudioFont.body(12))
-                                .foregroundStyle(StudioColor.danger)
-                        }
-                    }
-                    .padding(.top, 16)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Sombrey AI")
+                        .font(StudioFont.hero(28, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                    Spacer()
                 }
+                .padding(.top, 20)
 
-                inputBar
+                AISectionControl(selection: $appState.aiSection)
+                    .padding(.top, 10)
+
+                switch appState.aiSection {
+                case .coach:
+                    coach
+                case .nutrition:
+                    NutritionPanel()
+                }
             }
+        }
+    }
+
+    /// The conversation — Sombrey Coach, with its AI disclosure.
+    private var coach: some View {
+        VStack(spacing: 0) {
+            AiDisclosureBadge()
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if messages.isEmpty {
+                        emptyState
+                    }
+                    ForEach(messages) { message in
+                        MessageBubble(message: message)
+                    }
+                    if isSending {
+                        ProgressView().tint(StudioColor.ink)
+                    }
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.danger)
+                    }
+                }
+                .padding(.top, 16)
+            }
+
+            inputBar
         }
     }
 
@@ -136,5 +153,49 @@ private struct MessageBubble: View {
             if message.role == .user { Spacer(minLength: 0) }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+    }
+}
+
+/// The AI tab's sections in the navigation-tick grammar — a lit mark over
+/// the active one. Nutrition is a first-class part of AI, never a chat
+/// command.
+private struct AISectionControl: View {
+    @Binding var selection: AppState.AISection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var markSpace
+
+    var body: some View {
+        HStack(spacing: 24) {
+            ForEach(AppState.AISection.allCases) { section in
+                let isActive = section == selection
+                Button {
+                    withAnimation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion)) {
+                        selection = section
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(section.rawValue.uppercased())
+                            .font(StudioFont.body(11, weight: isActive ? .semibold : .medium))
+                            .tracking(1.3)
+                            .foregroundStyle(isActive ? StudioColor.ink : StudioColor.inkSoft)
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(StudioColor.ink.opacity(0.12)).frame(width: 12, height: 3)
+                            if isActive {
+                                Capsule()
+                                    .fill(StudioColor.accentInk)
+                                    .frame(width: 22, height: 3)
+                                    .matchedGeometryEffect(id: "aiSection", in: markSpace)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isActive ? .isSelected : [])
+            }
+            Spacer()
+        }
+        .sensoryFeedback(StudioHaptic.rangeChange, trigger: selection)
     }
 }

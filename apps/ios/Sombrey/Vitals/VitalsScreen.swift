@@ -3,8 +3,8 @@ import SwiftUI
 /// The dedicated destination for every wearable measurement Sombrey
 /// collects — Home stays a concise daily snapshot; this is where the
 /// user inspects each metric in depth with real historical trends.
-/// Reached from Home (tapping the Today's Metrics card) and from
-/// Settings, as a full-screen cover — same non-tab pattern as
+/// Reached from Home (tapping the Today's Vitals card) and from
+/// Progress (its deep-history entry), as a full-screen cover — same non-tab pattern as
 /// `NutritionScreen`/`NotificationSettingsView`, not a new nav tick.
 ///
 /// Every number here comes from `WearableManager`'s live state or a real

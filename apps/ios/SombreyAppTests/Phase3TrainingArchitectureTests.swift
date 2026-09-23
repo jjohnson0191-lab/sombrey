@@ -196,3 +196,42 @@ struct TrainingMathTests {
         #expect(session.currentSetNumber == 1)
     }
 }
+
+/// Five-tab architecture: Train's history, plans and nutrition provenance.
+struct ArchitecturePassTests {
+    private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+        try JSONDecoder().decode(T.self, from: json.data(using: .utf8)!)
+    }
+
+    @Test func historyShowsAnAttachedBandSessionOnlyOnce() throws {
+        let workouts = try decode([WorkoutHistoryDTO].self, """
+        [{"_id":"w1","name":"Leg Day","startedAt":2000,"source":"plan","sportPlusSessionId":"s1"},
+         {"_id":"w2","name":"Run","startedAt":1000,"source":"manual","activityType":"run","distanceMeters":5000,"durationSeconds":1800}]
+        """)
+        let sessions = try decode([SportSessionHistoryDTO].self, """
+        [{"_id":"s1","startedAt":2000,"sportType":4},{"_id":"s2","startedAt":3000,"sportType":7,"calories":210}]
+        """)
+        let entries = WorkoutHistory.merge(workouts: workouts, sessions: sessions) { _ in "Band activity" }
+        #expect(entries.map(\.id) == ["s2", "w1", "w2"])
+        #expect(entries[0].origin == .band)
+        #expect(entries[1].origin == .plan)
+        #expect(entries[2].origin == .manual("run"))
+        #expect(entries[2].detail == "5.00 km")
+    }
+
+    @Test func planNextDayIsClampedToRealDays() throws {
+        let plan = try decode(TrainingPlanDTO.self, """
+        {"_id":"p","name":"Upper/Lower","source":"user","isCurrent":true,"nextDayIndex":5,
+         "days":[{"name":"Upper","exercises":[]},{"name":"Lower","exercises":[]}]}
+        """)
+        #expect(plan.nextDay?.index == 1)
+        #expect(plan.nextDay?.day.name == "Lower")
+    }
+
+    @Test func nutritionTargetsCountOnlyWhenTheyAreTheUsers() throws {
+        let base = #""caloriesConsumed":0,"proteinConsumed":0,"carbsConsumed":0,"fatsConsumed":0,"caloriesTarget":2500,"proteinTarget":180,"carbsTarget":250,"fatsTarget":70,"totalMealsToday":0,"mealsCompleted":0"#
+        #expect(try decode(NutritionProgress.self, "{\(base)}").hasRealTargets == false)
+        #expect(try decode(NutritionProgress.self, "{\(base),\"targetsSource\":\"none\"}").hasRealTargets == false)
+        #expect(try decode(NutritionProgress.self, "{\(base),\"targetsSource\":\"ai_plan\"}").hasRealTargets == true)
+    }
+}

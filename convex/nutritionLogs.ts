@@ -77,6 +77,10 @@ export const getTodayProgress = query({
       proteinConsumed: Math.round(nutritionLog?.totalProtein ?? 0),
       carbsConsumed: Math.round(nutritionLog?.totalCarbs ?? 0),
       fatsConsumed: Math.round(nutritionLog?.totalFats ?? 0),
+      // Where the targets below come from. "none" means the user has no
+      // targets yet and the numbers are only the legacy web defaults —
+      // clients must not present them as the user's own targets.
+      targetsSource: macroTargets ? "ai_plan" : "none",
       caloriesTarget: macroTargets?.calories ?? 2500,
       proteinTarget: macroTargets?.protein ?? 180,
       carbsTarget: macroTargets?.carbs ?? 250,

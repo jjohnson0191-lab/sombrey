@@ -33,11 +33,22 @@ struct TrainOverviewView: View {
                     .foregroundStyle(StudioColor.ink)
                     .padding(.top, 20)
 
-                Text("Choose exercises to build today's session.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkSoft)
-
                 readinessContext
+
+                // Plans, manual logging, Sombrey workouts, the exercise
+                // library, history and workout days — Train's destinations.
+                TrainHubSection(session: session)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("START A SESSION")
+                        .font(StudioFont.body(11, weight: .semibold))
+                        .tracking(1.3)
+                        .foregroundStyle(StudioColor.inkSoft)
+                    Text("Choose exercises and train live with Sombrey and your band.")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkSoft)
+                }
+                .padding(.top, 8)
 
                 repeatPreviousButton
 
@@ -83,7 +94,9 @@ struct TrainOverviewView: View {
     private func startWorkout() {
         isStarting = true
         Task {
-            session.workoutSource = session.workoutSource == .repeated ? .repeated : .userCreated
+            if session.workoutSource != .repeated && session.workoutSource != .plan {
+                session.workoutSource = .userCreated
+            }
             await session.startWorkout()
             if let sportType = selectedSportType, wearableManager.pairedDevice != nil {
                 await wearableManager.startSportSession(type: sportType)

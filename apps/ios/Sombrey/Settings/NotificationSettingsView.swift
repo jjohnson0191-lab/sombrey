@@ -9,8 +9,6 @@ import SwiftUI
 struct NotificationSettingsView: View {
     @State private var preferences = ConvexQuery<NotificationPreferencesDTO>()
     @State private var authorizationDenied = false
-    @State private var showingMealSchedule = false
-    @State private var showingWorkoutSchedule = false
 
     var body: some View {
         ScrollView {
@@ -27,13 +25,13 @@ struct NotificationSettingsView: View {
 
                 if let prefs = preferences.value {
                     row(title: "Meal reminders", isOn: prefs.mealReminders) { setPreference(\.mealReminders, $0) }
-                    subRow(title: "Manage meal schedule") { showingMealSchedule = true }
+                    caption("Meal times are set in AI › Nutrition.")
                     row(title: "Missed meal reminders", isOn: prefs.missedMealReminders) { setPreference(\.missedMealReminders, $0) }
 
                     Divider().overlay(StudioColor.ink.opacity(0.08)).padding(.vertical, 8)
 
                     row(title: "Workout reminders", isOn: prefs.workoutReminders) { setPreference(\.workoutReminders, $0) }
-                    subRow(title: "Configure reminder behavior") { showingWorkoutSchedule = true }
+                    caption("Workout days are set in Train.")
                     row(title: "Missed workout", isOn: prefs.missedWorkoutReminders) { setPreference(\.missedWorkoutReminders, $0) }
 
                     Divider().overlay(StudioColor.ink.opacity(0.08)).padding(.vertical, 8)
@@ -54,8 +52,6 @@ struct NotificationSettingsView: View {
             preferences.subscribe(to: "notificationPreferences:get")
             authorizationDenied = await NotificationManager.shared.authorizationStatus() == .denied
         }
-        .sheet(isPresented: $showingMealSchedule) { MealScheduleView() }
-        .sheet(isPresented: $showingWorkoutSchedule) { WorkoutScheduleView() }
     }
 
     private var deniedNotice: some View {
@@ -78,21 +74,12 @@ struct NotificationSettingsView: View {
         .frame(minHeight: 44)
     }
 
-    private func subRow(title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.inkSoft)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-            .frame(minHeight: 32)
-        }
-        .buttonStyle(.plain)
-        .padding(.leading, 8)
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(StudioFont.body(11))
+            .foregroundStyle(StudioColor.inkFaint)
+            .padding(.leading, 8)
+            .padding(.bottom, 4)
     }
 
     // No local optimistic update needed — `preferences` is a live Convex

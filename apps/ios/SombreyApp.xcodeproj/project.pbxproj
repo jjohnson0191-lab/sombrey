@@ -51,6 +51,7 @@
 		000000000000000000000067 /* ProgressDataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000027 /* ProgressDataModels.swift */; };
 		000000000000000000000068 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000028 /* ChatModels.swift */; };
 		000000000000000000000069 /* TrainingSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000029 /* TrainingSessionManager.swift */; };
+		00000000000000000000010F /* TrainHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000010E /* TrainHub.swift */; };
 		00000000000000000000006A /* TrainOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002A /* TrainOverviewView.swift */; };
 		00000000000000000000006B /* ActiveWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002B /* ActiveWorkoutView.swift */; };
 		00000000000000000000006C /* TrainCompleteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002C /* TrainCompleteView.swift */; };
@@ -164,6 +165,7 @@
 		000000000000000000000027 /* ProgressDataModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressDataModels.swift"; sourceTree = "<group>"; };
 		000000000000000000000028 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatModels.swift"; sourceTree = "<group>"; };
 		000000000000000000000029 /* TrainingSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainingSessionManager.swift"; sourceTree = "<group>"; };
+		00000000000000000000010E /* TrainHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainHub.swift"; sourceTree = "<group>"; };
 		00000000000000000000002A /* TrainOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainOverviewView.swift"; sourceTree = "<group>"; };
 		00000000000000000000002B /* ActiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActiveWorkoutView.swift"; sourceTree = "<group>"; };
 		00000000000000000000002C /* TrainCompleteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainCompleteView.swift"; sourceTree = "<group>"; };
@@ -470,6 +472,7 @@
 			children = (
 			000000000000000000000021 /* TrainScreen.swift */,
 			000000000000000000000029 /* TrainingSessionManager.swift */,
+			00000000000000000000010E /* TrainHub.swift */,
 			00000000000000000000002A /* TrainOverviewView.swift */,
 			00000000000000000000002B /* ActiveWorkoutView.swift */,
 			00000000000000000000002C /* TrainCompleteView.swift */,
@@ -804,6 +807,7 @@
 				000000000000000000000067 /* ProgressDataModels.swift */,
 				000000000000000000000068 /* ChatModels.swift */,
 				000000000000000000000069 /* TrainingSessionManager.swift */,
+				00000000000000000000010F /* TrainHub.swift */,
 				00000000000000000000006A /* TrainOverviewView.swift */,
 				00000000000000000000006B /* ActiveWorkoutView.swift */,
 				00000000000000000000006C /* TrainCompleteView.swift */,
@@ -929,7 +933,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -960,7 +964,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -985,7 +989,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1011,7 +1015,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1033,7 +1037,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1058,7 +1062,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

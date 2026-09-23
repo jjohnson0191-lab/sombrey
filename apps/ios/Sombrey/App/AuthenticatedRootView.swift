@@ -61,8 +61,7 @@ struct AuthenticatedRootView: View {
             case .home, .readiness:
                 appState.selectedTab = .home
             case .nutrition:
-                appState.selectedTab = .home
-                appState.pendingNutritionDeepLink = true
+                appState.openNutrition()
             case .training:
                 appState.selectedTab = .train
             case .sleep:

@@ -1,16 +1,14 @@
 import SwiftUI
+import UIKit
 
-/// Account + sign-out — the minimal real slice of
-/// `apps/mobile/src/screens/SettingsScreen.tsx` needed for Phase 1's
-/// completion criteria ("sign-out returns cleanly to unauthenticated
-/// state"). The fuller settings surface (subscription, notifications,
-/// delete account) lands in a later phase — see Settings/README.md.
+/// Settings — account, app controls, privacy & data, legal and support.
+/// Consumer-facing only: domain features live in their own destinations
+/// (Vitals in Progress, meal times in AI › Nutrition, workout days in
+/// Train), and developer diagnostics exist only in debug builds.
 ///
-/// Phase 3 training-architecture expansion: adds the goal and coaching-
-/// mode controls the spec requires somewhere real (not a new screen —
-/// "no final visual-polish pass yet," just functional UI using existing
-/// tokens). AI Coach reads both from Convex directly; this screen is
-/// where the user actually sets them.
+/// Pages whose content doesn't exist yet (legal documents, the privacy
+/// explanation, data export, help) are honest entry points — they say
+/// the content isn't published, and never invent policy text.
 struct SettingsScreen: View {
     @Environment(AppState.self) private var appState
     @State private var isSigningOut = false
@@ -19,41 +17,91 @@ struct SettingsScreen: View {
     @State private var isSavingGoal = false
     @State private var selectedGoalCategory: GoalCategory = .generalFitness
     @State private var showingNotificationSettings = false
-    @State private var showingVitals = false
-    /// Temporary, explicit entry point for this diagnostic build only —
-    /// the existing long-press-on-Home's-band-card path wasn't
-    /// reachable/discoverable for a physical-device test where the band
-    /// wasn't even paired (no band card to long-press). Remove or hide
-    /// again before consumer release; see `WearableDiagnosticsView`'s
-    /// own header for why this panel exists at all.
+    @State private var placeholder: SettingsPlaceholder?
+    @State private var confirmingDelete = false
+    @State private var confirmingDeleteFinal = false
+    @State private var isDeleting = false
+    @State private var deleteError: String?
+    #if DEBUG
     @State private var showingDeveloperDiagnostics = false
+    #endif
 
     var body: some View {
         @Bindable var appState = appState
         ScreenContainer(scene: .settings, selection: $appState.selectedTab) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 30) {
                 Text("Settings")
                     .font(StudioFont.hero(32, weight: .semibold))
                     .foregroundStyle(StudioColor.ink)
                     .padding(.top, 20)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appState.currentUser?.name ?? "—")
-                        .font(StudioFont.body(15, weight: .medium))
-                        .foregroundStyle(StudioColor.ink)
-                    Text(appState.currentUser?.email ?? "—")
-                        .font(StudioFont.body(13))
-                        .foregroundStyle(StudioColor.inkSoft)
+                settingsGroup("ACCOUNT") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(appState.currentUser?.name ?? "—")
+                            .font(StudioFont.body(15, weight: .medium))
+                            .foregroundStyle(StudioColor.ink)
+                        Text(appState.currentUser?.email ?? "—")
+                            .font(StudioFont.body(13))
+                            .foregroundStyle(StudioColor.inkSoft)
+                    }
+                    .padding(.bottom, 6)
+                    row("Subscription", detail: "Not available yet") { placeholder = .subscription }
+                    WearableBandSection()
+                    goalSection
+                    row("Units", detail: "Metric · kg, km") { placeholder = .units }
                 }
 
-                WearableBandSection()
-                vitalsRow
-                goalSection
-                coachingModeSection
-                notificationsRow
-                developerDiagnosticsRow
+                settingsGroup("APP") {
+                    row("Notifications") { showingNotificationSettings = true }
+                    coachingModeSection
+                    row("Appearance", detail: "Studio") { placeholder = .appearance }
+                    row("Language", detail: "English") { placeholder = .language }
+                }
 
-                Spacer()
+                settingsGroup("PRIVACY & DATA") {
+                    row("How Sombrey uses your data") { placeholder = .dataUse }
+                    row("Permissions", detail: "Bluetooth, notifications") { openSystemSettings() }
+                    row("Download my data", detail: "Not available yet") { placeholder = .dataExport }
+                    Button {
+                        confirmingDelete = true
+                    } label: {
+                        HStack {
+                            Text(isDeleting ? "Deleting…" : "Delete account")
+                                .font(StudioFont.body(14, weight: .medium))
+                                .foregroundStyle(StudioColor.danger)
+                            Spacer()
+                        }
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDeleting)
+                    if let deleteError {
+                        Text("Couldn't delete your account: \(deleteError)")
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.danger)
+                    }
+                }
+
+                settingsGroup("LEGAL") {
+                    row("Terms & Conditions") { placeholder = .terms }
+                    row("Privacy Policy") { placeholder = .privacyPolicy }
+                    row("Cookie Policy") { placeholder = .cookiePolicy }
+                    row("AI Disclosure") { placeholder = .aiDisclosure }
+                    row("Health & Medical Disclaimer") { placeholder = .healthDisclaimer }
+                }
+
+                settingsGroup("SUPPORT") {
+                    row("Help & Support") { placeholder = .help }
+                    row("Contact Sombrey") { placeholder = .contact }
+                    row("About Sombrey", detail: AppVersion.text) { placeholder = .about }
+                }
+
+                #if DEBUG
+                settingsGroup("DEVELOPER (DEBUG BUILDS ONLY)") {
+                    row("Wearable diagnostics") { showingDeveloperDiagnostics = true }
+                }
+                #endif
 
                 Button {
                     isSigningOut = true
@@ -71,6 +119,7 @@ struct SettingsScreen: View {
                 .buttonStyle(.outlineCTA)
                 .disabled(isSigningOut)
             }
+            .padding(.bottom, 12)
         }
         .task {
             activeGoal.subscribe(to: "goals:getActiveGoal")
@@ -86,69 +135,83 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showingNotificationSettings) {
             NotificationSettingsView()
         }
-        .fullScreenCover(isPresented: $showingVitals) {
-            VitalsScreen()
+        .sheet(item: $placeholder) { page in
+            SettingsPlaceholderPage(page: page)
+                .presentationDetents([.medium])
         }
+        #if DEBUG
         .sheet(isPresented: $showingDeveloperDiagnostics) {
             WearableDiagnosticsView()
         }
+        #endif
+        .confirmationDialog("Delete your Sombrey account?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Continue", role: .destructive) { confirmingDeleteFinal = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your Sombrey profile and the data stored with it — band measurements, sleep, workouts, training plans, readiness, nutrition and AI conversations. It can't be undone.")
+        }
+        .alert("Delete everything permanently?", isPresented: $confirmingDeleteFinal) {
+            Button("Delete account", role: .destructive, action: deleteAccount)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It doesn't cancel an App Store subscription — manage that in your Apple account. Signing in again later starts a new, empty profile.")
+        }
     }
 
-    private var vitalsRow: some View {
-        Button {
-            showingVitals = true
-        } label: {
+    // MARK: - Building blocks
+
+    private func settingsGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(StudioFont.body(11, weight: .semibold))
+                .tracking(1.3)
+                .foregroundStyle(StudioColor.inkSoft)
+            content()
+        }
+    }
+
+    private func row(_ title: String, detail: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack {
-                Text("Vitals")
+                Text(title)
                     .font(StudioFont.body(14, weight: .medium))
                     .foregroundStyle(StudioColor.ink)
                 Spacer()
+                if let detail {
+                    Text(detail)
+                        .font(StudioFont.body(12))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12))
                     .foregroundStyle(StudioColor.inkFaint)
             }
             .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// Deliberately visible (not hidden/gestured) for this diagnostic
-    /// build only, per explicit instruction — clearly labeled so it
-    /// reads as a temporary developer surface, not a consumer feature.
-    private var developerDiagnosticsRow: some View {
-        Button {
-            showingDeveloperDiagnostics = true
-        } label: {
-            HStack {
-                Text("Developer Diagnostics")
-                    .font(StudioFont.body(14, weight: .medium))
-                    .foregroundStyle(StudioColor.ink)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-            .frame(minHeight: 44)
+    private func openSystemSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
         }
-        .buttonStyle(.plain)
     }
 
-    private var notificationsRow: some View {
-        Button {
-            showingNotificationSettings = true
-        } label: {
-            HStack {
-                Text("Notifications")
-                    .font(StudioFont.body(14, weight: .medium))
-                    .foregroundStyle(StudioColor.ink)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12))
-                    .foregroundStyle(StudioColor.inkFaint)
+    /// Deletes the account server-side (`users:deleteSelfAccount`, which
+    /// removes the profile and every Sombrey data table), then signs out.
+    private func deleteAccount() {
+        isDeleting = true
+        deleteError = nil
+        Task {
+            do {
+                try await ConvexClientProvider.client.mutation("users:deleteSelfAccount")
+                await appState.signOut()
+            } catch {
+                deleteError = String(describing: error)
             }
-            .frame(minHeight: 44)
+            isDeleting = false
         }
-        .buttonStyle(.plain)
     }
 
     private var goalSection: some View {
@@ -288,5 +351,97 @@ enum CoachingMode: String, CaseIterable, Identifiable {
         case .recommendations: return "You stay in control of your program — Sombrey offers suggestions, never changes it."
         case .trackingOnly: return "Sombrey records and analyzes your data without proactive coaching."
         }
+    }
+}
+
+/// Settings pages whose real content doesn't exist yet. Each says so
+/// plainly — none of them states a policy.
+enum SettingsPlaceholder: String, Identifiable {
+    case subscription, units, appearance, language
+    case dataUse, dataExport
+    case terms, privacyPolicy, cookiePolicy, aiDisclosure, healthDisclaimer
+    case help, contact, about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .subscription: return "Subscription"
+        case .units: return "Units"
+        case .appearance: return "Appearance"
+        case .language: return "Language"
+        case .dataUse: return "How Sombrey uses your data"
+        case .dataExport: return "Download my data"
+        case .terms: return "Terms & Conditions"
+        case .privacyPolicy: return "Privacy Policy"
+        case .cookiePolicy: return "Cookie Policy"
+        case .aiDisclosure: return "AI Disclosure"
+        case .healthDisclaimer: return "Health & Medical Disclaimer"
+        case .help: return "Help & Support"
+        case .contact: return "Contact Sombrey"
+        case .about: return "About Sombrey"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .subscription:
+            return "Subscriptions aren't available in this build yet. Nothing is being charged through the app."
+        case .units:
+            return "Sombrey currently shows metric units (kilograms, kilometres). A choice of units will come here."
+        case .appearance:
+            return "Sombrey uses its Studio appearance throughout. Appearance options will come here."
+        case .language:
+            return "Sombrey is available in English. More languages will come here."
+        case .dataUse:
+            return "The full explanation of what Sombrey collects from you and your band, what it stores, what its AI uses, which service providers receive data, retention, export, deletion and whether data is used to train models will be published here. It hasn't been published yet."
+        case .dataExport:
+            return "Exporting a copy of your data isn't available in this build yet. It will be offered here."
+        case .terms, .privacyPolicy, .cookiePolicy, .aiDisclosure, .healthDisclaimer:
+            return "Not yet published. Sombrey's \(title) will appear here once it is. Nothing on this page is a policy statement."
+        case .help:
+            return "Help articles will appear here."
+        case .contact:
+            return "A way to contact the Sombrey team will appear here."
+        case .about:
+            return "Sombrey — a premium wearable and AI fitness instrument.\nVersion \(AppVersion.text)"
+        }
+    }
+}
+
+private struct SettingsPlaceholderPage: View {
+    let page: SettingsPlaceholder
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(page.title)
+                    .font(StudioFont.hero(24, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .font(StudioFont.body(14, weight: .medium))
+                    .foregroundStyle(StudioColor.inkSoft)
+                    .frame(minHeight: 44)
+            }
+            Text(page.message)
+                .font(StudioFont.body(14))
+                .foregroundStyle(StudioColor.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(24)
+        .background(StudioColor.env4.ignoresSafeArea())
+    }
+}
+
+/// The installed app's version and build, e.g. "1.0 (29)".
+enum AppVersion {
+    static var text: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
     }
 }
