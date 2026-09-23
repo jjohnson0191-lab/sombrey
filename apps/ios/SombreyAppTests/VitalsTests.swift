@@ -100,3 +100,137 @@ struct InstrumentFoundationTests {
         #expect(points.allSatisfy { $0.kind == .live })
     }
 }
+
+/// UI3: the pure rules behind the readiness gauge, activity day dial and
+/// sleep timeline — each instrument may only draw what real data supports.
+struct UI3InstrumentTests {
+    // MARK: Readiness
+
+    private static let readinessJSON = """
+    {"userId":"u","date":"2026-09-23","algorithmVersion":"v1","score":87.0,"confidence":0.4,
+     "scoreBand":"Highly Ready","confidenceBand":"Improving",
+     "components":[
+       {"metric":"physiological","weight":0.0,"confidence":0.0,"description":"Not enough SpO2/temperature history yet"},
+       {"metric":"sleep","subScore":87.3,"weight":1.0,"confidence":0.4,"description":"Sleep met your need"},
+       {"metric":"cardiovascular","weight":0.0,"confidence":0.0,"description":"Building heart-rate baseline"},
+       {"metric":"trainingLoad","weight":0.0,"confidence":0.0,"description":"No recent training sessions logged"}
+     ],
+     "missingInputs":[],"calculatedAt":1000.0}
+    """.data(using: .utf8)!
+
+    @Test func readinessKeepsEveryComponentInServerOrder() throws {
+        let result = try JSONDecoder().decode(ReadinessResultDTO.self, from: Self.readinessJSON).toReadinessResult()
+        #expect(result.components.map(\.metric) == ["sleep", "cardiovascular", "trainingLoad", "physiological"])
+        #expect(result.components.filter(\.isIncluded).map(\.metric) == ["sleep"])
+    }
+
+    @Test func dialSegmentsTileExactlyZeroToHundred() throws {
+        let result = try JSONDecoder().decode(ReadinessResultDTO.self, from: Self.readinessJSON).toReadinessResult()
+        let segments = ReadinessDial.segments(result.components)
+        #expect(segments.count == 2)
+        #expect(segments.first?.kind == .contribution)
+        #expect(abs((segments.first?.end ?? 0) - 87.3) < 0.0001)
+        #expect(abs((segments.last?.end ?? 0) - 100) < 0.0001)
+    }
+
+    @Test func contributionsSumToTheUnroundedScoreAcrossSignals() {
+        let components = [
+            ReadinessComponent(metric: "sleep", subScore: 90, weight: 0.5, confidence: 1, description: ""),
+            ReadinessComponent(metric: "cardiovascular", subScore: 60, weight: 0.5, confidence: 1, description: ""),
+            ReadinessComponent(metric: "trainingLoad", subScore: nil, weight: 0, confidence: 0, description: ""),
+        ]
+        let segments = ReadinessDial.segments(components)
+        let filled = segments.filter { $0.kind == .contribution }
+        #expect(abs((filled.last?.end ?? 0) - 75) < 0.0001)
+        #expect(segments.allSatisfy { $0.metric != "trainingLoad" })
+    }
+
+    @Test func historyKeepsTheNewestRowPerDate() throws {
+        let rows = try JSONDecoder().decode([ReadinessResultDTO].self, from: """
+        [{"userId":"u","date":"2026-09-23","algorithmVersion":"v1","score":87,"confidence":0.4,"scoreBand":null,"confidenceBand":"x","components":[],"missingInputs":[],"calculatedAt":2},
+         {"userId":"u","date":"2026-09-23","algorithmVersion":"v1","score":80,"confidence":0.4,"scoreBand":null,"confidenceBand":"x","components":[],"missingInputs":[],"calculatedAt":1},
+         {"userId":"u","date":"2026-09-22","algorithmVersion":"v1","score":null,"confidence":0,"scoreBand":null,"confidenceBand":"x","components":[],"missingInputs":[],"calculatedAt":0}]
+        """.data(using: .utf8)!)
+        let daily = ReadinessDial.dailyScores(rows)
+        let newest: Double? = daily["2026-09-23"] ?? nil
+        #expect(newest == 87)
+        #expect(daily.keys.contains("2026-09-22"))
+        let unscored: Double? = daily["2026-09-22"] ?? nil
+        #expect(unscored == nil)
+        #expect(ReadinessGauge.lastDays(14).count == 14)
+    }
+
+    // MARK: Activity
+
+    private let midnight = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_790_100_000))
+
+    private func snap(_ minutesAfterMidnight: Double, _ steps: Double) -> ActivityDay.Snapshot {
+        ActivityDay.Snapshot(date: midnight.addingTimeInterval(minutesAfterMidnight * 60), steps: steps)
+    }
+
+    @Test func firstSpanRunsFromMidnightAndDifferencesAreExact() {
+        let spans = ActivityDay.spans([snap(460, 288), snap(506, 1126)], dayStart: midnight)
+        #expect(spans.count == 2)
+        #expect(spans[0].start == midnight)
+        #expect(spans[0].steps == 288)
+        #expect(spans[1].steps == 838)
+    }
+
+    @Test func closeSnapshotsCoalesceWithoutLosingSteps() {
+        let spans = ActivityDay.spans([snap(460, 100), snap(461, 140), snap(462, 190), snap(470, 300)], dayStart: midnight)
+        #expect(spans.reduce(0) { $0 + $1.steps } == 300)
+        #expect(spans.allSatisfy { $0.end.timeIntervalSince($0.start) >= ActivityDay.minimumSpan || $0.start == midnight })
+    }
+
+    @Test func counterResetIsNeverANegativeSpan() {
+        let spans = ActivityDay.spans([snap(600, 7528), snap(640, 4360), snap(700, 4648)], dayStart: midnight)
+        #expect(spans.allSatisfy { $0.steps > 0 })
+        #expect(spans.last?.steps == 288)
+    }
+
+    @Test func dailyTotalsOmitDaysWithoutData() {
+        let yesterday = midnight.addingTimeInterval(-86_400)
+        let totals = ActivityDay.dailyTotals([
+            ActivityDay.Snapshot(date: yesterday.addingTimeInterval(3600), steps: 2070),
+            snap(506, 1126),
+        ])
+        #expect(totals[yesterday] == 2070)
+        #expect(totals[midnight] == 1126)
+        #expect(totals.count == 2)
+    }
+
+    // MARK: Sleep
+
+    @Test func stagesAreOnlyPlacedAtRecordedTimes() {
+        let dto = SleepSessionSummaryDTO(
+            totalSleepMinutes: 380,
+            stages: [
+                SleepStageDTO(stage: "light", durationMinutes: 13, startedAt: 1_000_000),
+                SleepStageDTO(stage: "deep", durationMinutes: 35, startedAt: nil),
+                SleepStageDTO(stage: "rem", durationMinutes: 18, startedAt: 1_000_000 + 13 * 60_000),
+            ],
+            startedAt: 1_000_000,
+            endedAt: 1_000_000 + 380 * 60_000
+        )
+        let session = SleepTimelineModel.session(dto)
+        #expect(session.blocks.map(\.stage) == [.light, .rem])
+        #expect(SleepTimelineModel.minutesByStage(session.blocks)[.deep] == nil)
+    }
+
+    @Test func averageNeedsThreeEarlierNights() {
+        func night(_ start: Double, _ minutes: Int) -> SleepTimelineModel.Session {
+            SleepTimelineModel.Session(start: Date(timeIntervalSince1970: start), end: Date(timeIntervalSince1970: start + 1), totalSleepMinutes: minutes, blocks: [])
+        }
+        let latest = night(10, 380)
+        #expect(SleepTimelineModel.recentAverage(excluding: latest, in: [latest, night(1, 141)]) == nil)
+        #expect(SleepTimelineModel.recentAverage(excluding: latest, in: [latest, night(1, 300), night(2, 360), night(3, 420)]) == 360)
+    }
+
+    @Test func eveningClockPutsSixPMAtZero() {
+        var components = DateComponents()
+        components.year = 2026; components.month = 9; components.day = 23; components.hour = 18
+        let sixPM = Calendar.current.date(from: components)!
+        #expect(SleepTimelineModel.eveningClock(sixPM) == 0)
+        #expect(SleepTimelineModel.eveningClock(sixPM.addingTimeInterval(7 * 3600)) == 7)
+    }
+}

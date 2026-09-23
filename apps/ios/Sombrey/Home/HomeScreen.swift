@@ -19,13 +19,9 @@ import SwiftUI
 ///
 /// The readiness score comes from `readiness:getLatest` — a real,
 /// server-computed `ReadinessResult` (see `convex/readiness/scoring.ts`
-/// for the algorithm, unchanged this pass) — never fabricated locally.
-/// `ReadinessIndicatorView` handles "not enough data yet" honestly when
-/// `score` is nil; this pass added its `scoreBand`/`confidenceBand`
-/// presentation labels (both pre-existing, tested functions in
-/// `scoring.ts`, just not previously exposed to the client) and gave it
-/// more staging here (`readinessHero`), but the component's own
-/// data/cold-start logic is unchanged.
+/// for the algorithm, unchanged) — never fabricated locally.
+/// `ReadinessGauge` renders it as the screen's dominant instrument and
+/// handles "not enough data yet" honestly when `score` is nil.
 struct HomeScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
@@ -68,9 +64,24 @@ struct HomeScreen: View {
                     .padding(.top, 16)
                     .studioReveal(index: 3)
 
-                sleepCard
-                    .padding(.top, 16)
-                    .studioReveal(index: 4)
+                // Activity sits in the same tier as Today's Vitals — it IS
+                // today's band data — as its own day-dial instrument.
+                ActivityDialInstrument(
+                    steps: stepsToday,
+                    activeCalories: activeCaloriesToday,
+                    distance: distanceToday,
+                    isPaired: wearableManager.pairedDevice != nil
+                )
+                .padding(.top, 16)
+                .studioReveal(index: 4)
+
+                SleepTimelineInstrument(
+                    sessions: sleep.value,
+                    isPaired: wearableManager.pairedDevice != nil,
+                    isLoading: sleep.isLoading
+                )
+                .padding(.top, 16)
+                .studioReveal(index: 4)
 
                 trainingCard
                     .padding(.top, 16)
@@ -149,17 +160,13 @@ struct HomeScreen: View {
 
     // MARK: - Readiness hero
 
-    /// The central Sombrey instrument reading — everything below it is
-    /// subordinate. `ReadinessIndicatorView` itself is untouched in
-    /// structure (still the same real `readiness:getLatest` data,
-    /// contributing-factor logic, and cold-start honesty); this wrapper
-    /// only adds the physical-instrument staging around it: a restrained
-    /// radial backlight (the same "one panel lit from within" language
-    /// `BandPairingView`'s mark already uses, not a new visual idiom)
-    /// and real breathing room, so it reads as the dominant element even
-    /// with six more sections following it.
+    /// The central Sombrey instrument — everything below it is
+    /// subordinate. `ReadinessGauge` owns the reading and its opened
+    /// contributor detail; this wrapper keeps the restrained radial
+    /// backlight behind it and real breathing room, so it reads as the
+    /// dominant element with the other sections following.
     private var readinessHero: some View {
-        ReadinessIndicatorView(result: readiness.value.flatMap { $0 }?.toReadinessResult(), tone: .paper)
+        ReadinessGauge(result: readiness.value.flatMap { $0 }?.toReadinessResult(), isLoading: readiness.isLoading)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.vertical, 20)
             .background {
@@ -367,20 +374,6 @@ struct HomeScreen: View {
                         MetricView(label: "SpO2", value: metricText(.spo2, format: { "\(Int($0.rounded()))" }), unit: spo2 == nil ? nil : "%")
                         MetricView(label: "Temperature", value: metricText(.skinTemperature, format: { String(format: "%.1f", $0) }), unit: temperature == nil ? nil : "°C")
                         MetricView(label: "Blood Pressure", value: bloodPressureText, unit: nil)
-                        MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
-                        MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
-                        // "Active Calories": the band's pedometer
-                        // calorie counter — rises only with steps (0 cal
-                        // at 0 steps hours after midnight in production
-                        // data), so it excludes resting energy. Value is
-                        // kcal converted from the band's raw cal; see
-                        // `BandCalorieUnits`.
-                        MetricView(
-                            label: "Active Calories",
-                            value: activeCaloriesToday.map { Self.kilocalorieText($0.value) } ?? "—",
-                            unit: activeCaloriesToday == nil ? nil : "kcal",
-                            caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"
-                        )
                     }
                 }
             }
@@ -432,55 +425,6 @@ struct HomeScreen: View {
             return "—"
         }
         return "\(Int(systolic.value.rounded()))/\(Int(diastolic.value.rounded()))"
-    }
-
-    // MARK: - Sleep
-
-    private var sleepCard: some View {
-        Button { showingVitals = true } label: { sleepCardContent }
-            .buttonStyle(.plain)
-            .studioCard()
-    }
-
-    @ViewBuilder
-    private var sleepCardContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("SLEEP")
-                    .font(StudioFont.body(11, weight: .semibold))
-                    .tracking(1.3)
-                    .foregroundStyle(StudioColor.inkSoft)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-
-            if let latest = sleep.value?.first {
-                let hours = latest.totalSleepMinutes / 60
-                let minutes = latest.totalSleepMinutes % 60
-                Text("\(hours)h \(minutes)m")
-                    .font(StudioFont.body(20, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .monospacedDigit()
-                if let stages = latest.stages, !stages.isEmpty {
-                    let byStage = Dictionary(grouping: stages, by: \.stage).mapValues { $0.reduce(0) { $0 + $1.durationMinutes } }
-                    Text(["light", "deep", "rem"].compactMap { stage in
-                        byStage[stage].map { "\(stage.capitalized) \($0)m" }
-                    }.joined(separator: " · "))
-                        .font(StudioFont.body(12))
-                        .foregroundStyle(StudioColor.inkSoft)
-                }
-            } else if wearableManager.pairedDevice == nil {
-                Text("Put on your Sombrey Band to begin collecting sleep data.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                Text("No sleep synced yet.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-        }
     }
 
     // MARK: - Training

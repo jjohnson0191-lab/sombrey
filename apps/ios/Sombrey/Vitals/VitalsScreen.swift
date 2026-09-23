@@ -354,70 +354,22 @@ struct VitalsScreen: View {
     private var activeCaloriesToday: WearableMeasurement? { wearableManager.latestMeasurementForToday(.activeCalories) }
 
     private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("ACTIVITY")
-            HStack(spacing: 24) {
-                MetricView(label: "Steps", value: stepsToday.map { "\(Int($0.value.rounded()))" } ?? "—", unit: nil)
-                MetricView(label: "Distance", value: distanceToday.map { String(format: "%.1f", $0.value / 1000) } ?? "—", unit: distanceToday == nil ? nil : "km")
-                // See HomeScreen's identical tile for the label and units.
-                MetricView(
-                    label: "Active Calories",
-                    value: activeCaloriesToday.map { HomeScreen.kilocalorieText($0.value) } ?? "—",
-                    unit: activeCaloriesToday == nil ? nil : "kcal",
-                    caption: activeCaloriesToday.map { "As of \(Self.timeOnlyFormatter.string(from: $0.recordedAt))" } ?? "Waiting for band data"
-                )
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Steps").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
-                MetricHistoryChart(metricType: .steps, unit: "steps", valueFormatter: { "\(Int($0.rounded()))" })
-            }
-        }
-        .studioCard()
+        ActivityDialInstrument(
+            steps: stepsToday,
+            activeCalories: activeCaloriesToday,
+            distance: distanceToday,
+            isPaired: wearableManager.pairedDevice != nil
+        )
     }
 
     // MARK: - Sleep
 
     private var sleepSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("SLEEP")
-            if let latest = recentSleep.value?.first {
-                let hours = latest.totalSleepMinutes / 60
-                let minutes = latest.totalSleepMinutes % 60
-                Text("\(hours)h \(minutes)m")
-                    .font(StudioFont.hero(40, weight: .bold))
-                    .foregroundStyle(StudioColor.ink)
-                    .monospacedDigit()
-                Text("\(Self.timeOnlyString(latest.startedAt)) – \(Self.timeOnlyString(latest.endedAt))")
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.inkSoft)
-                if let stages = latest.stages, !stages.isEmpty {
-                    let byStage = Dictionary(grouping: stages, by: \.stage).mapValues { $0.reduce(0) { $0 + $1.durationMinutes } }
-                    HStack(spacing: 16) {
-                        ForEach(["light", "deep", "rem"], id: \.self) { stage in
-                            if let minutes = byStage[stage] {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(stage.capitalized).font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
-                                    Text("\(minutes / 60)h \(minutes % 60)m").font(StudioFont.body(13, weight: .medium)).foregroundStyle(StudioColor.ink)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            } else if wearableManager.pairedDevice == nil {
-                Text("Wear the band overnight to begin collecting sleep data.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                Text("No sleep synced yet.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-            DurationHistoryChart(points: (recentSleep.value ?? []).map {
-                .init(date: Date(timeIntervalSince1970: $0.endedAt / 1000), minutes: Double($0.totalSleepMinutes))
-            })
-        }
-        .studioCard()
+        SleepTimelineInstrument(
+            sessions: recentSleep.value,
+            isPaired: wearableManager.pairedDevice != nil,
+            isLoading: recentSleep.isLoading
+        )
     }
 
     // MARK: - Training
@@ -470,13 +422,4 @@ struct VitalsScreen: View {
         return formatter
     }()
 
-    private static let timeOnlyFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter
-    }()
-
-    private static func timeOnlyString(_ epochMs: Double) -> String {
-        timeOnlyFormatter.string(from: Date(timeIntervalSince1970: epochMs / 1000))
-    }
 }

@@ -31,7 +31,48 @@ struct ReadinessResult {
     let contributingFactors: [ContributingFactor]
     let missingInputs: [String]
     let calculatedAt: Date
+    /// Every component the server evaluated — included or not — exactly
+    /// as `convex/readiness/scoring.ts` produced it. The score is the sum
+    /// of included components' `subScore × weight`, so this is a true
+    /// decomposition, never a client-side attribution.
+    var components: [ReadinessComponent] = []
 }
+
+/// One readiness signal as the server scored it.
+struct ReadinessComponent: Identifiable, Hashable {
+    var id: String { metric }
+    /// "sleep" | "cardiovascular" | "trainingLoad" | "physiological".
+    let metric: String
+    /// 0–100, nil when the signal had too little data to be scored.
+    let subScore: Double?
+    /// Share of the score after the server redistributes missing
+    /// signals' weight; 0 when not included.
+    let weight: Double
+    /// 0–1 data sufficiency for this signal.
+    let confidence: Double
+    /// Server-written explanation (e.g. "No sleep data synced yet").
+    let description: String
+
+    var isIncluded: Bool { subScore != nil && weight > 0 }
+    /// Points this signal added to the score.
+    var contribution: Double { (subScore ?? 0) * weight }
+    /// Points this signal held back (its share of 100 not earned).
+    var shortfall: Double { isIncluded ? (100 - (subScore ?? 0)) * weight : 0 }
+
+    /// Fixed display order — the server's own base-weight order.
+    static let order = ["sleep", "cardiovascular", "trainingLoad", "physiological"]
+
+    var displayName: String {
+        switch metric {
+        case "sleep": return "Sleep"
+        case "cardiovascular": return "Cardiovascular"
+        case "trainingLoad": return "Training load"
+        case "physiological": return "Physiological"
+        default: return metric.capitalized
+        }
+    }
+}
+
 
 // MARK: - Convex wire decoding
 //
@@ -79,7 +120,10 @@ struct ReadinessResultDTO: Decodable {
             confidenceBand: confidenceBand,
             contributingFactors: factors,
             missingInputs: missingInputs,
-            calculatedAt: Date(timeIntervalSince1970: calculatedAt / 1000)
+            calculatedAt: Date(timeIntervalSince1970: calculatedAt / 1000),
+            components: components
+                .map { ReadinessComponent(metric: $0.metric, subScore: $0.subScore, weight: $0.weight, confidence: $0.confidence, description: $0.description) }
+                .sorted { (ReadinessComponent.order.firstIndex(of: $0.metric) ?? 99) < (ReadinessComponent.order.firstIndex(of: $1.metric) ?? 99) }
         )
     }
 }

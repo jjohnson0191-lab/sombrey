@@ -249,6 +249,11 @@ struct WearableMeasurementDTO: Decodable {
 struct SleepStageDTO: Decodable {
     let stage: String
     let durationMinutes: Int
+    /// Epoch ms — the band's own per-stage timestamp
+    /// (`QCSleepModel.happenDate`), stored with every stage. Optional so a
+    /// row without it still decodes; such a stage is never placed on a
+    /// timeline at a guessed time.
+    var startedAt: Double?
 }
 
 struct SleepSessionSummaryDTO: Decodable {

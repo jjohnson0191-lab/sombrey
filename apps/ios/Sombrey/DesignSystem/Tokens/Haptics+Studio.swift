@@ -16,6 +16,9 @@ enum StudioHaptic {
     static let rangeChange = SensoryFeedback.selection
     /// Scrubbing across a chart onto a different real reading.
     static let scrubStep = SensoryFeedback.selection
+    /// Singling out one part of an instrument (a readiness contributor,
+    /// an activity span, a sleep stage).
+    static let focus = SensoryFeedback.selection
     /// An on-demand measurement returned a real reading from the band.
     static let measurementComplete = SensoryFeedback.success
     /// An on-demand measurement ended without a reading.
