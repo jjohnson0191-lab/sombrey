@@ -12,6 +12,8 @@ enum StudioHaptic {
     static let expand = SensoryFeedback.impact(flexibility: .soft, intensity: 0.55)
     /// The instrument closing — lighter than opening.
     static let collapse = SensoryFeedback.impact(flexibility: .soft, intensity: 0.3)
+    /// Changing destination on the tab bar.
+    static let tabChange = SensoryFeedback.selection
     /// Moving between LIVE / TODAY / 7D / 30D.
     static let rangeChange = SensoryFeedback.selection
     /// Scrubbing across a chart onto a different real reading.

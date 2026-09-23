@@ -14,7 +14,14 @@ import SwiftUI
 struct AuthenticatedRootView: View {
     @Environment(AppState.self) private var appState
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(TrainingSessionManager.self) private var trainingSession
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The bar hides only during a workout's active and completion
+    /// moments — exactly where those screens already hid navigation.
+    private var showsNav: Bool {
+        !(appState.selectedTab == .train && trainingSession.phase != .overview)
+    }
 
     var body: some View {
         @Bindable var appState = appState
@@ -35,6 +42,19 @@ struct AuthenticatedRootView: View {
         .id(appState.selectedTab)
         .transition(.opacity)
         .animation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion), value: appState.selectedTab)
+        // Outside the per-tab `.id` above, so the bar persists across
+        // destinations. Ignores the keyboard so it stays put (hidden
+        // behind it) while typing, rather than riding up over the input.
+        .overlay(alignment: .bottom) {
+            if showsNav {
+                NavTicks(selection: $appState.selectedTab)
+                    // Only the bar ignores the keyboard (screens still
+                    // lift their own inputs, e.g. AI Coach's composer).
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 24)))
+            }
+        }
+        .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: showsNav)
         .onChange(of: notificationManager.pendingDeepLink) { _, target in
             guard let target else { return }
             switch target {

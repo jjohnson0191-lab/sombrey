@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Home — the daily Sombrey command center, hierarchy in strict order:
 /// Readiness (the dominant hero, the one thing that answers "how ready
@@ -42,12 +43,11 @@ struct HomeScreen: View {
         ScreenContainer(scene: .home, selection: $appState.selectedTab) {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                    .padding(.top, 20)
+                    .padding(.top, 16)
                     .studioReveal(index: 0)
 
                 readinessHero
-                    .padding(.top, 20)
-                    .padding(.bottom, 8)
+                    .padding(.top, 22)
                     .studioReveal(index: 1)
 
                 if let error = appState.userLoadError {
@@ -139,42 +139,66 @@ struct HomeScreen: View {
         }
     }
 
+    /// The masthead: the Sombrey faceplate (wordmark + a mark that is a
+    /// miniature of the Sombrey Score gauge, its indicator at today's real
+    /// score) and the band's state, above the instrument clock and an
+    /// understated greeting. Real device time only (see `HomeClock`).
     private var header: some View {
-        HStack(alignment: .top) {
-            Text(greeting)
-                .font(StudioFont.body(13))
-                .foregroundStyle(StudioColor.paperSoft)
-            Spacer()
-            WearableStatusBadge(
-                state: wearableManager.displayState,
-                batteryPct: wearableManager.status?.batteryPct
-            )
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center) {
+                SombreyWordmark(score: currentScore)
+                Spacer()
+                WearableStatusBadge(
+                    state: wearableManager.displayState,
+                    batteryPct: wearableManager.status?.batteryPct
+                )
+            }
+            HomeClock(firstName: firstName)
         }
     }
 
-    private var greeting: String {
-        if let firstName = appState.currentUser?.name?.split(separator: " ").first {
-            return "Good morning, \(firstName)"
-        }
-        return "Good morning"
+    private var currentScore: Int? {
+        readiness.value.flatMap { $0 }?.score.map { Int($0.rounded()) }
+    }
+
+    private var firstName: String? {
+        appState.currentUser?.name?.split(separator: " ").first.map(String.init)
     }
 
     // MARK: - Readiness hero
 
     /// The central Sombrey instrument — everything below it is
-    /// subordinate. `ReadinessGauge` owns the reading and its opened
-    /// contributor detail; this wrapper keeps the restrained radial
-    /// backlight behind it and real breathing room, so it reads as the
-    /// dominant element with the other sections following.
+    /// subordinate. A rounded, dark glass bezel (continuous 28pt corners —
+    /// deliberate, not a pill) with the same restrained backlight the
+    /// gauge always had, now held inside the instrument's own face.
+    /// `ReadinessGauge` owns the reading and its opened detail.
     private var readinessHero: some View {
         ReadinessGauge(result: readiness.value.flatMap { $0 }?.toReadinessResult(), isLoading: readiness.isLoading)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.vertical, 20)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 22)
             .background {
-                RadialGradient(
-                    colors: [StudioColor.env2.opacity(0.30), .clear],
-                    center: UnitPoint(x: 0.86, y: 0.5), startRadius: 0, endRadius: 220
-                )
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(StudioColor.env0.opacity(0.34))
+                    RadialGradient(
+                        colors: [StudioColor.env2.opacity(0.38), .clear],
+                        center: UnitPoint(x: 0.78, y: 0.42), startRadius: 0, endRadius: 240
+                    )
+                    LinearGradient(
+                        colors: [StudioColor.paper.opacity(0.06), .clear],
+                        startPoint: .top, endPoint: .center
+                    )
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(colors: [StudioColor.paper.opacity(0.20), StudioColor.paper.opacity(0.04)], startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1
+                        )
+                }
+                .shadow(color: StudioColor.env0.opacity(0.28), radius: 22, y: 12)
                 .allowsHitTesting(false)
             }
     }
@@ -619,5 +643,44 @@ struct HomeScreen: View {
             Button("Ask Sombrey") { appState.selectedTab = .aiCoach }
                 .buttonStyle(.outlineCTA)
         }
+    }
+}
+
+/// The instrument clock: the device's own local time, large and quiet,
+/// with the day period small beside it, and a one-line greeting + date.
+/// Re-renders on each minute boundary (no ticking animation) and
+/// immediately on a time-zone or significant time change, so travelling
+/// or changing the zone is reflected at once.
+private struct HomeClock: View {
+    let firstName: String?
+    @State private var timeChange = 0
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            let clock = InstrumentClockText(date: context.date)
+            let part = DayPart(date: context.date)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(clock.digits)
+                        .font(StudioFont.body(40, weight: .medium))
+                        .tracking(-0.8)
+                        .foregroundStyle(StudioColor.paper)
+                        .monospacedDigit()
+                    if let period = clock.period {
+                        Text(period.uppercased())
+                            .font(StudioFont.body(12, weight: .semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(StudioColor.paperSoft)
+                    }
+                }
+                Text("\(part.greeting)\(firstName.map { ", \($0)" } ?? "") · \(context.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                    .font(StudioFont.body(13))
+                    .foregroundStyle(StudioColor.paperSoft)
+            }
+            .id(timeChange)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in timeChange += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in timeChange += 1 }
+        .accessibilityElement(children: .combine)
     }
 }

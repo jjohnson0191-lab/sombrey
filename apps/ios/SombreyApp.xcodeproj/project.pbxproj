@@ -93,6 +93,7 @@
 		000000000000000000000107 /* ReadinessGauge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000106 /* ReadinessGauge.swift */; };
 		000000000000000000000109 /* ActivityDial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000108 /* ActivityDial.swift */; };
 		00000000000000000000010B /* SleepTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000010A /* SleepTimeline.swift */; };
+		00000000000000000000010D /* SombreyBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000010C /* SombreyBrand.swift */; };
 		0000000000000000000000F2 /* WearableDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F1 /* WearableDiagnosticsView.swift */; };
 		0000000000000000000000DF /* NotificationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DE /* NotificationModels.swift */; };
 		0000000000000000000000E1 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E0 /* NotificationManager.swift */; };
@@ -212,6 +213,7 @@
 		000000000000000000000106 /* ReadinessGauge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReadinessGauge.swift"; sourceTree = "<group>"; };
 		000000000000000000000108 /* ActivityDial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityDial.swift"; sourceTree = "<group>"; };
 		00000000000000000000010A /* SleepTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SleepTimeline.swift"; sourceTree = "<group>"; };
+		00000000000000000000010C /* SombreyBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyBrand.swift"; sourceTree = "<group>"; };
 		0000000000000000000000F1 /* WearableDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableDiagnosticsView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -332,7 +334,8 @@
 			000000000000000000000104 /* InstrumentChart.swift */,
 			000000000000000000000106 /* ReadinessGauge.swift */,
 			000000000000000000000108 /* ActivityDial.swift */,
-			00000000000000000000010A /* SleepTimeline.swift */
+			00000000000000000000010A /* SleepTimeline.swift */,
+			00000000000000000000010C /* SombreyBrand.swift */
 			);
 			name = "Components";
 			path = "Components";
@@ -822,6 +825,7 @@
 				000000000000000000000107 /* ReadinessGauge.swift */,
 				000000000000000000000109 /* ActivityDial.swift */,
 				00000000000000000000010B /* SleepTimeline.swift */,
+				00000000000000000000010D /* SombreyBrand.swift */,
 				0000000000000000000000F2 /* WearableDiagnosticsView.swift */,
 				0000000000000000000000E1 /* NotificationManager.swift */,
 				0000000000000000000000E3 /* NotificationSettingsView.swift */,
@@ -925,7 +929,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -956,7 +960,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -981,7 +985,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1007,7 +1011,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1029,7 +1033,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1054,7 +1058,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

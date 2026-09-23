@@ -16,6 +16,28 @@ enum ReadinessDial {
     /// from the server's own `scoreBand`, never from these numbers.
     static let bandThresholds: [Double] = [40, 55, 70, 85]
 
+    /// The same bands, named as `scoreBand()` names them, for the
+    /// score-level scale. The CURRENT band's label always comes from the
+    /// server's own `scoreBand`; these names label the rest of the scale.
+    struct Band: Equatable {
+        let name: String
+        let lower: Int
+        let upper: Int
+        func contains(_ score: Int) -> Bool { score >= lower && score <= upper }
+    }
+
+    static let bands: [Band] = [
+        Band(name: "Low Readiness", lower: 0, upper: 39),
+        Band(name: "Caution", lower: 40, upper: 54),
+        Band(name: "Moderate", lower: 55, upper: 69),
+        Band(name: "Ready", lower: 70, upper: 84),
+        Band(name: "Highly Ready", lower: 85, upper: 100),
+    ]
+
+    static func band(for score: Int) -> Band? {
+        bands.first { $0.contains(min(max(score, 0), 100)) }
+    }
+
     /// Fraction of a full circle (for `trim`) for a 0–100 value.
     static func trim(_ value: Double) -> CGFloat {
         CGFloat(sweep / 360 * min(max(value, 0), 100) / 100)
@@ -123,10 +145,17 @@ struct ReadinessGauge: View {
 
     private var summary: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("READINESS")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.paperSoft)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("SOMBREY SCORE")
+                    .font(StudioFont.body(11, weight: .semibold))
+                    .tracking(1.8)
+                    .foregroundStyle(StudioColor.paper)
+                // Says exactly what the number is: the readiness score.
+                Text("Readiness · 0–100")
+                    .font(StudioFont.body(10))
+                    .foregroundStyle(StudioColor.paperFaint)
+            }
+            .padding(.bottom, 4)
             if let result, score != nil {
                 if let band = result.scoreBand {
                     Text(band.uppercased())
@@ -212,6 +241,12 @@ struct ReadinessGauge: View {
                     .padding(isExpanded ? 34 : 28)
             }
             VStack(spacing: 2) {
+                if isExpanded {
+                    Text("SOMBREY SCORE")
+                        .font(StudioFont.body(8, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundStyle(StudioColor.paperSoft)
+                }
                 if let score {
                     HeroNumberText(text: "\(score)", size: .md, tone: .paper)
                     if let band = result?.scoreBand, isExpanded {
@@ -262,6 +297,9 @@ struct ReadinessGauge: View {
     private var detail: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let result {
+                if let score = result.score {
+                    ReadinessBandScale(score: score, serverBand: result.scoreBand)
+                }
                 VStack(spacing: 0) {
                     ForEach(components) { component in
                         contributorLine(component)
@@ -430,8 +468,8 @@ struct ReadinessGauge: View {
     }
 
     private var accessibilitySummary: String {
-        guard let result, let score else { return "Readiness. \(isLoading ? "Loading" : emptyText)" }
-        return "Readiness \(score), \(result.scoreBand ?? ""), \(result.confidenceBand) confidence. \(basisText)"
+        guard let result, let score else { return "Sombrey Score, readiness. \(isLoading ? "Loading" : emptyText)" }
+        return "Sombrey Score, readiness \(score) out of 100, \(result.scoreBand ?? ""), \(result.confidenceBand) confidence. \(basisText)"
     }
 }
 
@@ -456,6 +494,121 @@ private struct DialTicks: View {
                 path.move(to: CGPoint(x: center.x + direction.x * (outer - length), y: center.y + direction.y * (outer - length)))
                 path.addLine(to: CGPoint(x: center.x + direction.x * outer, y: center.y + direction.y * outer))
                 context.stroke(path, with: .color(color.opacity(isMajor ? 0.45 : 0.2)), lineWidth: 1)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Score level: where the score sits on Sombrey's 0–100 readiness range,
+/// read like a ruled instrument scale rather than a progress bar — a
+/// tick every 5, the band boundaries as numbered divisions, the five
+/// bands as segments (only the score's own band lit), and a marker at
+/// the exact score. The band name shown is the server's own.
+struct ReadinessBandScale: View {
+    let score: Int
+    let serverBand: String?
+
+    @State private var placed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var clamped: Int { min(max(score, 0), 100) }
+    private var currentBand: ReadinessDial.Band? { ReadinessDial.band(for: score) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("SCORE LEVEL")
+                    .font(StudioFont.body(9, weight: .semibold))
+                    .tracking(1.3)
+                    .foregroundStyle(StudioColor.paperSoft)
+                Spacer()
+                if let band = currentBand {
+                    Text("\((serverBand ?? band.name).uppercased()) · \(band.lower)–\(band.upper)")
+                        .font(StudioFont.body(10, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(StudioColor.paper)
+                }
+            }
+            GeometryReader { geo in
+                let width = geo.size.width
+                ZStack(alignment: .topLeading) {
+                    ScaleTicks()
+                        .frame(width: width, height: 6)
+                    ForEach(ReadinessDial.bands, id: \.lower) { band in
+                        segment(band, width: width)
+                    }
+                    marker(width: width)
+                    ForEach([0, 40, 55, 70, 85, 100], id: \.self) { value in
+                        Text("\(value)")
+                            .font(StudioFont.body(8))
+                            .foregroundStyle(StudioColor.paperFaint)
+                            .monospacedDigit()
+                            .fixedSize()
+                            .position(x: min(max(x(Double(value), width: width), 6), width - 8), y: 30)
+                    }
+                }
+            }
+            .frame(height: 36)
+        }
+        .onAppear {
+            if let animation = StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion) {
+                withAnimation(animation.delay(0.15)) { placed = true }
+            } else {
+                placed = true
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private func x(_ value: Double, width: CGFloat) -> CGFloat {
+        CGFloat(value / 100) * width
+    }
+
+    private func segment(_ band: ReadinessDial.Band, width: CGFloat) -> some View {
+        let start = x(Double(band.lower), width: width)
+        let end = x(Double(band.upper == 100 ? 100 : band.upper + 1), width: width)
+        let isCurrent = band == currentBand
+        return RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(isCurrent ? StudioColor.paper : StudioColor.paper.opacity(0.16))
+            .frame(width: max(end - start - 2, 2), height: isCurrent ? 6 : 4)
+            .offset(x: start + 1, y: isCurrent ? 9 : 10)
+    }
+
+    private func marker(width: CGFloat) -> some View {
+        let position = x(Double(placed ? clamped : 0), width: width)
+        return VStack(spacing: 2) {
+            Text("\(clamped)")
+                .font(StudioFont.body(9, weight: .semibold))
+                .foregroundStyle(StudioColor.accentInkDark)
+                .monospacedDigit()
+                .fixedSize()
+            Rectangle()
+                .fill(StudioColor.accentInkDark)
+                .frame(width: 2, height: 12)
+        }
+        .position(x: position, y: 4)
+    }
+
+    private var accessibilityText: String {
+        let bands = ReadinessDial.bands.map { "\($0.name) \($0.lower) to \($0.upper)" }.joined(separator: ", ")
+        let current = currentBand.map { " in the \(serverBand ?? $0.name) band, \($0.lower) to \($0.upper)" } ?? ""
+        return "Score level: \(clamped) out of 100\(current). Bands: \(bands)."
+    }
+}
+
+/// Fine ruling for the score-level scale: a tick every 5 points.
+private struct ScaleTicks: View {
+    var body: some View {
+        Canvas { context, size in
+            for step in 0...20 {
+                let x = size.width * CGFloat(step) / 20
+                let isDivision = [0, 8, 11, 14, 17, 20].contains(step)
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: isDivision ? 6 : 3))
+                context.stroke(path, with: .color(StudioColor.paper.opacity(isDivision ? 0.45 : 0.18)), lineWidth: 1)
             }
         }
         .accessibilityHidden(true)

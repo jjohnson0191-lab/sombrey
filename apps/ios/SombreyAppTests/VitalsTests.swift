@@ -234,3 +234,50 @@ struct UI3InstrumentTests {
         #expect(SleepTimelineModel.eveningClock(sixPM.addingTimeInterval(7 * 3600)) == 7)
     }
 }
+
+/// UI2: Home's time-of-day and score-level rules.
+struct HomeIdentityTests {
+    @Test func greetingBoundariesAreFixed() {
+        #expect(DayPart(hour: 4) == .evening)
+        #expect(DayPart(hour: 5) == .morning)
+        #expect(DayPart(hour: 11) == .morning)
+        #expect(DayPart(hour: 12) == .afternoon)
+        #expect(DayPart(hour: 16) == .afternoon)
+        #expect(DayPart(hour: 17) == .evening)
+        #expect(DayPart(hour: 0) == .evening)
+        #expect(DayPart.morning.greeting == "Good morning")
+    }
+
+    @Test func greetingFollowsTheTimeZoneNotAFixedClock() {
+        let instant = Date(timeIntervalSince1970: 1_790_188_920) // 18:42 UTC
+        var utc = Calendar(identifier: .gregorian); utc.timeZone = TimeZone(identifier: "UTC")!
+        var losAngeles = Calendar(identifier: .gregorian); losAngeles.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        #expect(DayPart(date: instant, calendar: utc) == .evening)
+        #expect(DayPart(date: instant, calendar: losAngeles) == .morning)
+    }
+
+    @Test func clockHonoursTwelveAndTwentyFourHourLocales() {
+        let instant = Date(timeIntervalSince1970: 1_790_188_920)
+        let utc = TimeZone(identifier: "UTC")!
+        let us = InstrumentClockText(date: instant, locale: Locale(identifier: "en_US"), timeZone: utc)
+        #expect(us.digits == "6:42")
+        #expect(us.period == "PM")
+        let uk = InstrumentClockText(date: instant, locale: Locale(identifier: "en_GB"), timeZone: utc)
+        #expect(uk.digits == "18:42")
+        #expect(uk.period == nil)
+        // French has a literal "h" in its pattern but is a 24-hour clock.
+        #expect(InstrumentClockText(date: instant, locale: Locale(identifier: "fr_FR"), timeZone: utc).period == nil)
+        let kolkata = InstrumentClockText(date: instant, locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "Asia/Kolkata")!)
+        #expect(kolkata.digits == "12:12")
+        #expect(kolkata.period == "AM")
+    }
+
+    @Test func scoreBandsMirrorTheServerThresholdsAndCoverTheRange() {
+        #expect(ReadinessDial.bands.dropFirst().map { Double($0.lower) } == ReadinessDial.bandThresholds)
+        #expect(ReadinessDial.band(for: 87)?.name == "Highly Ready")
+        #expect(ReadinessDial.band(for: 85)?.name == "Highly Ready")
+        #expect(ReadinessDial.band(for: 84)?.name == "Ready")
+        #expect(ReadinessDial.band(for: 39)?.name == "Low Readiness")
+        #expect((0...100).allSatisfy { score in ReadinessDial.bands.filter { $0.contains(score) }.count == 1 })
+    }
+}
