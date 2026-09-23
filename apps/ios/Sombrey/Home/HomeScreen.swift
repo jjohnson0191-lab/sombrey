@@ -336,7 +336,7 @@ struct HomeScreen: View {
                         .foregroundStyle(StudioColor.inkSoft)
                     if let resting = todayRestingHeartRate {
                         Text("\(Int(resting.rounded()))")
-                            .font(StudioFont.body(22, weight: .semibold))
+                            .font(StudioFont.hero(24, weight: .semibold))
                             .foregroundStyle(StudioColor.ink)
                             .monospacedDigit()
                         Text("BPM today")
@@ -576,7 +576,7 @@ struct HomeScreen: View {
 
             if let progress = nutritionProgress.value, progress.mealsCompleted > 0 {
                 Text("\(Int(progress.caloriesConsumed.rounded())) kcal")
-                    .font(StudioFont.body(20, weight: .semibold))
+                    .font(StudioFont.hero(22, weight: .semibold))
                     .foregroundStyle(StudioColor.ink)
                     .monospacedDigit()
                 Text("\(Int(progress.proteinConsumed.rounded()))g protein · \(progress.mealsCompleted) meal\(progress.mealsCompleted == 1 ? "" : "s") logged")
@@ -662,8 +662,8 @@ private struct HomeClock: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(clock.digits)
-                        .font(StudioFont.body(40, weight: .medium))
-                        .tracking(-0.8)
+                        .font(StudioFont.hero(38, weight: .semibold))
+                        .tracking(-0.4)
                         .foregroundStyle(StudioColor.paper)
                         .monospacedDigit()
                     if let period = clock.period {

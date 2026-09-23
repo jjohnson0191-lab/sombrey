@@ -158,7 +158,7 @@ struct SleepTimelineInstrument: View {
         if let latest = models.first {
             HStack(alignment: .firstTextBaseline) {
                 Text(Self.duration(latest.totalSleepMinutes))
-                    .font(StudioFont.body(24, weight: .semibold))
+                    .font(StudioFont.hero(28, weight: .semibold))
                     .foregroundStyle(StudioColor.ink)
                     .monospacedDigit()
                 Spacer()

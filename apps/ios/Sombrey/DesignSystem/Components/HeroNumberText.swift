@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Bricolage Grotesque — reserved for exactly the highest-attention
-/// numerical moments (readiness score, a live rep count, a rest timer, the
-/// workout-duration stat on completion). This is the ONLY view type
-/// allowed to use `StudioFont.hero`; every other number in the app stays
-/// in Instrument Sans. Ported from `apps/mobile/src/ui/HeroNumber.tsx`.
+/// The standard hero numeral — Bricolage Grotesque at one of three
+/// fixed sizes, with a weighted entrance — for the numbers that ARE the
+/// moment (the Sombrey Score, a live rep count, a workout's duration).
+/// Other display-face uses (titles, the clock, secondary hero values)
+/// call `StudioFont.hero` directly; see `StudioFont` for the rule.
+/// Ported from `apps/mobile/src/ui/HeroNumber.tsx`.
 ///
 /// `animatesEntrance`: a controlled, weighted reveal (opacity + a small
 /// scale settle, via `StudioMotion.bloomOnce`/`StudioReveal`) rather than

@@ -191,7 +191,7 @@ struct ActivityDialInstrument: View {
                 }
             VStack(spacing: 2) {
                 Text(steps.map { $0.value.formatted(.number.precision(.fractionLength(0))) } ?? "—")
-                    .font(StudioFont.body(isExpanded ? 30 : 22, weight: .semibold))
+                    .font(StudioFont.hero(isExpanded ? 32 : 24, weight: .semibold))
                     .foregroundStyle(steps == nil ? StudioColor.inkFaint : StudioColor.ink)
                     .monospacedDigit()
                     .studioNumericTransition(steps?.value ?? 0)

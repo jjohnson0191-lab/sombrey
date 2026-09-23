@@ -166,7 +166,7 @@ struct InstrumentHistoryChart: View {
     private var readoutRow: some View {
         if let point = selectedPoint {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                (Text(valueText(point)).font(StudioFont.body(20, weight: .semibold)).foregroundStyle(StudioColor.ink)
+                (Text(valueText(point)).font(StudioFont.hero(22, weight: .semibold)).foregroundStyle(StudioColor.ink)
                     + Text(" \(unit)").font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft))
                     .monospacedDigit()
                 Text(timestamp(point.date))

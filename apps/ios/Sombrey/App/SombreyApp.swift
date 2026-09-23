@@ -16,11 +16,15 @@ struct SombreyApp: App {
 
     init() {
         ClerkAuthCoordinator.configure()
+        StudioFont.configureUIKitAppearance()
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                // Any text without its own font is Sombrey's supporting
+                // face, never the system face (see `StudioFont`).
+                .font(StudioFont.defaultText)
                 .environment(Clerk.shared)
                 .environment(appState)
                 .environment(wearableManager)

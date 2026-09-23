@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import UIKit
 @testable import SombreyApp
 
 /// `MetricHistoryChart.TimeRange` is the one piece of genuinely new,
@@ -279,5 +280,20 @@ struct HomeIdentityTests {
         #expect(ReadinessDial.band(for: 84)?.name == "Ready")
         #expect(ReadinessDial.band(for: 39)?.name == "Low Readiness")
         #expect((0...100).allSatisfy { score in ReadinessDial.bands.filter { $0.contains(score) }.count == 1 })
+    }
+}
+
+/// Typography: every face the system names must be a real, registered
+/// font — a typo would silently fall back to the system face.
+struct TypographyTests {
+    @Test func everyStudioFontNameResolves() {
+        let names = [
+            StudioFont.Instrument.regular, StudioFont.Instrument.medium, StudioFont.Instrument.mediumItalic,
+            StudioFont.Instrument.semibold, StudioFont.Instrument.bold,
+            StudioFont.Hero.semibold, StudioFont.Hero.bold,
+        ]
+        for name in names {
+            #expect(UIFont(name: name, size: 17) != nil, "\(name) is not a registered font")
+        }
     }
 }

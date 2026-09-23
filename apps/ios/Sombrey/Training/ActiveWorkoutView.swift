@@ -270,7 +270,7 @@ private struct WorkoutHUD: View {
                     .foregroundStyle(session.isPaused ? StudioColor.inkSoft : StudioColor.accentInk)
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(TrainingMath.clock(session.activeSeconds(at: context.date)))
-                        .font(StudioFont.body(20, weight: .semibold))
+                        .font(StudioFont.hero(24, weight: .semibold))
                         .foregroundStyle(session.isPaused ? StudioColor.inkFaint : StudioColor.ink)
                         .monospacedDigit()
                 }
@@ -320,7 +320,7 @@ private struct LiveSignalLine: View {
                 LivePulseMark(bpm: reading)
                 if let reading {
                     Text("\(Int(reading.rounded()))")
-                        .font(StudioFont.body(20, weight: .semibold))
+                        .font(StudioFont.hero(22, weight: .semibold))
                         .foregroundStyle(StudioColor.ink)
                         .monospacedDigit()
                         .studioNumericTransition(reading.rounded())
@@ -512,7 +512,8 @@ private struct SetLogger: View {
                 } label: {
                     VStack(spacing: 0) {
                         Text(weightKg.map { TrainingMath.weightText($0) } ?? "Bodyweight")
-                            .font(StudioFont.body(weightKg == nil ? 20 : 30, weight: .semibold))
+                            // A load is a hero numeral; "Bodyweight" is a word.
+                            .font(weightKg == nil ? StudioFont.body(20, weight: .semibold) : StudioFont.hero(30, weight: .semibold))
                             .foregroundStyle(StudioColor.ink)
                             .monospacedDigit()
                         Text(weightKg == nil ? "TAP OR + TO ADD LOAD" : "KG · TAP TO TYPE")
@@ -697,7 +698,7 @@ private struct PausedPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Workout paused")
-                    .font(StudioFont.body(20, weight: .semibold))
+                    .font(StudioFont.hero(24, weight: .semibold))
                     .foregroundStyle(StudioColor.ink)
                 Text("The clock and rest are stopped. Everything logged is saved.")
                     .font(StudioFont.body(12))

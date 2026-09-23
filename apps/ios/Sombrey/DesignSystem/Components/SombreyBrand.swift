@@ -107,8 +107,9 @@ struct SombreyMark: View {
     }
 }
 
-/// "SOMBREY" as an engraved faceplate legend — widely tracked Instrument
-/// Sans, not a display logo — beside the mark.
+/// The Sombrey wordmark beside the mark — the same display-face wordmark
+/// as Sign In and Band Pairing (Bricolage Grotesque), so the brand reads
+/// identically wherever it appears.
 struct SombreyWordmark: View {
     var score: Int?
     var color: Color = StudioColor.paper
@@ -116,9 +117,8 @@ struct SombreyWordmark: View {
     var body: some View {
         HStack(spacing: 9) {
             SombreyMark(score: score, color: color, size: 17)
-            Text("SOMBREY")
-                .font(StudioFont.body(12, weight: .semibold))
-                .tracking(4.2)
+            Text("Sombrey")
+                .font(StudioFont.hero(20, weight: .bold))
                 .foregroundStyle(color)
         }
         .accessibilityElement(children: .ignore)

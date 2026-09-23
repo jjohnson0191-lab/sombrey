@@ -1,11 +1,22 @@
 import SwiftUI
+import UIKit
 
-/// Sombrey typography tokens. Bricolage Grotesque is reserved for exactly
-/// the highest-attention numerical moments (readiness score, a live rep
-/// count, a rest timer) — see `HeroNumberText`, the only view type allowed
-/// to reference `.hero`. Every other number/label in the app stays in
-/// Instrument Sans. This mirrors the web app's `HeroNumber.tsx` rule
-/// verbatim; do not reach for the hero font "because it's a number."
+/// Sombrey typography tokens — two faces, one hierarchy:
+///
+/// - Bricolage Grotesque (`hero`) is the display face: the Sombrey
+///   wordmark, screen titles, and the numbers that ARE the moment — the
+///   Sombrey Score, live heart rate, the instrument clock, a set's reps,
+///   the rest dial, a primary card value. Semibold for titles and
+///   secondary hero values, bold for the single dominant numeral of a
+///   view. Never for sentences, labels, controls or dense data.
+/// - Instrument Sans (`body`) is everything else: labels, captions,
+///   controls, metadata, long-form and accessibility-heavy text. It is
+///   also the app-wide default (`defaultText`), set once at the root, so
+///   any text that doesn't choose a font is still Sombrey, never the
+///   system face.
+///
+/// Both are `Font.custom(_:size:)`, which scales with Dynamic Type
+/// relative to body text. Mirrors the web app's `HeroNumber.tsx` rule.
 ///
 /// Font files are bundled from Google Fonts (Bricolage Grotesque 600/700,
 /// Instrument Sans 400/500/600/700 + 500 italic — the exact weight set the
@@ -40,10 +51,47 @@ enum StudioFont {
         }
     }
 
-    /// Hero numerals only — see `HeroNumberText`.
+    /// The display face — see this type's header for where it belongs.
     static func hero(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
         weight == .semibold
             ? .custom(Hero.semibold, size: size)
             : .custom(Hero.bold, size: size)
+    }
+
+    /// App-wide default for any text that doesn't set a font — the same
+    /// size as the system's body style, so nothing shifts in layout, but
+    /// in Instrument Sans instead of the system face.
+    static let defaultText: Font = body(17)
+
+    /// UIKit-drawn text SwiftUI's font environment can't reach —
+    /// navigation-bar titles in sheets (Add meal, schedules, exercise
+    /// pickers). Standard titles in Instrument Sans, large titles in the
+    /// display face; both scaled with Dynamic Type. Call once at launch.
+    static func configureUIKitAppearance() {
+        let standard = UINavigationBarAppearance()
+        standard.configureWithDefaultBackground()
+        applyFonts(to: standard)
+        // iOS's own default at the scroll edge is transparent — kept, so
+        // only the typeface changes, never the bar's look.
+        let scrollEdge = UINavigationBarAppearance()
+        scrollEdge.configureWithTransparentBackground()
+        applyFonts(to: scrollEdge)
+        UINavigationBar.appearance().standardAppearance = standard
+        UINavigationBar.appearance().compactAppearance = standard
+        UINavigationBar.appearance().scrollEdgeAppearance = scrollEdge
+    }
+
+    private static func applyFonts(to appearance: UINavigationBarAppearance) {
+        if let title = UIFont(name: Instrument.semibold, size: 17) {
+            appearance.titleTextAttributes = [.font: UIFontMetrics(forTextStyle: .headline).scaledFont(for: title)]
+        }
+        if let large = UIFont(name: Hero.semibold, size: 32) {
+            appearance.largeTitleTextAttributes = [.font: UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: large)]
+        }
+        if let button = UIFont(name: Instrument.medium, size: 17) {
+            let attributes: [NSAttributedString.Key: Any] = [.font: UIFontMetrics(forTextStyle: .body).scaledFont(for: button)]
+            appearance.buttonAppearance.normal.titleTextAttributes = attributes
+            appearance.doneButtonAppearance.normal.titleTextAttributes = attributes
+        }
     }
 }
