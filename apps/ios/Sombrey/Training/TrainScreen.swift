@@ -12,7 +12,9 @@ import SwiftUI
 struct TrainScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var session = TrainingSessionManager()
+    /// App-level (see `SombreyApp`) — never owned here, since this screen
+    /// is rebuilt every time the Train tab is selected.
+    @Environment(TrainingSessionManager.self) private var session
 
     var body: some View {
         Group {
@@ -28,5 +30,12 @@ struct TrainScreen: View {
         .id(session.phase)
         .transition(.opacity)
         .animation(StudioMotion.resolve(StudioMotion.settleOnce, reduceMotion: reduceMotion), value: session.phase)
+        .sensoryFeedback(trigger: session.phase) { _, phase in
+            switch phase {
+            case .active: return StudioHaptic.workoutStart
+            case .complete: return StudioHaptic.workoutFinish
+            case .overview: return nil
+            }
+        }
     }
 }

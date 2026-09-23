@@ -65,6 +65,35 @@ export const logSet = mutation({
   },
 });
 
+// Correcting a set already logged during the workout (a mistyped rep
+// count or weight). Owner-checked through the parent workout.
+export const updateSet = mutation({
+  args: {
+    setId: v.id("sombreyWorkoutSets"),
+    reps: v.number(),
+    weightKg: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const set = await ctx.db.get(args.setId);
+    if (!set || set.userId !== user._id) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Set not found" });
+    }
+    await ctx.db.patch(args.setId, { reps: args.reps, weightKg: args.weightKg });
+  },
+});
+
+// Removing a set logged by mistake.
+export const deleteSet = mutation({
+  args: { setId: v.id("sombreyWorkoutSets") },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const set = await ctx.db.get(args.setId);
+    if (!set || set.userId !== user._id) return;
+    await ctx.db.delete(args.setId);
+  },
+});
+
 export const finishWorkout = mutation({
   args: {
     workoutId: v.id("sombreyWorkouts"),

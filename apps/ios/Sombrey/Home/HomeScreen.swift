@@ -25,6 +25,7 @@ import SwiftUI
 struct HomeScreen: View {
     @Environment(AppState.self) private var appState
     @Environment(WearableManager.self) private var wearableManager
+    @Environment(TrainingSessionManager.self) private var trainingSession
     @State private var showingNutrition = false
     @State private var showingBandPairing = false
     @State private var showingVitals = false
@@ -436,8 +437,8 @@ struct HomeScreen: View {
                     .font(StudioFont.body(11, weight: .semibold))
                     .tracking(1.3)
                     .foregroundStyle(StudioColor.training)
-                if wearableManager.activeSportSession != nil {
-                    Text("IN PROGRESS")
+                if wearableManager.activeSportSession != nil || trainingSession.phase == .active {
+                    Text(trainingSession.isPaused ? "PAUSED" : "IN PROGRESS")
                         .font(StudioFont.body(10, weight: .semibold))
                         .tracking(1.1)
                         .foregroundStyle(StudioColor.training)
@@ -447,7 +448,22 @@ struct HomeScreen: View {
                 }
             }
 
-            if let active = wearableManager.activeSportSession {
+            if trainingSession.phase != .overview {
+                // A Sombrey workout in progress (or finished but not yet
+                // saved) always wins here — one tap back into it.
+                Text(trainingSession.workoutName)
+                    .font(StudioFont.body(16, weight: .medium))
+                    .foregroundStyle(StudioColor.ink)
+                Text(trainingSessionStatus)
+                    .font(StudioFont.body(13))
+                    .foregroundStyle(StudioColor.inkSoft)
+                Button(trainingSession.phase == .complete ? "View workout" : "Return to workout") {
+                    appState.selectedTab = .train
+                }
+                .font(StudioFont.body(13, weight: .semibold))
+                .foregroundStyle(StudioColor.accentInk)
+                .frame(minHeight: 44)
+            } else if let active = wearableManager.activeSportSession {
                 Text(sportTypeName(active.sportType))
                     .font(StudioFont.body(16, weight: .medium))
                     .foregroundStyle(StudioColor.ink)
@@ -494,6 +510,17 @@ struct HomeScreen: View {
             }
         }
         .studioCard()
+    }
+
+    private var trainingSessionStatus: String {
+        switch trainingSession.phase {
+        case .complete:
+            return trainingSession.completionSaved ? "Recorded" : "Finished — still saving"
+        default:
+            let state = trainingSession.isPaused ? "Paused" : (trainingSession.isResting ? "Resting" : "In progress")
+            let exercise = trainingSession.currentExercise.map { " · \($0.name)" } ?? ""
+            return "\(state)\(exercise) · \(trainingSession.completedSets.count) set\(trainingSession.completedSets.count == 1 ? "" : "s")"
+        }
     }
 
     private var todaysSportSession: SportSessionSummaryDTO? {

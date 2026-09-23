@@ -19,6 +19,17 @@ enum StudioHaptic {
     /// Singling out one part of an instrument (a readiness contributor,
     /// an activity span, a sleep stage).
     static let focus = SensoryFeedback.selection
+    // Training — the one place the app is allowed to feel more physical.
+    /// A set was recorded: a firm, single landing.
+    static let setLogged = SensoryFeedback.impact(flexibility: .solid, intensity: 0.9)
+    /// The rest target was reached.
+    static let restComplete = SensoryFeedback.success
+    /// Workout paused or resumed.
+    static let pauseToggle = SensoryFeedback.impact(flexibility: .soft, intensity: 0.6)
+    /// Workout started / finished and recorded.
+    static let workoutStart = SensoryFeedback.impact(flexibility: .solid, intensity: 0.7)
+    static let workoutFinish = SensoryFeedback.success
+
     /// An on-demand measurement returned a real reading from the band.
     static let measurementComplete = SensoryFeedback.success
     /// An on-demand measurement ended without a reading.

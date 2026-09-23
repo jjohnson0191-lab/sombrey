@@ -130,3 +130,69 @@ struct GoalAndCoachingModeTests {
         #expect(CoachingMode.trackingOnly.rawValue == "tracking_only")
     }
 }
+
+/// UI4: the pure training arithmetic and history rules — every number the
+/// workout and completion screens show comes from logged or stored sets.
+struct TrainingMathTests {
+    private static let squat = Exercise(id: "ex1", name: "Squat", description: "", muscleGroup: "legs")
+    private static let pushUp = Exercise(id: "ex2", name: "Push-up", description: "", muscleGroup: "chest")
+
+    private func set(_ exercise: Exercise, _ reps: Int, _ weight: Double?, order: Int, index: Int = 0) -> CompletedSet {
+        CompletedSet(exercise: exercise, reps: reps, weightKg: weight, setIndex: index, orderIndex: order, completedAt: Date())
+    }
+
+    @Test func volumeCountsOnlyWeightedSets() {
+        let sets = [set(Self.squat, 10, 40, order: 1), set(Self.pushUp, 20, nil, order: 2)]
+        #expect(TrainingMath.volumeKg(sets) == 400)
+        #expect(TrainingMath.hasWeightedSets(sets))
+        #expect(!TrainingMath.hasWeightedSets([set(Self.pushUp, 20, nil, order: 1)]))
+    }
+
+    @Test func bestSetIsHeaviestThenMostReps() {
+        let sets = [set(Self.squat, 10, 40, order: 1), set(Self.squat, 6, 50, order: 2), set(Self.squat, 8, 50, order: 3)]
+        let best = TrainingMath.bestSet(sets)
+        #expect(best?.weightKg == 50)
+        #expect(best?.reps == 8)
+    }
+
+    @Test func trainedExercisesAreOnlyThoseWithSetsInOrder() {
+        let sets = [set(Self.pushUp, 20, nil, order: 2), set(Self.squat, 10, 40, order: 1), set(Self.squat, 10, 40, order: 3)]
+        #expect(TrainingMath.trainedExercises(sets) == [Self.squat, Self.pushUp])
+    }
+
+    @Test func clockFormatsMinutesAndHours() {
+        #expect(TrainingMath.clock(65) == "1:05")
+        #expect(TrainingMath.clock(3725) == "1:02:05")
+        #expect(TrainingMath.clock(-4) == "0:00")
+    }
+
+    @Test func lastSessionSkipsTheWorkoutInProgressAndKeepsSetOrder() {
+        let rows = [
+            ExerciseHistorySetDTO(workoutId: "now", setIndex: 0, reps: 12, weightKg: 45, completedAt: 3_000),
+            ExerciseHistorySetDTO(workoutId: "prev", setIndex: 1, reps: 8, weightKg: 42.5, completedAt: 2_100),
+            ExerciseHistorySetDTO(workoutId: "prev", setIndex: 0, reps: 10, weightKg: 40, completedAt: 2_000),
+            ExerciseHistorySetDTO(workoutId: "old", setIndex: 0, reps: 5, weightKg: 30, completedAt: 1_000),
+        ]
+        let last = ExerciseHistory.lastSession(rows, excludingWorkout: "now")
+        #expect(last?.sets.map { $0.reps } == [10, 8])
+        #expect(last?.summary == "10×40 · 8×42.5")
+        #expect(last?.lastSet?.weightKg == 42.5)
+        #expect(ExerciseHistory.lastSession([], excludingWorkout: nil) == nil)
+    }
+
+    @Test func uniformLastSessionSummarisesCompactly() {
+        let rows = (0..<3).map { ExerciseHistorySetDTO(workoutId: "prev", setIndex: Double($0), reps: 10, weightKg: 40, completedAt: 2_000 + Double($0)) }
+        #expect(ExerciseHistory.lastSession(rows, excludingWorkout: nil)?.summary == "3 × 10 · 40 kg")
+    }
+
+    @MainActor
+    @Test func aNewSessionStartsInOverviewWithNothingToRestore() {
+        let defaults = UserDefaults(suiteName: "sombrey.tests.training.\(UUID().uuidString)")!
+        let session = TrainingSessionManager(defaults: defaults)
+        session.restoreIfNeeded()
+        #expect(session.phase == .overview)
+        #expect(!session.isPaused)
+        #expect(!session.isResting)
+        #expect(session.currentSetNumber == 1)
+    }
+}

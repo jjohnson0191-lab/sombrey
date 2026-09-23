@@ -113,6 +113,10 @@ final class WearableManager {
         let convexSessionId: String
         let startedAt: Date
         var liveUpdate: SportSessionLiveUpdate?
+        /// When `liveUpdate` arrived — the band's pushes carry no
+        /// timestamp of their own, so this is what tells a live reading
+        /// from a stale one.
+        var liveUpdateAt: Date? = nil
     }
 
     init(service: QCBandService) {
@@ -452,6 +456,7 @@ final class WearableManager {
             for await update in self.service.sportSessionUpdates(for: deviceId) {
                 guard !Task.isCancelled else { return }
                 self.activeSportSession?.liveUpdate = update
+                self.activeSportSession?.liveUpdateAt = Date()
             }
         }
     }

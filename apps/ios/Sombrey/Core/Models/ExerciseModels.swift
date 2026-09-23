@@ -4,7 +4,7 @@ import Foundation
 /// (`convex/exercises.ts`'s `list` query — publicly queryable, no
 /// coach/program assignment required). Used to build a training session
 /// from real exercise data rather than any fabricated "today's plan."
-struct Exercise: Decodable, Identifiable, Hashable {
+struct Exercise: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let description: String

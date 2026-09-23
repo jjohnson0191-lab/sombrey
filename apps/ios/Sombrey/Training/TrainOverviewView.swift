@@ -22,6 +22,7 @@ struct TrainOverviewView: View {
     @State private var showingSportPicker = false
     @State private var isStarting = false
     @State private var repeatTemplate = ConvexQuery<RepeatTemplate?>()
+    @State private var readiness = ConvexQuery<ReadinessResultDTO?>()
 
     var body: some View {
         @Bindable var appState = appState
@@ -35,6 +36,8 @@ struct TrainOverviewView: View {
                 Text("Choose exercises to build today's session.")
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.inkSoft)
+
+                readinessContext
 
                 repeatPreviousButton
 
@@ -57,8 +60,11 @@ struct TrainOverviewView: View {
                 }
 
                 if !session.selectedExercises.isEmpty {
-                    Button(isStarting ? "Starting…" : "Start Workout (\(session.selectedExercises.count) exercises)") {
+                    Button {
                         startWorkout()
+                    } label: {
+                        Text(isStarting ? "Starting…" : "Start workout · \(session.selectedExercises.count) exercise\(session.selectedExercises.count == 1 ? "" : "s")")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.illuminatedCTA)
                     .disabled(isStarting)
@@ -70,6 +76,7 @@ struct TrainOverviewView: View {
         .task {
             exercises.subscribe(to: "exercises:list")
             repeatTemplate.subscribe(to: "sombreyWorkouts:getMostRecentWorkoutTemplate")
+            readiness.subscribe(to: "readiness:getLatest")
         }
     }
 
@@ -80,8 +87,28 @@ struct TrainOverviewView: View {
             await session.startWorkout()
             if let sportType = selectedSportType, wearableManager.pairedDevice != nil {
                 await wearableManager.startSportSession(type: sportType)
+                // Only recorded if the band actually started it — the
+                // workout never claims a band session that doesn't exist.
+                session.attachSportSession(id: wearableManager.activeSportSession?.convexSessionId)
             }
             isStarting = false
+        }
+    }
+
+    /// Today's real readiness, acknowledged — not advice, not a workout
+    /// prescription, and nothing when there's no score.
+    @ViewBuilder
+    private var readinessContext: some View {
+        if let result = readiness.value.flatMap({ $0 })?.toReadinessResult(), let score = result.score {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(StudioColor.accentInk)
+                    .frame(width: 14, height: 3)
+                Text("Readiness \(score)\(result.scoreBand.map { " · \($0)" } ?? "") · \(result.confidenceBand.lowercased()) confidence")
+                    .font(StudioFont.body(12, weight: .medium))
+                    .foregroundStyle(StudioColor.inkSoft)
+            }
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -107,9 +134,12 @@ struct TrainOverviewView: View {
                 .foregroundStyle(StudioColor.inkSoft)
             List {
                 ForEach(session.selectedExercises) { exercise in
-                    Text(exercise.name)
-                        .font(StudioFont.body(13))
-                        .foregroundStyle(StudioColor.ink)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(exercise.name)
+                            .font(StudioFont.body(13))
+                            .foregroundStyle(StudioColor.ink)
+                        LastTimeLine(exerciseId: exercise.id)
+                    }
                 }
                 .onMove { session.moveExercise(fromOffsets: $0, toOffset: $1) }
                 .onDelete { offsets in
@@ -118,7 +148,7 @@ struct TrainOverviewView: View {
                 .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
-            .frame(height: CGFloat(min(session.selectedExercises.count, 5)) * 44 + 8)
+            .frame(height: CGFloat(min(session.selectedExercises.count, 5)) * 56 + 8)
             .scrollDisabled(session.selectedExercises.count <= 5)
         }
     }
@@ -189,6 +219,24 @@ struct TrainOverviewView: View {
                 .foregroundStyle(StudioColor.inkFaint)
                 .padding(.top, 24)
         }
+    }
+}
+
+/// "Last time · 3 × 10 · 40 kg" for one exercise, from real stored sets
+/// only; nothing when it has never been trained.
+private struct LastTimeLine: View {
+    let exerciseId: String
+    @State private var history = ConvexQuery<[ExerciseHistorySetDTO]>()
+
+    var body: some View {
+        Group {
+            if let last = ExerciseHistory.lastSession(history.value ?? [], excludingWorkout: nil) {
+                Text("Last time · \(last.summary)")
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkSoft)
+            }
+        }
+        .task { history.subscribe(to: "sombreyWorkouts:getExerciseHistory", with: ["exerciseId": exerciseId, "limit": 30.0]) }
     }
 }
 
