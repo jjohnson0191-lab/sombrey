@@ -297,3 +297,72 @@ struct TypographyTests {
         }
     }
 }
+
+/// Sport+ band-record import: what reaches Convex is exactly what the band
+/// reported — zeros that mean "not measured" become absent, timing stays raw.
+struct BandSportImportTests {
+    private func record(
+        sportType: Int = 29, sourceType: Int = 0, start: Double = 1_790_000_000, duration: Int = 4920,
+        hr: (Int, Int, Int) = (92, 131, 168), calories: Double = 612, distance: Int = 0, steps: Int = 0,
+        heartRates: [Int] = [], speeds: [Double] = []
+    ) -> BandSportRecord {
+        BandSportRecord(
+            sportType: sportType, sourceType: sourceType, rawStartTime: start, rawDuration: duration,
+            distanceMeters: distance, calories: calories, averageSpeed: 0, fastestSpeed: 0,
+            averageHeartRate: hr.1, lowestHeartRate: hr.0, highestHeartRate: hr.2,
+            averageAltitude: 0, climbMeters: 0, descentMeters: 0, stepFrequency: 0, actionCount: 0,
+            steps: steps, sampleRateSeconds: 0, heartRates: heartRates, speeds: speeds, route: []
+        )
+    }
+
+    @Test func realValuesPassThroughAndUnmeasuredZerosBecomeAbsent() throws {
+        let payload = try #require(BandSportImport.normalize(record()))
+        #expect(payload.sportType == 29)
+        #expect(payload.recordSource == "band")
+        #expect(payload.bandStartTimeSec == 1_790_000_000)
+        #expect(payload.bandDurationRaw == 4920)
+        #expect(payload.durationSeconds == 4920)
+        #expect(payload.lowestHeartRate == 92)
+        #expect(payload.averageHeartRate == 131)
+        #expect(payload.highestHeartRate == 168)
+        #expect(payload.calories == 612)
+        // Tennis on the band: no distance, steps, speed or altitude.
+        #expect(payload.distanceMeters == nil)
+        #expect(payload.steps == nil)
+        #expect(payload.averageSpeedMetersPerSecond == nil)
+        #expect(payload.averageAltitudeMeters == nil)
+    }
+
+    @Test func missingHeartRateStaysMissing() throws {
+        let payload = try #require(BandSportImport.normalize(record(hr: (0, 0, 0))))
+        #expect(payload.averageHeartRate == nil)
+        #expect(payload.lowestHeartRate == nil)
+        #expect(payload.highestHeartRate == nil)
+    }
+
+    @Test func appStartedRecordsAreLabelled() throws {
+        #expect(try #require(BandSportImport.normalize(record(sourceType: 1))).recordSource == "app")
+        #expect(try #require(BandSportImport.normalize(record(sourceType: 7))).recordSource == nil)
+    }
+
+    @Test func recordsWithoutTimingAreNotSessions() {
+        #expect(BandSportImport.normalize(record(start: 0)) == nil)
+        #expect(BandSportImport.normalize(record(duration: 0)) == nil)
+    }
+
+    @Test func seriesKeepRealSamplesOnly() throws {
+        let payload = try #require(BandSportImport.normalize(record(heartRates: [0, 120, 0, 135], speeds: [0, 0])))
+        #expect(payload.heartRates == [120, 135])
+        #expect(payload.speedsMetersPerSecond == nil)
+        #expect(payload.route == nil)
+    }
+
+    @Test func payloadOmitsAbsentFieldsInsteadOfSendingNull() throws {
+        let payload = try #require(BandSportImport.normalize(record()))
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as! [String: Any]
+        #expect(json["distanceMeters"] == nil)
+        #expect(json.keys.contains("steps") == false)
+        #expect(json["averageHeartRate"] as? Double == 131)
+        #expect(json["bandStartTimeSec"] as? Double == 1_790_000_000)
+    }
+}

@@ -86,8 +86,12 @@ final class MockQCBandService: QCBandService {
         AsyncStream { continuation in continuation.finish() }
     }
 
-    func sportSessionHistory(_ deviceId: DeviceID, since timestamp: Date) async throws -> [SportSessionSummary] {
+    func sportSessionHistory(_ deviceId: DeviceID, sinceBandTimestamp bandTimestamp: Double) async throws -> [BandSportRecord] {
         []
+    }
+
+    func sportRecordUpdates(for deviceId: DeviceID) -> AsyncStream<Void> {
+        AsyncStream { continuation in continuation.finish() }
     }
 
     func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult {

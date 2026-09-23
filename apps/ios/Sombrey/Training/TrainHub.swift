@@ -56,19 +56,47 @@ struct WorkoutHistoryDTO: Decodable, Identifiable {
     }
 }
 
-/// A band-recorded Sport+ session (`sportPlusSessions:getRecentSessions`).
-struct SportSessionHistoryDTO: Decodable, Identifiable {
+/// A Sport+ session (`sportPlusSessions:getRecentSessions`) — started on
+/// the band or from Sombrey. Every measurement is optional: absent means
+/// the band didn't report it.
+struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
     let id: String
     let startedAt: Double
+    let endedAt: Double?
     let durationSeconds: Double?
     let sportType: Int?
     let calories: Double?
     let distanceMeters: Double?
+    let recordSource: String?
+    let summarySource: String?
+    let activityKey: String?
+    let activityCategory: String?
+    let averageHeartRate: Double?
+    let lowestHeartRate: Double?
+    let highestHeartRate: Double?
+    let averageSpeedMetersPerSecond: Double?
+    let fastestSpeedMetersPerSecond: Double?
+    let steps: Double?
+    let stepFrequency: Double?
+    let actionCount: Double?
+    let averageAltitudeMeters: Double?
+    let climbMeters: Double?
+    let descentMeters: Double?
+    let bandStartTimeSec: Double?
+    let bandDurationRaw: Double?
+    let timestampSuspect: Bool?
+    let importedAt: Double?
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
-        case startedAt, durationSeconds, sportType, calories, distanceMeters
+        case startedAt, endedAt, durationSeconds, sportType, calories, distanceMeters, recordSource, summarySource
+        case activityKey, activityCategory, averageHeartRate, lowestHeartRate, highestHeartRate
+        case averageSpeedMetersPerSecond, fastestSpeedMetersPerSecond, steps, stepFrequency, actionCount
+        case averageAltitudeMeters, climbMeters, descentMeters, bandStartTimeSec, bandDurationRaw, timestampSuspect, importedAt
     }
+
+    /// In progress (app-started, not stopped, no band record yet).
+    var isOpen: Bool { endedAt == nil && bandStartTimeSec == nil }
 }
 
 /// Exercise detail for the library (`exercises:list`).
@@ -114,7 +142,7 @@ struct AIGeneratedPlanDTO: Decodable {
 /// that workout — never twice.
 enum WorkoutHistory {
     enum Origin: Equatable {
-        case sombrey, plan, manual(String), band
+        case sombrey, plan, manual(String), band, appSport
     }
 
     struct Entry: Identifiable, Equatable {
@@ -147,16 +175,17 @@ enum WorkoutHistory {
                 detail: details.isEmpty ? nil : details.joined(separator: " · ")
             )
         }
-        for session in sessions where !attached.contains(session.id) {
+        for session in sessions where !attached.contains(session.id) && !session.isOpen {
             var details: [String] = []
             if let meters = session.distanceMeters, meters > 0 { details.append(String(format: "%.2f km", meters / 1000)) }
             if let kcal = session.calories, kcal > 0 { details.append("\(Int(kcal)) kcal (band)") }
+            if let hr = session.averageHeartRate, session.summarySource == "band_record" { details.append("avg \(Int(hr)) bpm") }
             entries.append(Entry(
                 id: session.id,
                 title: sportName(session.sportType ?? 0),
                 startedAt: Date(timeIntervalSince1970: session.startedAt / 1000),
                 durationSeconds: session.durationSeconds.map { Int($0) },
-                origin: .band,
+                origin: session.recordSource == "app" ? .appSport : .band,
                 detail: details.isEmpty ? nil : details.joined(separator: " · ")
             ))
         }
@@ -762,8 +791,11 @@ struct LogWorkoutView: View {
 
 struct WorkoutHistoryView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(WearableManager.self) private var wearableManager
     @State private var workouts = ConvexQuery<[WorkoutHistoryDTO]>()
     @State private var sessions = ConvexQuery<[SportSessionHistoryDTO]>()
+    @State private var selectedSession: SportSessionHistoryDTO?
+    @State private var isSyncing = false
 
     private var entries: [WorkoutHistory.Entry] {
         WorkoutHistory.merge(workouts: workouts.value ?? [], sessions: sessions.value ?? []) { raw in
@@ -775,6 +807,7 @@ struct WorkoutHistoryView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    bandSyncRow
                     if workouts.isLoading && sessions.isLoading {
                         ProgressView().tint(StudioColor.ink)
                     } else if entries.isEmpty {
@@ -783,39 +816,10 @@ struct WorkoutHistoryView: View {
                             .foregroundStyle(StudioColor.inkFaint)
                     }
                     ForEach(entries) { entry in
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.title)
-                                    .font(StudioFont.body(15, weight: .medium))
-                                    .foregroundStyle(StudioColor.ink)
-                                Text(entry.startedAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                                    .font(StudioFont.body(11))
-                                    .foregroundStyle(StudioColor.inkSoft)
-                                if let detail = entry.detail {
-                                    Text(detail)
-                                        .font(StudioFont.body(11))
-                                        .foregroundStyle(StudioColor.inkSoft)
-                                }
+                        HistoryRow(entry: entry)
+                            .onTapGesture {
+                                selectedSession = sessions.value?.first { $0.id == entry.id }
                             }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                if let seconds = entry.durationSeconds {
-                                    Text(TrainingMath.clock(seconds))
-                                        .font(StudioFont.body(13, weight: .semibold))
-                                        .foregroundStyle(StudioColor.ink)
-                                        .monospacedDigit()
-                                }
-                                Text(Self.originLabel(entry.origin))
-                                    .font(StudioFont.body(9, weight: .semibold))
-                                    .tracking(1.1)
-                                    .foregroundStyle(StudioColor.inkSoft)
-                            }
-                        }
-                        .padding(.vertical, 8)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(StudioColor.ink.opacity(0.07)).frame(height: 1)
-                        }
-                        .accessibilityElement(children: .combine)
                     }
                 }
                 .padding(24)
@@ -831,6 +835,41 @@ struct WorkoutHistoryView: View {
             workouts.subscribe(to: "sombreyWorkouts:listHistory", with: ["limit": 60.0])
             sessions.subscribe(to: "sportPlusSessions:getRecentSessions", with: ["limit": 60.0])
         }
+        .sheet(item: $selectedSession) { session in
+            SportSessionDetailView(session: session)
+                .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// Pull band-recorded Sport+ sessions now, and say what the last
+    /// import found — sessions done on the band also arrive on every sync.
+    private var bandSyncRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                isSyncing = true
+                Task {
+                    await wearableManager.importBandSportSessions(reason: "manual")
+                    isSyncing = false
+                }
+            } label: {
+                Text(isSyncing ? "Syncing band activities…" : "Sync band activities")
+                    .font(StudioFont.body(14, weight: .semibold))
+                    .foregroundStyle(StudioColor.accentInk)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(isSyncing || wearableManager.displayState != .connected)
+            if let status = wearableManager.lastSportImport {
+                Text(status.error.map { "Last band sync failed: \($0)" }
+                     ?? "Last band sync \(status.at.formatted(.dateTime.hour().minute())): \(status.fetched) found · \(status.inserted) new · \(status.merged) matched · \(status.skipped) skipped")
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkSoft)
+            } else if wearableManager.displayState != .connected {
+                Text("Connect the band to sync activities recorded on it.")
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkFaint)
+            }
+        }
     }
 
     static func originLabel(_ origin: WorkoutHistory.Origin) -> String {
@@ -839,6 +878,7 @@ struct WorkoutHistoryView: View {
         case .plan: return "PLAN"
         case .manual(let type): return "LOGGED · \(type.uppercased())"
         case .band: return "BAND · SPORT+"
+        case .appSport: return "APP · SPORT+"
         }
     }
 }
@@ -968,5 +1008,175 @@ struct SombreyWorkoutsView: View {
             }
         }
         .task { plan.subscribe(to: "premiumOnboarding:getMyAiPlan") }
+    }
+}
+
+/// One history line: title, when, detail, duration and where it came from.
+private struct HistoryRow: View {
+    let entry: WorkoutHistory.Entry
+
+    private var isSportSession: Bool { entry.origin == .band || entry.origin == .appSport }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            titleColumn
+            Spacer()
+            trailingColumn
+        }
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(StudioColor.ink.opacity(0.07)).frame(height: 1)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSportSession ? .isButton : [])
+    }
+
+    private var titleColumn: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.title)
+                .font(StudioFont.body(15, weight: .medium))
+                .foregroundStyle(StudioColor.ink)
+            Text(entry.startedAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                .font(StudioFont.body(11))
+                .foregroundStyle(StudioColor.inkSoft)
+            if let detail = entry.detail {
+                Text(detail)
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkSoft)
+            }
+        }
+    }
+
+    private var trailingColumn: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            if let seconds = entry.durationSeconds {
+                Text(TrainingMath.clock(seconds))
+                    .font(StudioFont.body(13, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
+                    .monospacedDigit()
+            }
+            Text(WorkoutHistoryView.originLabel(entry.origin))
+                .font(StudioFont.body(9, weight: .semibold))
+                .tracking(1.1)
+                .foregroundStyle(StudioColor.inkSoft)
+        }
+    }
+}
+
+/// Everything Sombrey holds for one Sport+ session — what the band
+/// measured, what it didn't ("Not measured", never a zero), where each
+/// figure came from, and the band's raw timing for verification.
+struct SportSessionDetailView: View {
+    let session: SportSessionHistoryDTO
+    @Environment(\.dismiss) private var dismiss
+
+    private var sportName: String {
+        session.sportType.flatMap { SombreySportType.byRawValue[$0]?.displayName } ?? "Band activity"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(sportName)
+                            .font(StudioFont.hero(26, weight: .semibold))
+                            .foregroundStyle(StudioColor.ink)
+                        Text([session.activityCategory?.replacingOccurrences(of: "_", with: " ").capitalized, session.sportType.map { "Sport+ \($0)" }].compactMap { $0 }.joined(separator: " · "))
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.inkSoft)
+                        Text(provenance)
+                            .font(StudioFont.body(12, weight: .medium))
+                            .foregroundStyle(StudioColor.accentInk)
+                    }
+                    if session.timestampSuspect == true {
+                        Text("The band's time for this session looks wrong (it ends in the future). It's shown exactly as the band reported it.")
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.danger)
+                    }
+                    group("SESSION") {
+                        line("Started", Date(timeIntervalSince1970: session.startedAt / 1000).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute().second()))
+                        line("Duration", session.durationSeconds.map { TrainingMath.clock(Int($0)) })
+                    }
+                    group("HEART RATE") {
+                        line("Lowest", hr(session.lowestHeartRate))
+                        line("Average", hr(session.averageHeartRate))
+                        line("Highest", hr(session.highestHeartRate))
+                    }
+                    group("MOVEMENT & ENERGY") {
+                        line("Calories", session.calories.map { "\(Int($0.rounded())) kcal" })
+                        line("Distance", session.distanceMeters.map { String(format: "%.2f km", $0 / 1000) })
+                        line("Steps", session.steps.map { "\(Int($0))" })
+                        line("Step frequency", session.stepFrequency.map { "\(Int($0)) /min" })
+                        line("Actions", session.actionCount.map { "\(Int($0))" })
+                        line("Average speed", session.averageSpeedMetersPerSecond.map { String(format: "%.2f m/s", $0) })
+                        line("Fastest speed", session.fastestSpeedMetersPerSecond.map { String(format: "%.2f m/s", $0) })
+                        line("Average altitude", session.averageAltitudeMeters.map { "\(Int($0)) m" })
+                        line("Climb / descent", session.climbMeters.map { c in "\(Int(c)) m / \(session.descentMeters.map { "\(Int($0)) m" } ?? "—")" })
+                    }
+                    group("SOURCE") {
+                        line("Figures from", summarySourceText)
+                        line("Band start (raw)", session.bandStartTimeSec.map { String(format: "%.0f", $0) })
+                        line("Band duration (raw)", session.bandDurationRaw.map { String(format: "%.0f", $0) })
+                        line("Imported", session.importedAt.map { Date(timeIntervalSince1970: $0 / 1000).formatted(.dateTime.month(.abbreviated).day().hour().minute()) })
+                    }
+                }
+                .padding(24)
+            }
+            .background(StudioColor.env4.ignoresSafeArea())
+            .navigationTitle("Band activity")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+
+    private var provenance: String {
+        switch session.recordSource {
+        case "band": return "Recorded on the band"
+        case "app": return "Started from Sombrey, recorded by the band"
+        default: return "Recorded by the band"
+        }
+    }
+
+    private var summarySourceText: String {
+        switch session.summarySource {
+        case "band_record": return "The band's own session record"
+        case "live_final_tick": return "The band's last live update (its full record hasn't been imported yet)"
+        default: return "—"
+        }
+    }
+
+    private func hr(_ value: Double?) -> String? {
+        // Heart-rate statistics are only real when they came from the
+        // band's own record.
+        guard session.summarySource == "band_record", let value else { return nil }
+        return "\(Int(value)) bpm"
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(StudioFont.body(10, weight: .semibold))
+                .tracking(1.3)
+                .foregroundStyle(StudioColor.inkSoft)
+            content()
+        }
+    }
+
+    private func line(_ label: String, _ value: String?) -> some View {
+        HStack {
+            Text(label)
+                .font(StudioFont.body(13))
+                .foregroundStyle(StudioColor.inkSoft)
+            Spacer()
+            Text(value ?? "Not measured")
+                .font(StudioFont.body(13, weight: value == nil ? .regular : .semibold))
+                .foregroundStyle(value == nil ? StudioColor.inkFaint : StudioColor.ink)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
     }
 }

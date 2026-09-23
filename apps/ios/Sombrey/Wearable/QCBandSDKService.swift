@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 // @preconcurrency: CoreBluetooth and QCBandSDK both predate Swift
 // concurrency auditing — their types (CBCentralManager, CBPeripheral,
 // QCSleepModel, QCSportModel, etc.) aren't marked Sendable, which Swift
@@ -60,6 +61,7 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     private var measurementContinuation: AsyncStream<WearableMeasurement>.Continuation?
     private var sportUpdateContinuation: AsyncStream<SportSessionLiveUpdate>.Continuation?
+    private var sportRecordContinuation: AsyncStream<Void>.Continuation?
     private var connectionStateContinuation: AsyncStream<WearableConnectionState>.Continuation?
     /// The Sport+ type of whatever session is currently active on the
     /// band, if any — `currentSportInfo` pushes are tagged with the
@@ -410,22 +412,67 @@ final class QCBandSDKService: NSObject, QCBandService {
         }
     }
 
-    func sportSessionHistory(_ deviceId: DeviceID, since timestamp: Date) async throws -> [SportSessionSummary] {
-        let summaries = try await sportRecords(since: timestamp.timeIntervalSince1970)
-        return summaries.map { model in
-            SportSessionSummary(
-                sportType: model.exerciseType,
-                startedAt: Date(timeIntervalSince1970: model.startTime),
-                durationSeconds: model.duration,
-                distanceMeters: Double(model.distance),
-                calories: Double(model.calorie),
-                averageHeartRate: Double(model.averageHR),
-                lowestHeartRate: Double(model.lowestHR),
-                highestHeartRate: Double(model.highestHR),
-                averageSpeedMetersPerSecond: Double(model.averageSpeed),
-                steps: model.steps
+    func sportSessionHistory(_ deviceId: DeviceID, sinceBandTimestamp bandTimestamp: Double) async throws -> [BandSportRecord] {
+        let summaries = try await sportRecords(since: bandTimestamp)
+        let records = summaries.map(Self.bandSportRecord)
+        WearableRuntimeDiagnostics.shared.recordSportRecordsFetched(since: bandTimestamp, records: records)
+        return records
+    }
+
+    func sportRecordUpdates(for deviceId: DeviceID) -> AsyncStream<Void> {
+        AsyncStream { continuation in
+            self.sportRecordContinuation = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    guard self?.sportRecordContinuation != nil else { return }
+                    self?.sportRecordContinuation = nil
+                }
+            }
+        }
+    }
+
+    /// The vendor summary + detail, as-is. The header has no nullability
+    /// annotations, so its arrays/detail import implicitly unwrapped — read
+    /// defensively. Heart rates and speeds prefer the detail series (the
+    /// demo reads `model.detail.hrs`), falling back to the summary's own.
+    private static func bandSportRecord(_ model: OdmGeneralExerciseSummaryModel) -> BandSportRecord {
+        let detail: OdmGeneralExerciseDetailModel? = model.detail
+        let detailHRs: [NSNumber] = detail?.hrs ?? []
+        let summaryHRs: [NSNumber] = model.hrs ?? []
+        let heartRates = (detailHRs.isEmpty ? summaryHRs : detailHRs).map { $0.intValue }
+        let speeds: [Double] = (detail?.speeds ?? []).map { $0.doubleValue }
+        let locations: [CLLocation] = detail?.gpsLocations ?? []
+        let route = locations.map {
+            BandSportRecord.RoutePoint(
+                latitude: $0.coordinate.latitude,
+                longitude: $0.coordinate.longitude,
+                recordedAt: $0.timestamp,
+                altitudeMeters: $0.verticalAccuracy >= 0 ? $0.altitude : nil
             )
         }
+        return BandSportRecord(
+            sportType: model.exerciseType,
+            sourceType: model.sourceType,
+            rawStartTime: model.startTime,
+            rawDuration: model.duration,
+            distanceMeters: model.distance,
+            calories: Double(model.calorie),
+            averageSpeed: Double(model.averageSpeed),
+            fastestSpeed: Double(model.fastestSpeed),
+            averageHeartRate: model.averageHR,
+            lowestHeartRate: model.lowestHR,
+            highestHeartRate: model.highestHR,
+            averageAltitude: Double(model.averageAltitude),
+            climbMeters: Double(model.upHillDistance),
+            descentMeters: Double(model.downHillDistance),
+            stepFrequency: model.averageStepFrequency,
+            actionCount: model.numberOfActions,
+            steps: model.steps,
+            sampleRateSeconds: model.sampleRateSeconds,
+            heartRates: heartRates,
+            speeds: speeds,
+            route: route
+        )
     }
 
     // MARK: - On-demand measurement
@@ -606,6 +653,11 @@ final class QCBandSDKService: NSObject, QCBandService {
     // `init(rawValue:)`, same reasoning as `QCSportState` above; matched
     // by raw int rather than a guessed bridged case name.
     // QCBandRealTimeHeartRateCmdTypeStart=0x01, ...End=0x02, ...Hold=0x03.
+    /// `QCDeviceDataUpdateSportRecord` (QCDFU_Utils.h: HeartRate = 0x01,
+    /// then BloodPressure, BloodOxygen, Step, Temperature, Sleep,
+    /// SportRecord = 7).
+    static let dataUpdateSportRecord = 7
+
     private static let realTimeHRCmdStart: UInt32 = 0x01
     private static let realTimeHRCmdEnd: UInt32 = 0x02
     private static let realTimeHRCmdHold: UInt32 = 0x03
@@ -707,6 +759,20 @@ final class QCBandSDKService: NSObject, QCBandService {
                 WearableRuntimeDiagnostics.shared.recordHRCallback(raw: Int(hr))
                 guard let self, let deviceId = self.activeDeviceId, hr > 0 else { return }
                 self.emit(deviceId: deviceId, type: .heartRate, value: Double(hr), unit: "bpm", at: Date(), sdkSource: LiveHeartRateTrace.sdkSource)
+            }
+        }
+        // The band's "data updated" report. Every report is logged (it's
+        // the evidence for which ones this band actually sends); a Sport+
+        // record report (QCDeviceDataUpdateSportRecord = 7 in
+        // QCDFU_Utils.h, matched by raw value) triggers an import.
+        manager.watchDataUpdateReport = { [weak self] dataType, value in
+            let raw = dataType.rawValue
+            Task { @MainActor in
+                WearableDiagnostics.log("watchDataUpdateReport: type=\(raw) value=\(value)")
+                WearableRuntimeDiagnostics.shared.recordDataUpdateReport(type: raw, value: value)
+                if raw == Self.dataUpdateSportRecord {
+                    self?.sportRecordContinuation?.yield(())
+                }
             }
         }
         manager.currentSportInfo = { [weak self] sportInfo in

@@ -1203,8 +1203,39 @@ export default defineSchema({
     averageSpeedMetersPerSecond: v.optional(v.number()),
     steps: v.optional(v.number()),
     source: v.string(),                    // "sombrey_band"
+    // ── Band-record import (all optional: rows from earlier builds lack them)
+    // Who started the session, per the band's own record (SDK sourceType):
+    // "band" = started on the band, "app" = started from Sombrey.
+    recordSource: v.optional(v.union(v.literal("band"), v.literal("app"))),
+    // The band's own start time, exactly as the SDK returned it (seconds).
+    // Dedup key for imports; kept raw so timestamp interpretation can be
+    // re-checked against real devices.
+    bandStartTimeSec: v.optional(v.number()),
+    // The band's own duration value, exactly as returned (unit undocumented
+    // in the SDK header; durationSeconds assumes seconds).
+    bandDurationRaw: v.optional(v.number()),
+    // Sombrey activity model (convex/activityTaxonomy.ts); sportType above
+    // stays the vendor id.
+    activityKey: v.optional(v.string()),
+    activityCategory: v.optional(v.string()),
+    // Where the summary figures came from: the band's own post-session
+    // record, or (app-started sessions not yet matched to a band record)
+    // the last live update the band pushed.
+    summarySource: v.optional(v.union(v.literal("band_record"), v.literal("live_final_tick"))),
+    fastestSpeedMetersPerSecond: v.optional(v.number()),
+    stepFrequency: v.optional(v.number()),
+    actionCount: v.optional(v.number()),
+    averageAltitudeMeters: v.optional(v.number()),
+    climbMeters: v.optional(v.number()),
+    descentMeters: v.optional(v.number()),
+    sampleRateSeconds: v.optional(v.number()),
+    // Set when the record's timing is implausible (e.g. it ends well in the
+    // future) — kept, flagged, never silently "corrected".
+    timestampSuspect: v.optional(v.boolean()),
+    importedAt: v.optional(v.number()),
   }).index("by_user", ["userId"])
-    .index("by_user_and_startedAt", ["userId", "startedAt"]),
+    .index("by_user_and_startedAt", ["userId", "startedAt"])
+    .index("by_user_and_bandStart", ["userId", "bandStartTimeSec"]),
 
   // Per-session detail — heart-rate/speed timelines and, for GPS-tagged sport
   // types, the phone-CoreLocation-derived route (the band has no onboard GPS
@@ -1215,6 +1246,10 @@ export default defineSchema({
     userId: v.id("users"),
     heartRates: v.optional(v.array(v.number())),
     speedsMetersPerSecond: v.optional(v.array(v.number())),
+    // Where the series came from: "band_record" (the band's own Sport+
+    // detail) or "phone_gps" (the phone's CoreLocation route).
+    seriesSource: v.optional(v.string()),
+    routeSource: v.optional(v.string()),
     route: v.optional(v.array(v.object({
       latitude: v.number(),
       longitude: v.number(),

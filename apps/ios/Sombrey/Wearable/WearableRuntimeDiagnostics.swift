@@ -364,6 +364,37 @@ final class WearableRuntimeDiagnostics {
         log("BP: SDK window ended \(bpCompletion ?? "")")
     }
 
+    // MARK: - Sport+ band-record import (evidence for physical-band validation)
+
+    /// Every data-update report the band has sent this session, by type —
+    /// shows whether the band emits the Sport+ record report (type 7).
+    private(set) var dataUpdateReports: [Int: Int] = [:]
+    private(set) var lastSportFetchAt: Date?
+    private(set) var lastSportFetchSince: Double?
+    /// The raw records from the latest fetch, exactly as the SDK returned
+    /// them (start time and duration untouched).
+    private(set) var lastSportRecords: [BandSportRecord] = []
+    private(set) var lastSportImportSummary: String?
+
+    func recordDataUpdateReport(type: Int, value: Int) {
+        dataUpdateReports[type, default: 0] += 1
+        log("dataUpdateReport: type=\(type) value=\(value)")
+    }
+
+    func recordSportRecordsFetched(since: Double, records: [BandSportRecord]) {
+        lastSportFetchAt = Date()
+        lastSportFetchSince = since
+        lastSportRecords = records
+        for r in records {
+            log("sport+ record: type=\(r.sportType) source=\(r.sourceType) rawStart=\(r.rawStartTime) rawDuration=\(r.rawDuration) hr=\(r.lowestHeartRate)/\(r.averageHeartRate)/\(r.highestHeartRate) kcal=\(r.calories) dist=\(r.distanceMeters) steps=\(r.steps) hrSeries=\(r.heartRates.count) speedSeries=\(r.speeds.count) gps=\(r.route.count)")
+        }
+    }
+
+    func recordSportImport(_ summary: String) {
+        lastSportImportSummary = summary
+        log("sport+ import: \(summary)")
+    }
+
     func recordBPFailure(_ reason: String) {
         bpFailureReason = reason
         log("bp: failed — \(reason)")
@@ -493,6 +524,14 @@ final class WearableRuntimeDiagnostics {
         if let calState = metricStates[.activeCalories] {
             lines.append("  calories accepted/rejected: \(calState.acceptedCount)/\(calState.rejectedCount)  lastAccepted: \(calState.lastAcceptedValue.map { "\($0)" } ?? "none") at \(fmt(calState.lastAcceptedAt))")
             lines.append("  lastRejectionReason: \(calState.lastRejectionReason ?? "none")")
+        }
+        lines.append("")
+        lines.append("SPORT+ IMPORT")
+        lines.append("  dataUpdateReports: \(dataUpdateReports.sorted { $0.key < $1.key }.map { "\($0.key)×\($0.value)" }.joined(separator: " "))")
+        lines.append("  lastFetch: \(fmt(lastSportFetchAt)) sinceBandTs=\(lastSportFetchSince.map { "\($0)" } ?? "none") records=\(lastSportRecords.count)")
+        lines.append("  lastImport: \(lastSportImportSummary ?? "none")")
+        for r in lastSportRecords.prefix(10) {
+            lines.append("  • type=\(r.sportType) src=\(r.sourceType) rawStart=\(r.rawStartTime) (as UTC: \(Date(timeIntervalSince1970: r.rawStartTime))) rawDuration=\(r.rawDuration) hr=\(r.lowestHeartRate)/\(r.averageHeartRate)/\(r.highestHeartRate) kcal=\(r.calories) dist=\(r.distanceMeters) steps=\(r.steps)")
         }
         lines.append("")
         lines.append("BLOOD PRESSURE")

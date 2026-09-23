@@ -85,6 +85,25 @@ final class WearableManager {
     private let gpsTracker = GPSTracker()
     private var measurementTask: Task<Void, Never>?
     private var sportUpdateTask: Task<Void, Never>?
+    private var sportRecordTask: Task<Void, Never>?
+    private var isImportingSportRecords = false
+    /// Set when an import is requested while one is running; the running
+    /// import then runs once more, so a record reported mid-import isn't
+    /// left waiting for the next sync.
+    private var sportImportRequestedAgain = false
+    /// The outcome of the latest band Sport+ import, for Train's history
+    /// ("last synced from band") and physical-band validation.
+    private(set) var lastSportImport: SportImportStatus?
+
+    struct SportImportStatus: Equatable {
+        let at: Date
+        let fetched: Int
+        let inserted: Int
+        let merged: Int
+        let refreshed: Int
+        let skipped: Int
+        let error: String?
+    }
     private var connectionStateTask: Task<Void, Never>?
     private var syncTask: Task<Void, Never>?
     private var pendingMeasurements: [WearableMeasurement] = []
@@ -285,6 +304,10 @@ final class WearableManager {
                 self.lastSyncResult = result
                 await self.flushPendingMeasurements(deviceId: device.id)
                 let foundFreshWake = await self.syncSleepHistory(deviceId: device.id)
+                // Sessions recorded on the band — including ones started on
+                // the band that Sombrey never saw live — on every sync
+                // (connect, reconnect, foreground, relaunch).
+                await self.importBandSportSessions(deviceId: device.id, reason: "sync")
                 await self.persistDeviceState(deviceId: device.id, model: nil, nickname: nil, connected: false, synced: true)
                 await self.refreshStatus()
                 await self.triggerReadinessRecompute(postMorningSummary: foundFreshWake)
@@ -408,7 +431,10 @@ final class WearableManager {
                 args["durationSeconds"] = Double(liveUpdate.durationSeconds)
                 args["distanceMeters"] = Double(liveUpdate.distanceMeters)
                 args["calories"] = liveUpdate.calories
-                args["averageHeartRate"] = Double(liveUpdate.heartRate)
+                // No heart-rate statistics from here: the only figure
+                // available is the last live reading, which is not an
+                // average. The band's own record supplies real min/avg/max
+                // when it's imported (below).
                 args["steps"] = Double(liveUpdate.steps)
             }
             try await ConvexClientProvider.client.mutation("sportPlusSessions:finishSession", with: args)
@@ -428,6 +454,13 @@ final class WearableManager {
         lastCompletedSportSession = liveUpdate
         activeSportSession = nil
         await triggerReadinessRecompute()
+        // The band writes its own record of this session once it stops;
+        // import it to complete the row with the band's real summary.
+        let deviceId = device.id
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            await self?.importBandSportSessions(deviceId: deviceId, reason: "after app-started session")
+        }
         return sessionId
     }
 
@@ -663,6 +696,8 @@ final class WearableManager {
     private func teardownLocalState() {
         measurementTask?.cancel()
         measurementTask = nil
+        sportRecordTask?.cancel()
+        sportRecordTask = nil
         sportUpdateTask?.cancel()
         sportUpdateTask = nil
         connectionStateTask?.cancel()
@@ -684,7 +719,73 @@ final class WearableManager {
 
     // MARK: - Live measurement stream
 
+    /// The band's "new Sport+ record" report triggers an import. It's only
+    /// a trigger: a missed report is covered by the import on every sync.
+    private func subscribeToSportRecordReports(deviceId: DeviceID) {
+        sportRecordTask?.cancel()
+        sportRecordTask = Task { [weak self] in
+            guard let self else { return }
+            for await _ in self.service.sportRecordUpdates(for: deviceId) {
+                guard !Task.isCancelled else { return }
+                // Give the band a moment to finish writing the record.
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                await self.importBandSportSessions(deviceId: deviceId, reason: "band report")
+            }
+        }
+    }
+
+    /// Imports the band's Sport+ records into Convex. Asks the server for
+    /// the newest band start time already imported, then asks the band for
+    /// records from six hours before it (so a slow or partial earlier
+    /// import is re-covered); the server de-duplicates on the band's own
+    /// start time, so re-sending is harmless. One import at a time.
+    func importBandSportSessions(deviceId: DeviceID? = nil, reason: String) async {
+        guard let deviceId = deviceId ?? pairedDevice?.id else { return }
+        guard !isImportingSportRecords else {
+            sportImportRequestedAgain = true
+            return
+        }
+        isImportingSportRecords = true
+        await runSportImport(deviceId: deviceId, reason: reason)
+        if sportImportRequestedAgain {
+            sportImportRequestedAgain = false
+            await runSportImport(deviceId: deviceId, reason: "\(reason) (requested again)")
+        }
+        isImportingSportRecords = false
+    }
+
+    private func runSportImport(deviceId: DeviceID, reason: String) async {
+        do {
+            let cursor: Double? = try await ConvexClientProvider.client.mutation("sportPlusSessions:importCursor")
+            let since = max(0, (cursor ?? 0) - 6 * 3600)
+            let records = try await service.sportSessionHistory(deviceId, sinceBandTimestamp: since)
+            let payloads = records.compactMap(BandSportImport.normalize)
+            var result = SportImportResultDTO(inserted: 0, merged: 0, refreshed: 0, skipped: 0)
+            if !payloads.isEmpty {
+                let boxed: [ConvexEncodable?] = payloads.map { $0 as ConvexEncodable? }
+                result = try await ConvexClientProvider.client.mutation("sportPlusSessions:importBandSessions", with: [
+                    "deviceId": deviceId,
+                    "records": boxed,
+                ])
+            }
+            let status = SportImportStatus(
+                at: Date(), fetched: records.count,
+                inserted: result.inserted, merged: result.merged, refreshed: result.refreshed,
+                skipped: result.skipped + (records.count - payloads.count), error: nil
+            )
+            lastSportImport = status
+            WearableRuntimeDiagnostics.shared.recordSportImport("\(reason): since=\(since) fetched=\(records.count) inserted=\(result.inserted) merged=\(result.merged) refreshed=\(result.refreshed) skipped=\(status.skipped)")
+            if result.inserted > 0 || result.merged > 0 {
+                await triggerReadinessRecompute()
+            }
+        } catch {
+            lastSportImport = SportImportStatus(at: Date(), fetched: 0, inserted: 0, merged: 0, refreshed: 0, skipped: 0, error: String(describing: error))
+            WearableRuntimeDiagnostics.shared.recordSportImport("\(reason): failed — \(error)")
+        }
+    }
+
     private func subscribeToMeasurements(deviceId: DeviceID) {
+        subscribeToSportRecordReports(deviceId: deviceId)
         measurementTask?.cancel()
         measurementTask = Task { [weak self] in
             guard let self else { return }
@@ -794,4 +895,12 @@ final class WearableManager {
             lastError = String(describing: error)
         }
     }
+}
+
+/// `sportPlusSessions:importBandSessions`' result.
+struct SportImportResultDTO: Decodable {
+    let inserted: Int
+    let merged: Int
+    let refreshed: Int
+    let skipped: Int
 }

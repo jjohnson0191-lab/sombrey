@@ -77,11 +77,15 @@ protocol QCBandService: AnyObject {
     /// `MockQCBandService`, matching `measurements(for:)`'s honest-absence
     /// convention.
     func sportSessionUpdates(for deviceId: DeviceID) -> AsyncStream<SportSessionLiveUpdate>
-    /// The band's own historical Sport+ records since `timestamp` —
-    /// distinct from the live stream above; this is the richer,
-    /// device-processed summary (avg/min/max HR, distance, calories,
-    /// speed) fetched once a session has actually finished.
-    func sportSessionHistory(_ deviceId: DeviceID, since timestamp: Date) async throws -> [SportSessionSummary]
+    /// The band's own Sport+ records started after `bandTimestamp` (the
+    /// band's own start-time seconds), exactly as the SDK returns them —
+    /// including sessions started on the band that Sombrey never saw live.
+    /// Interpretation happens in `BandSportImport`, not here.
+    func sportSessionHistory(_ deviceId: DeviceID, sinceBandTimestamp bandTimestamp: Double) async throws -> [BandSportRecord]
+    /// Fires when the band reports that a new Sport+ record exists (the
+    /// SDK's data-update report). A trigger only — never the sole path to
+    /// an import; sync and reconnect import too.
+    func sportRecordUpdates(for deviceId: DeviceID) -> AsyncStream<Void>
 
     /// A single "measure now" reading — on-demand, not scheduled/passive.
     func measureNow(_ deviceId: DeviceID, metric: OnDemandMetric) async throws -> OnDemandMeasurementResult

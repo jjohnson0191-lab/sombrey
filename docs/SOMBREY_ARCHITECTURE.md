@@ -59,6 +59,18 @@ The UI must always make clear which of these a value is:
 
 Consumers never see a provider's name. Plans and workouts reference Sombrey ids only, so a provider can be replaced without touching them.
 
+## Activity model (Sport+ and every other pathway)
+
+- `convex/activityTaxonomy.ts` holds Sombrey's own model: 18 categories plus a stable `activityKey`, mapped explicitly for all 180 vendor Sport+ ids. The vendor id is always kept.
+- Sport+ sessions started **on the band** are imported from the band's own history. Triggers:
+  - every sync (connect, reconnect, foreground, relaunch)
+  - the band's new-record report
+  - shortly after an app-started session stops
+
+  The import is de-duplicated on the band's raw start time and merged with a matching app-started row (`sportPlusSessions:importBandSessions`; rules in `convex/sportPlusImport.ts`).
+- `activities:listRecent` returns every activity in one normalized shape, with provenance: `band_sport_plus`, `app_sport_plus`, `manual` or `sombrey_workout`. This is what the AI Coach will read.
+- Physical-band validation: `docs/SPORT_PLUS_VALIDATION.md`.
+
 ## Future metrics: where they will appear
 
 | Metric | Home | Progress | AI | Train |

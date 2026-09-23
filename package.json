@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "prettier-fix": "prettier --write .",
     "prettier-check": "prettier --check .",
-    "test:readiness": "node --experimental-strip-types --test tests/readiness/scoring.test.ts"
+    "test:readiness": "node --experimental-strip-types --test tests/readiness/scoring.test.ts",
+    "test:activity": "node --experimental-strip-types --test tests/activity/activity.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

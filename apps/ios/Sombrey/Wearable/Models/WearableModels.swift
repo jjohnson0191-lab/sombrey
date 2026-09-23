@@ -238,21 +238,89 @@ struct SportSessionLiveUpdate {
     let calories: Double
 }
 
-/// A completed Sport+ session, from the band's own historical record
-/// (`getSportRecordsFromLastTimeStamp:`) — richer and more accurate than
-/// the last live tick, but only available after the band has processed
-/// the session, hence fetched separately during `sync()`.
-struct SportSessionSummary {
+/// One Sport+ record exactly as the band's SDK returned it
+/// (`OdmGeneralExerciseSummaryModel` + its detail), before any
+/// interpretation. The SDK's numeric fields are non-optional, so an
+/// unmeasured value arrives as 0 — `BandSportImport.normalize` decides
+/// which zeros mean "not measured".
+struct BandSportRecord: Equatable {
     let sportType: Int
-    let startedAt: Date
-    let durationSeconds: Int?
-    let distanceMeters: Double?
-    let calories: Double?
-    let averageHeartRate: Double?
-    let lowestHeartRate: Double?
-    let highestHeartRate: Double?
-    let averageSpeedMetersPerSecond: Double?
-    let steps: Int?
+    /// SDK `sourceType`: 0 = started on the band, 1 = started from an app.
+    let sourceType: Int
+    /// SDK `startTime`, "单位秒" (seconds) per the header. Epoch/time zone
+    /// not documented — kept raw so it can be checked on a real band.
+    let rawStartTime: Double
+    /// SDK `duration` — unit not stated in the header.
+    let rawDuration: Int
+    let distanceMeters: Int
+    /// kcal ("单位大卡"); the SDK converts from the band's cal itself.
+    let calories: Double
+    let averageSpeed: Double
+    let fastestSpeed: Double
+    let averageHeartRate: Int
+    let lowestHeartRate: Int
+    let highestHeartRate: Int
+    let averageAltitude: Double
+    let climbMeters: Double
+    let descentMeters: Double
+    let stepFrequency: Int
+    let actionCount: Int
+    let steps: Int
+    let sampleRateSeconds: Int
+    let heartRates: [Int]
+    let speeds: [Double]
+    let route: [RoutePoint]
+
+    struct RoutePoint: Equatable {
+        let latitude: Double
+        let longitude: Double
+        let recordedAt: Date
+        let altitudeMeters: Double?
+    }
+}
+
+/// Turns a raw band record into what Sombrey stores. Pure, so the rules
+/// are unit-tested:
+/// - A measurement the band reports as 0 where 0 can't be a real result
+///   (heart rate, speed, calories, distance, steps, altitude, climb…) is
+///   stored as absent — never as a fake zero.
+/// - Timing is passed through untouched (`bandStartTimeSec`,
+///   `bandDurationRaw`); `durationSeconds` assumes the undocumented unit
+///   is seconds. The server flags implausible timing rather than shifting
+///   it.
+/// - A record with no start time or no duration isn't a session: `nil`.
+enum BandSportImport {
+    static func normalize(_ record: BandSportRecord) -> BandSportRecordPayload? {
+        guard record.rawStartTime > 0, record.rawDuration > 0 else { return nil }
+        func positive(_ value: Double) -> Double? { value > 0 && value.isFinite ? value : nil }
+        func positive(_ value: Int) -> Double? { value > 0 ? Double(value) : nil }
+        let heartRates = record.heartRates.filter { $0 > 0 }
+        let speeds = record.speeds.filter { $0 >= 0 && $0.isFinite }
+        return BandSportRecordPayload(
+            sportType: record.sportType,
+            recordSource: record.sourceType == 0 ? "band" : (record.sourceType == 1 ? "app" : nil),
+            bandStartTimeSec: record.rawStartTime,
+            bandDurationRaw: Double(record.rawDuration),
+            durationSeconds: Double(record.rawDuration),
+            distanceMeters: positive(record.distanceMeters),
+            calories: positive(record.calories),
+            averageHeartRate: positive(record.averageHeartRate),
+            lowestHeartRate: positive(record.lowestHeartRate),
+            highestHeartRate: positive(record.highestHeartRate),
+            averageSpeedMetersPerSecond: positive(record.averageSpeed),
+            fastestSpeedMetersPerSecond: positive(record.fastestSpeed),
+            stepFrequency: positive(record.stepFrequency),
+            actionCount: positive(record.actionCount),
+            averageAltitudeMeters: positive(record.averageAltitude),
+            climbMeters: positive(record.climbMeters),
+            descentMeters: positive(record.descentMeters),
+            steps: positive(record.steps),
+            sampleRateSeconds: positive(record.sampleRateSeconds),
+            heartRates: heartRates.isEmpty ? nil : heartRates.map(Double.init),
+            speedsMetersPerSecond: speeds.isEmpty || speeds.allSatisfy({ $0 == 0 }) ? nil : speeds,
+            route: record.route.isEmpty ? nil : record.route
+        )
+    }
 }
 
 /// A metric the vendor SDK genuinely supports as an on-demand ("measure
@@ -277,6 +345,7 @@ enum OnDemandMetric: String, CaseIterable {
         }
     }
 }
+
 
 /// The band's own real-time BP push, as the SDK forwards it to
 /// `startToMeasuring`'s `measuringHandle`: `@{"sbp": NSNumber, "dbp":

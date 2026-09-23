@@ -76,3 +76,74 @@ struct GPSPointPayload: Encodable, ConvexEncodable {
         altitudeMeters = point.altitudeMeters
     }
 }
+
+/// `sportPlusSessions:importBandSessions`' record shape. Absent values are
+/// omitted from the JSON entirely (Convex's `v.optional` rejects `null`).
+struct BandSportRecordPayload: Encodable, ConvexEncodable, Equatable {
+    let sportType: Int
+    let recordSource: String?
+    let bandStartTimeSec: Double
+    let bandDurationRaw: Double
+    let durationSeconds: Double
+    let distanceMeters: Double?
+    let calories: Double?
+    let averageHeartRate: Double?
+    let lowestHeartRate: Double?
+    let highestHeartRate: Double?
+    let averageSpeedMetersPerSecond: Double?
+    let fastestSpeedMetersPerSecond: Double?
+    let stepFrequency: Double?
+    let actionCount: Double?
+    let averageAltitudeMeters: Double?
+    let climbMeters: Double?
+    let descentMeters: Double?
+    let steps: Double?
+    let sampleRateSeconds: Double?
+    let heartRates: [Double]?
+    let speedsMetersPerSecond: [Double]?
+    let route: [BandSportRecord.RoutePoint]?
+
+    enum CodingKeys: String, CodingKey {
+        case sportType, recordSource, bandStartTimeSec, bandDurationRaw, durationSeconds, distanceMeters, calories
+        case averageHeartRate, lowestHeartRate, highestHeartRate, averageSpeedMetersPerSecond, fastestSpeedMetersPerSecond
+        case stepFrequency, actionCount, averageAltitudeMeters, climbMeters, descentMeters, steps, sampleRateSeconds
+        case heartRates, speedsMetersPerSecond, route
+    }
+
+    private struct RouteKeys: Encodable {
+        let latitude: Double
+        let longitude: Double
+        let recordedAt: Double
+        let altitudeMeters: Double?
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(Double(sportType), forKey: .sportType)
+        try c.encodeIfPresent(recordSource, forKey: .recordSource)
+        try c.encode(bandStartTimeSec, forKey: .bandStartTimeSec)
+        try c.encode(bandDurationRaw, forKey: .bandDurationRaw)
+        try c.encode(durationSeconds, forKey: .durationSeconds)
+        try c.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
+        try c.encodeIfPresent(calories, forKey: .calories)
+        try c.encodeIfPresent(averageHeartRate, forKey: .averageHeartRate)
+        try c.encodeIfPresent(lowestHeartRate, forKey: .lowestHeartRate)
+        try c.encodeIfPresent(highestHeartRate, forKey: .highestHeartRate)
+        try c.encodeIfPresent(averageSpeedMetersPerSecond, forKey: .averageSpeedMetersPerSecond)
+        try c.encodeIfPresent(fastestSpeedMetersPerSecond, forKey: .fastestSpeedMetersPerSecond)
+        try c.encodeIfPresent(stepFrequency, forKey: .stepFrequency)
+        try c.encodeIfPresent(actionCount, forKey: .actionCount)
+        try c.encodeIfPresent(averageAltitudeMeters, forKey: .averageAltitudeMeters)
+        try c.encodeIfPresent(climbMeters, forKey: .climbMeters)
+        try c.encodeIfPresent(descentMeters, forKey: .descentMeters)
+        try c.encodeIfPresent(steps, forKey: .steps)
+        try c.encodeIfPresent(sampleRateSeconds, forKey: .sampleRateSeconds)
+        try c.encodeIfPresent(heartRates, forKey: .heartRates)
+        try c.encodeIfPresent(speedsMetersPerSecond, forKey: .speedsMetersPerSecond)
+        if let route {
+            try c.encode(route.map {
+                RouteKeys(latitude: $0.latitude, longitude: $0.longitude, recordedAt: $0.recordedAt.timeIntervalSince1970 * 1000, altitudeMeters: $0.altitudeMeters)
+            }, forKey: .route)
+        }
+    }
+}
