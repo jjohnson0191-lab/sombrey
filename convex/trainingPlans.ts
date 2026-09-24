@@ -30,10 +30,27 @@ const dayValidator = v.object({
     sets: v.number(),
     reps: v.number(),
     restSeconds: v.optional(v.number()),
+    targetWeightKg: v.optional(v.number()),
+    // Filled in here from the library (clients may omit it).
+    exerciseName: v.optional(v.string()),
   })),
 });
 
-function validateDays(days: Array<{ name: string; weekday?: number; exercises: Array<{ sets: number; reps: number; restSeconds?: number }> }>) {
+type Day = { name: string; weekday?: number; exercises: Array<{ exerciseId: Id<"exercises">; sets: number; reps: number; restSeconds?: number; targetWeightKg?: number; exerciseName?: string }> };
+
+/** Keeps each plan item's exercise name with it (history integrity): the
+ * library's current name, else whatever the plan already held. */
+async function withExerciseNames(ctx: MutationCtx, days: Day[]): Promise<Day[]> {
+  return Promise.all(days.map(async (day) => ({
+    ...day,
+    exercises: await Promise.all(day.exercises.map(async (item) => ({
+      ...item,
+      exerciseName: (await ctx.db.get(item.exerciseId))?.name ?? item.exerciseName,
+    }))),
+  })));
+}
+
+function validateDays(days: Array<{ name: string; weekday?: number; exercises: Array<{ sets: number; reps: number; restSeconds?: number; targetWeightKg?: number }> }>) {
   if (days.length === 0) throw new ConvexError({ code: "BAD_REQUEST", message: "A plan needs at least one day" });
   for (const day of days) {
     if (day.weekday !== undefined && (day.weekday < 1 || day.weekday > 7)) {
@@ -45,6 +62,9 @@ function validateDays(days: Array<{ name: string; weekday?: number; exercises: A
       }
       if (e.restSeconds !== undefined && (e.restSeconds < 0 || e.restSeconds > 900)) {
         throw new ConvexError({ code: "BAD_REQUEST", message: "Rest must be 0–900 seconds" });
+      }
+      if (e.targetWeightKg !== undefined && (e.targetWeightKg < 0 || e.targetWeightKg > 1000)) {
+        throw new ConvexError({ code: "BAD_REQUEST", message: "Weight must be 0–1000 kg" });
       }
     }
   }
@@ -87,7 +107,7 @@ export const create = mutation({
       userId: user._id,
       name,
       source: "user",
-      days: args.days,
+      days: await withExerciseNames(ctx, args.days),
       isCurrent: makeCurrent,
       nextDayIndex: 0,
       createdAt: now,
@@ -106,7 +126,7 @@ export const update = mutation({
     validateDays(args.days);
     await ctx.db.patch(plan._id, {
       name,
-      days: args.days,
+      days: await withExerciseNames(ctx, args.days),
       nextDayIndex: Math.min(plan.nextDayIndex, args.days.length - 1),
       updatedAt: Date.now(),
     });
@@ -141,5 +161,40 @@ export const completeDay = mutation({
     const plan = await ownedPlan(ctx, user._id, args.planId);
     if (args.dayIndex < 0 || args.dayIndex >= plan.days.length) return;
     await ctx.db.patch(plan._id, { nextDayIndex: (args.dayIndex + 1) % plan.days.length, updatedAt: Date.now() });
+  },
+});
+
+/** Adds one exercise to a day of a plan — the Exercise Library's "Add to
+ * workout". `dayIndex` = the plan's day count appends a new day. */
+export const addExercise = mutation({
+  args: {
+    planId: v.id("trainingPlans"),
+    dayIndex: v.number(),
+    newDayName: v.optional(v.string()),
+    exerciseId: v.id("exercises"),
+    sets: v.number(),
+    reps: v.number(),
+    restSeconds: v.optional(v.number()),
+    targetWeightKg: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const plan = await ownedPlan(ctx, user._id, args.planId);
+    const exercise = await ctx.db.get(args.exerciseId);
+    if (!exercise) throw new ConvexError({ code: "NOT_FOUND", message: "Exercise not found" });
+    const item = {
+      exerciseId: args.exerciseId, sets: args.sets, reps: args.reps,
+      restSeconds: args.restSeconds, targetWeightKg: args.targetWeightKg, exerciseName: exercise.name,
+    };
+    const days = plan.days.map((d) => ({ ...d, exercises: [...d.exercises] }));
+    if (args.dayIndex === days.length) {
+      days.push({ name: args.newDayName?.trim() || `Day ${days.length + 1}`, exercises: [item] });
+    } else if (args.dayIndex >= 0 && args.dayIndex < days.length) {
+      days[args.dayIndex].exercises.push(item);
+    } else {
+      throw new ConvexError({ code: "BAD_REQUEST", message: "That day isn't in the plan" });
+    }
+    validateDays(days);
+    await ctx.db.patch(plan._id, { days, updatedAt: Date.now() });
   },
 });

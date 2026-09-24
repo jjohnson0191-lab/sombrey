@@ -134,6 +134,33 @@ export default defineSchema({
   // Cache table — records which WorkoutX queries have already been synced into Convex.
   // Key is a normalized query string (e.g. "bodyPart:back", "name:bench press").
   // Once a query is cached, subsequent requests are served from Convex with zero WX API calls.
+  // ── Sombrey Exercise Library: provider bookkeeping (internal only) ──────
+  // Which provider queries have been fetched, and when — so the same query
+  // never costs a second provider request within its TTL.
+  exerciseProviderQueries: defineTable({
+    provider: v.string(),
+    queryKey: v.string(),
+    fetchedAt: v.number(),
+    returned: v.number(),
+    total: v.optional(v.number()),
+  }).index("by_provider_and_key", ["provider", "queryKey"]),
+  // Requests made to a provider per calendar month — a budget guard below
+  // the provider's own quota.
+  exerciseProviderUsage: defineTable({
+    provider: v.string(),
+    month: v.string(),                     // "2026-09" (UTC)
+    requests: v.number(),
+  }).index("by_provider_and_month", ["provider", "month"]),
+  // What the provider's account allows, as reported by its own responses
+  // (e.g. whether its media carries provider branding on the current plan).
+  exerciseProviderState: defineTable({
+    provider: v.string(),
+    plan: v.optional(v.string()),
+    mediaBranded: v.boolean(),
+    updatedAt: v.number(),
+    lastError: v.optional(v.string()),
+  }).index("by_provider", ["provider"]),
+
   wxQueryCache: defineTable({
     cacheKey: v.string(),   // normalized query identifier
     cachedAt: v.number(),   // Unix ms timestamp — used to expire stale cache entries
@@ -151,7 +178,9 @@ export default defineSchema({
       v.literal("arms"),
       v.literal("legs"),
       v.literal("core"),
-      v.literal("cardio")
+      v.literal("cardio"),
+      // A provider record whose body part Sombrey can't place — never guessed.
+      v.literal("other")
     ),
     equipment: v.array(v.string()),
     primaryMuscles: v.array(v.string()),
@@ -169,9 +198,42 @@ export default defineSchema({
     gifUrl: v.optional(v.string()),       // WorkoutX GIF URL for demonstration
     wxBodyPart: v.optional(v.string()),   // WorkoutX bodyPart field
     wxTarget: v.optional(v.string()),     // WorkoutX target muscle
+    // ── Sombrey Exercise Library (convex/exerciseNormalization.ts) ────────
+    // Sombrey's own normalized fields; the rows' _id is the stable Sombrey
+    // exercise id that workouts and plans reference.
+    bodyRegion: v.optional(v.string()),
+    primaryEquipment: v.optional(v.string()),   // lowercased, for filtering
+    difficulty: v.optional(v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced"))),
+    category: v.optional(v.string()),
+    mechanic: v.optional(v.union(v.literal("compound"), v.literal("isolation"))),
+    force: v.optional(v.string()),
+    met: v.optional(v.number()),
+    caloriesPerMinute: v.optional(v.number()),
+    isUnilateral: v.optional(v.boolean()),
+    searchText: v.optional(v.string()),
+    // Internal provenance — which provider record this came from. Never
+    // returned to the app.
+    sourceProvider: v.optional(v.string()),
+    sourceId: v.optional(v.string()),
+    sourceSyncedAt: v.optional(v.number()),
+    // Related exercises, as Sombrey ids, once fetched.
+    similarIds: v.optional(v.array(v.id("exercises"))),
+    alternativeIds: v.optional(v.array(v.id("exercises"))),
+    relatedFetchedAt: v.optional(v.number()),
+    // Demonstration media, cached in Sombrey storage when the provider's
+    // terms allow showing it (see convex/exerciseLibrary.ts).
+    mediaStorageId: v.optional(v.id("_storage")),
+    mediaStatus: v.optional(v.union(v.literal("cached"), v.literal("withheld"), v.literal("unavailable"))),
+    mediaCheckedAt: v.optional(v.number()),
   }).index("by_muscle_group", ["muscleGroup"])
     .index("by_phase", ["programPhase"])
-    .index("by_workoutx_id", ["workoutxId"]),
+    .index("by_workoutx_id", ["workoutxId"])
+    .index("by_source", ["sourceProvider", "sourceId"])
+    .index("by_name", ["name"])
+    .searchIndex("search_library", {
+      searchField: "searchText",
+      filterFields: ["muscleGroup", "primaryEquipment", "difficulty", "category"],
+    }),
 
   programs: defineTable({
     name: v.string(),
@@ -1332,6 +1394,10 @@ export default defineSchema({
     reps: v.number(),
     weightKg: v.optional(v.number()),
     completedAt: v.number(),               // epoch ms
+    // The exercise as it was when the set was logged, so history reads
+    // correctly even if the library entry later changes or disappears.
+    exerciseName: v.optional(v.string()),
+    exerciseMuscleGroup: v.optional(v.string()),
   }).index("by_workout", ["workoutId"])
     .index("by_user_and_exercise", ["userId", "exerciseId"])
     .index("by_user_and_completedAt", ["userId", "completedAt"]),
@@ -1354,6 +1420,10 @@ export default defineSchema({
         sets: v.number(),
         reps: v.number(),
         restSeconds: v.optional(v.number()),
+        // The user's own target load for the exercise (kg).
+        targetWeightKg: v.optional(v.number()),
+        // The exercise's name when it was added (history integrity).
+        exerciseName: v.optional(v.string()),
       })),
     })),
     isCurrent: v.boolean(),

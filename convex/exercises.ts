@@ -2,6 +2,7 @@ import { ConvexError } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { hasRole } from "./lib/roles.js";
+import { toSummary } from "./exerciseLibraryPolicy";
 
 const MUSCLE_GROUP_VALIDATOR = v.union(
   v.literal("chest"),
@@ -11,6 +12,7 @@ const MUSCLE_GROUP_VALIDATOR = v.union(
   v.literal("legs"),
   v.literal("core"),
   v.literal("cardio"),
+  v.literal("other"),
 );
 
 const PROGRAM_PHASE_VALIDATOR = v.union(
@@ -18,6 +20,15 @@ const PROGRAM_PHASE_VALIDATOR = v.union(
   v.literal("anabolic_surge"),
   v.literal("body_recode"),
 );
+
+/** Rows as clients may see them: no provider provenance and no stored
+ * provider media URL (older provider URLs could carry an API key). */
+function withoutProvenance<T extends Record<string, unknown>>(e: T) {
+  const { sourceProvider, sourceId, sourceSyncedAt, workoutxId, gifUrl, wxBodyPart, wxTarget, mediaStorageId, searchText, ...rest } = e;
+  void sourceProvider; void sourceId; void sourceSyncedAt; void workoutxId; void gifUrl; void wxBodyPart; void wxTarget; void mediaStorageId; void searchText;
+  // The legacy web page still reads `gifUrl`; it stays in the shape, empty.
+  return { ...rest, gifUrl: undefined as string | undefined };
+}
 
 export const list = query({
   args: {
@@ -46,7 +57,7 @@ export const list = query({
     // Resolve video URLs for exercises that have a storageId
     return Promise.all(
       exercises.map(async (e) => ({
-        ...e,
+        ...withoutProvenance(e),
         videoUrl: e.storageId ? await ctx.storage.getUrl(e.storageId) : e.videoUrl ?? null,
         // gifUrl is already stored on the document for WorkoutX exercises
       })),
@@ -62,7 +73,8 @@ export const getMany = query({
   handler: async (ctx, args) => {
     const unique = Array.from(new Set(args.ids)).slice(0, 200);
     const rows = await Promise.all(unique.map((id) => ctx.db.get(id)));
-    return rows.filter((row): row is NonNullable<typeof row> => row !== null);
+    // Sombrey's own fields only — never provider provenance.
+    return rows.filter((row): row is NonNullable<typeof row> => row !== null).map(toSummary);
   },
 });
 
@@ -77,7 +89,7 @@ export const get = query({
     const videoUrl = exercise.storageId
       ? await ctx.storage.getUrl(exercise.storageId)
       : (exercise.videoUrl ?? null);
-    return { ...exercise, videoUrl };
+    return { ...withoutProvenance(exercise), videoUrl };
   },
 });
 

@@ -110,6 +110,9 @@
 		000000000000000000000120 /* ActivityIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000011F /* ActivityIntelligence.swift */; };
 		000000000000000000000122 /* ActivityInstruments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000121 /* ActivityInstruments.swift */; };
 		000000000000000000000124 /* ActivityExperienceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000123 /* ActivityExperienceView.swift */; };
+		000000000000000000000127 /* ExerciseLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000126 /* ExerciseLibrary.swift */; };
+		000000000000000000000129 /* ExerciseDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000128 /* ExerciseDetailView.swift */; };
+		00000000000000000000012B /* ExerciseLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012A /* ExerciseLibraryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -235,6 +238,9 @@
 		00000000000000000000011F /* ActivityIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityIntelligence.swift"; sourceTree = "<group>"; };
 		000000000000000000000121 /* ActivityInstruments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityInstruments.swift"; sourceTree = "<group>"; };
 		000000000000000000000123 /* ActivityExperienceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityExperienceView.swift"; sourceTree = "<group>"; };
+		000000000000000000000126 /* ExerciseLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseLibrary.swift"; sourceTree = "<group>"; };
+		000000000000000000000128 /* ExerciseDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseDetailView.swift"; sourceTree = "<group>"; };
+		00000000000000000000012A /* ExerciseLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseLibraryTests.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -494,7 +500,8 @@
 			00000000000000000000002A /* TrainOverviewView.swift */,
 			00000000000000000000002B /* ActiveWorkoutView.swift */,
 			00000000000000000000002C /* TrainCompleteView.swift */,
-			000000000000000000000110 /* Activity */
+			000000000000000000000110 /* Activity */,
+			000000000000000000000125 /* Exercises */
 			);
 			name = "Training";
 			path = "Training";
@@ -515,6 +522,16 @@
 			);
 			name = "Activity";
 			path = "Activity";
+			sourceTree = "<group>";
+		};
+		000000000000000000000125 /* Exercises */ = {
+			isa = PBXGroup;
+			children = (
+			000000000000000000000126 /* ExerciseLibrary.swift */,
+			000000000000000000000128 /* ExerciseDetailView.swift */,
+			);
+			name = "Exercises";
+			path = "Exercises";
 			sourceTree = "<group>";
 		};
 		000000000000000000000090 /* Progress */ = {
@@ -594,7 +611,8 @@
 			0000000000000000000000DC /* ReadinessTests.swift */,
 			0000000000000000000000EA /* NotificationTests.swift */,
 			0000000000000000000000F5 /* VitalsTests.swift */,
-			00000000000000000000011D /* ActivityTests.swift */
+			00000000000000000000011D /* ActivityTests.swift */,
+			00000000000000000000012A /* ExerciseLibraryTests.swift */
 			);
 			name = "SombreyAppTests";
 			path = "SombreyAppTests";
@@ -844,6 +862,8 @@
 				000000000000000000000068 /* ChatModels.swift */,
 				000000000000000000000069 /* TrainingSessionManager.swift */,
 				00000000000000000000010F /* TrainHub.swift */,
+				000000000000000000000127 /* ExerciseLibrary.swift */,
+				000000000000000000000129 /* ExerciseDetailView.swift */,
 				000000000000000000000112 /* ActivityCatalog.generated.swift */,
 				000000000000000000000114 /* ActivityModel.swift */,
 				000000000000000000000116 /* ActivitySessionManager.swift */,
@@ -896,6 +916,7 @@
 				0000000000000000000000E9 /* NotificationTests.swift */,
 				0000000000000000000000F4 /* VitalsTests.swift */,
 				00000000000000000000011E /* ActivityTests.swift */,
+				00000000000000000000012B /* ExerciseLibraryTests.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -978,7 +999,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1009,7 +1030,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1034,7 +1055,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1060,7 +1081,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1082,7 +1103,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1107,7 +1128,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 34;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

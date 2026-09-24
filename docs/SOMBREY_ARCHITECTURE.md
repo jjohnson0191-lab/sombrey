@@ -51,13 +51,33 @@ The UI must always make clear which of these a value is:
 
 | Provider | Sits behind | Status in production |
 |---|---|---|
-| WorkoutX (exercise data) | Sombrey's `exercises` table (`workoutx.ts` syncs into it) | Key **not configured**, so the production exercise library is **empty** |
+| WorkoutX (exercise data) | The Sombrey Exercise Library (`exerciseLibrary.ts` → `exerciseProviders/workoutx.ts`) | Key **not configured**, so the production exercise library is **empty** until `WORKOUTX_API_KEY` is set |
 | Edamam (food nutrition) | Server-side camera meal analysis (`ai/cameraAnalysis.ts`) | Keys not configured; no food-search integration yet |
 | Gemini (vision) | Camera meal analysis | Key not configured |
 | OpenAI (text) | `aiCoach/providers` (single swap point) | Key **not configured**, so Sombrey Coach **cannot answer in production** |
 | Hercules (subscriptions, email) | `commerce`, `emails` | Key not configured |
 
 Consumers never see a provider's name. Plans and workouts reference Sombrey ids only, so a provider can be replaced without touching them.
+
+## Sombrey Exercise Library (Train › Exercise Library)
+
+Sombrey owns its exercises. An external provider is only a source of exercise knowledge behind a boundary, and it is never visible in the app.
+
+```
+provider API → exerciseProviders/<provider>.ts (the only provider-aware code)
+             → exerciseProvider.ts (neutral interface + record shape)
+             → exerciseNormalization.ts (Sombrey names, groups, search text, synonyms)
+             → `exercises` table (Sombrey ids; provenance in internal fields)
+             → exerciseLibrary.ts (search / facets / detail / refresh / prepare)
+             → iOS Training/Exercises (library, detail, Add to workout, pickers)
+```
+
+- **Stable ids.** Workouts, sets and plans reference the Sombrey `_id`. Re-syncing upserts on (provider, provider id), so ids never change and no duplicates appear. Sets store the exercise name when they are logged (`exerciseName`), and plan items store it when they are added. History therefore never depends on the provider.
+- **On demand, never mirrored.** A search, a filter or an opened exercise fetches just that. Each query is cached for 30 days, related exercises for 30 days, and a failed media fetch is retried after 7 days. A monthly request budget sits below the plan's quota. This follows the provider's terms (no bulk caching beyond the app's needs).
+- **Media.** Demonstration GIFs require the API key, so the server fetches each GIF once and stores it in Sombrey storage. On the provider's free plan, GIFs carry the provider's watermark (which may not be removed), so no visual is shown on that plan.
+- **Privacy of the key.** The key is used server-side only, as a header. No stored or returned URL contains it. Clients never receive provider provenance (`exerciseLibraryPolicy.toSummary`/`toDetail` allow-list).
+- **Replacing the provider** means one new adapter in `exerciseProviders/` plus `configuredExerciseProvider()`.
+- **Not used for Physical Activity.** Activities (tennis, golf, …) come from the band's Sport+ modes and Sombrey's activity taxonomy.
 
 ## Activity model (Sport+ and every other pathway)
 

@@ -23,6 +23,10 @@ struct TrainingPlanDTO: Decodable, Identifiable, Equatable {
         let sets: Double
         let reps: Double
         let restSeconds: Double?
+        let targetWeightKg: Double?
+        /// The exercise's name when it was added — shown if the library
+        /// entry is ever missing.
+        let exerciseName: String?
     }
 
     enum CodingKeys: String, CodingKey {
@@ -102,25 +106,6 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
 
     /// In progress (app-started, not stopped, no band record yet).
     var isOpen: Bool { endedAt == nil && bandStartTimeSec == nil }
-}
-
-/// Exercise detail for the library (`exercises:list`).
-struct ExerciseDetailDTO: Decodable, Identifiable {
-    let id: String
-    let name: String
-    let description: String
-    let muscleGroup: String
-    let equipment: [String]
-    let primaryMuscles: [String]
-    let secondaryMuscles: [String]
-    let instructions: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case id = "_id"
-        case name, description, muscleGroup, equipment, primaryMuscles, secondaryMuscles, instructions
-    }
-
-    var asExercise: Exercise { Exercise(id: id, name: name, description: description, muscleGroup: muscleGroup) }
 }
 
 /// The AI-generated plan (`premiumOnboarding:getMyAiPlan`), read-only.
@@ -341,6 +326,8 @@ struct PlanEditorView: View {
         var sets: Int
         var reps: Int
         var restSeconds: Int
+        var weightText: String = ""
+        var targetWeightKg: Double? { Double(weightText.replacingOccurrences(of: ",", with: ".")).flatMap { $0 > 0 ? $0 : nil } }
     }
 
     struct EditableDay: Identifiable, Equatable {
@@ -353,9 +340,16 @@ struct PlanEditorView: View {
     init(plan: TrainingPlanDTO?) {
         self.plan = plan
         _name = State(initialValue: plan?.name ?? "")
+        // Names kept with the plan, until the library resolves current ones.
+        var stored: [String: String] = [:]
+        for day in plan?.days ?? [] {
+            for item in day.exercises { if let name = item.exerciseName { stored[item.exerciseId] = name } }
+        }
+        _exerciseNames = State(initialValue: stored)
         _days = State(initialValue: plan?.days.map { day in
             EditableDay(name: day.name, weekday: day.weekday.map { Int($0) }, items: day.exercises.map {
-                EditableItem(exerciseId: $0.exerciseId, sets: Int($0.sets), reps: Int($0.reps), restSeconds: Int($0.restSeconds ?? 90))
+                EditableItem(exerciseId: $0.exerciseId, sets: Int($0.sets), reps: Int($0.reps), restSeconds: Int($0.restSeconds ?? 90),
+                             weightText: $0.targetWeightKg.map { TrainingMath.weightText($0) } ?? "")
             })
         } ?? [EditableDay(name: "Day 1", weekday: nil, items: [])])
     }
@@ -386,6 +380,15 @@ struct PlanEditorView: View {
                                 Stepper("\(item.sets) sets", value: $item.sets, in: 1...20)
                                 Stepper("\(item.reps) reps", value: $item.reps, in: 1...100)
                                 Stepper("Rest \(TrainingMath.clock(item.restSeconds))", value: $item.restSeconds, in: 0...600, step: 15)
+                                HStack {
+                                    Text("Target weight")
+                                    Spacer()
+                                    TextField("Bodyweight", text: $item.weightText)
+                                        .keyboardType(.decimalPad)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(maxWidth: 110)
+                                    Text("kg").foregroundStyle(StudioColor.inkSoft)
+                                }
                             }
                             .padding(.vertical, 4)
                         }
@@ -432,7 +435,7 @@ struct PlanEditorView: View {
             for exercise in rows ?? [] { exerciseNames[exercise.id] = exercise.name }
         }
         .sheet(item: Binding(get: { pickingForDay.map { PickTarget(dayIndex: $0) } }, set: { pickingForDay = $0?.dayIndex })) { target in
-            ExercisePickerView { exercise in
+            ExercisePickerSheet { exercise in
                 exerciseNames[exercise.id] = exercise.name
                 guard days.indices.contains(target.dayIndex) else { return }
                 days[target.dayIndex].items.append(EditableItem(exerciseId: exercise.id, sets: 3, reps: 10, restSeconds: 90))
@@ -458,7 +461,7 @@ struct PlanEditorView: View {
                 PlanDayPayload(
                     name: day.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Day" : day.name,
                     weekday: day.weekday,
-                    exercises: day.items.map { PlanItemPayload(exerciseId: $0.exerciseId, sets: $0.sets, reps: $0.reps, restSeconds: $0.restSeconds) }
+                    exercises: day.items.map { PlanItemPayload(exerciseId: $0.exerciseId, sets: $0.sets, reps: $0.reps, restSeconds: $0.restSeconds, targetWeightKg: $0.targetWeightKg) }
                 ) as ConvexEncodable?
             }
             do {
@@ -481,8 +484,9 @@ private struct PlanItemPayload: Encodable, ConvexEncodable {
     let sets: Int
     let reps: Int
     let restSeconds: Int
+    let targetWeightKg: Double?
 
-    enum CodingKeys: String, CodingKey { case exerciseId, sets, reps, restSeconds }
+    enum CodingKeys: String, CodingKey { case exerciseId, sets, reps, restSeconds, targetWeightKg }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -490,6 +494,7 @@ private struct PlanItemPayload: Encodable, ConvexEncodable {
         try container.encode(Double(sets), forKey: .sets)
         try container.encode(Double(reps), forKey: .reps)
         try container.encode(Double(restSeconds), forKey: .restSeconds)
+        if let targetWeightKg { try container.encode(targetWeightKg, forKey: .targetWeightKg) }
     }
 }
 
@@ -505,48 +510,6 @@ private struct PlanDayPayload: Encodable, ConvexEncodable {
         try container.encode(name, forKey: .name)
         if let weekday { try container.encode(Double(weekday), forKey: .weekday) }
         try container.encode(exercises, forKey: .exercises)
-    }
-}
-
-/// Searchable picker over Sombrey's exercise library.
-struct ExercisePickerView: View {
-    @Environment(\.dismiss) private var dismiss
-    let onPick: (Exercise) -> Void
-    @State private var exercises = ConvexQuery<[Exercise]>()
-    @State private var searchTerm = ""
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if exercises.value?.isEmpty == true {
-                    Text("The exercise library is empty right now.")
-                        .foregroundStyle(StudioColor.inkFaint)
-                }
-                ForEach(exercises.value ?? []) { exercise in
-                    Button {
-                        onPick(exercise)
-                        dismiss()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(exercise.name).foregroundStyle(StudioColor.ink)
-                            Text(exercise.muscleGroup.capitalized)
-                                .font(StudioFont.body(12))
-                                .foregroundStyle(StudioColor.inkSoft)
-                        }
-                    }
-                }
-            }
-            .searchable(text: $searchTerm)
-            .onChange(of: searchTerm) { _, newValue in
-                exercises.subscribe(to: "exercises:list", with: ["searchTerm": newValue])
-            }
-            .navigationTitle("Add exercise")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            }
-        }
-        .task { exercises.subscribe(to: "exercises:list") }
     }
 }
 
@@ -664,6 +627,7 @@ struct WorkoutHistoryView: View {
     @State private var workouts = ConvexQuery<[WorkoutHistoryDTO]>()
     @State private var sessions = ConvexQuery<[SportSessionHistoryDTO]>()
     @State private var selectedSession: SportSessionHistoryDTO?
+    @State private var selectedWorkout: WorkoutHistoryDTO?
     @State private var isSyncing = false
 
     private var entries: [WorkoutHistory.Entry] {
@@ -688,6 +652,9 @@ struct WorkoutHistoryView: View {
                         HistoryRow(entry: entry)
                             .onTapGesture {
                                 selectedSession = sessions.value?.first { $0.id == entry.id }
+                                if selectedSession == nil {
+                                    selectedWorkout = workouts.value?.first { $0.id == entry.id && $0.source != "manual" }
+                                }
                             }
                     }
                 }
@@ -706,6 +673,10 @@ struct WorkoutHistoryView: View {
         }
         .sheet(item: $selectedSession) { session in
             SportSessionDetailView(session: session)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $selectedWorkout) { workout in
+            WorkoutSetsView(workout: workout)
                 .presentationDetents([.medium, .large])
         }
     }
@@ -752,77 +723,94 @@ struct WorkoutHistoryView: View {
     }
 }
 
-// MARK: - Exercise library
-
-/// Sombrey's exercise library. Its content may come from an exercise-data
-/// provider behind the scenes; the user only ever sees Sombrey's library.
-struct ExerciseLibraryView: View {
+/// A logged Sombrey workout, exercise by exercise, set by set. Exercise
+/// names come from what was kept when each set was logged, so an old
+/// workout reads correctly even if the library has changed since.
+struct WorkoutSetsView: View {
+    let workout: WorkoutHistoryDTO
     @Environment(\.dismiss) private var dismiss
-    @State private var exercises = ConvexQuery<[ExerciseDetailDTO]>()
-    @State private var searchTerm = ""
-    @State private var selected: ExerciseDetailDTO?
+    @State private var detail = ConvexQuery<WorkoutWithSetsDTO?>()
+
+    struct WorkoutWithSetsDTO: Decodable, Equatable {
+        let sets: [SetDTO]
+    }
+
+    struct SetDTO: Decodable, Equatable, Identifiable {
+        let id: String
+        let exerciseId: String
+        let exerciseName: String
+        let orderIndex: Double
+        let setIndex: Double
+        let reps: Double
+        let weightKg: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case id = "_id"
+            case exerciseId, exerciseName, orderIndex, setIndex, reps, weightKg
+        }
+    }
+
+    private var groups: [(name: String, sets: [SetDTO])] {
+        var order: [String] = []
+        var byExercise: [String: [SetDTO]] = [:]
+        for set in detail.value.flatMap({ $0 })?.sets ?? [] {
+            if byExercise[set.exerciseId] == nil { order.append(set.exerciseId) }
+            byExercise[set.exerciseId, default: []].append(set)
+        }
+        return order.map { id in
+            let sets = (byExercise[id] ?? []).sorted { $0.setIndex < $1.setIndex }
+            return (sets.first?.exerciseName ?? "Exercise", sets)
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if exercises.value?.isEmpty == true {
-                    Text("The exercise library is empty right now.")
-                        .foregroundStyle(StudioColor.inkFaint)
-                }
-                ForEach(exercises.value ?? []) { exercise in
-                    Button { selected = exercise } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(exercise.name).foregroundStyle(StudioColor.ink)
-                            Text(([exercise.muscleGroup.capitalized] + exercise.equipment).joined(separator: " · "))
-                                .font(StudioFont.body(12))
-                                .foregroundStyle(StudioColor.inkSoft)
-                        }
-                    }
-                }
-            }
-            .searchable(text: $searchTerm)
-            .onChange(of: searchTerm) { _, newValue in
-                exercises.subscribe(to: "exercises:list", with: ["searchTerm": newValue])
-            }
-            .navigationTitle("Exercise library")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-        }
-        .task { exercises.subscribe(to: "exercises:list") }
-        .sheet(item: $selected) { exercise in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(exercise.name)
-                        .font(StudioFont.hero(24, weight: .semibold))
-                        .foregroundStyle(StudioColor.ink)
-                    if !exercise.primaryMuscles.isEmpty {
-                        Text("Muscles · " + (exercise.primaryMuscles + exercise.secondaryMuscles).joined(separator: ", "))
-                            .font(StudioFont.body(13))
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(workout.name)
+                            .font(StudioFont.hero(26, weight: .semibold))
+                            .foregroundStyle(StudioColor.ink)
+                        Text(Date(timeIntervalSince1970: workout.startedAt / 1000).formatted(.dateTime.weekday(.wide).day().month().hour().minute()))
+                            .font(StudioFont.body(12))
                             .foregroundStyle(StudioColor.inkSoft)
                     }
-                    if !exercise.equipment.isEmpty {
-                        Text("Equipment · " + exercise.equipment.joined(separator: ", "))
+                    if detail.isLoading {
+                        ProgressView().tint(StudioColor.ink)
+                    } else if groups.isEmpty {
+                        Text("No sets were logged in this workout.")
                             .font(StudioFont.body(13))
-                            .foregroundStyle(StudioColor.inkSoft)
+                            .foregroundStyle(StudioColor.inkFaint)
                     }
-                    if !exercise.description.isEmpty {
-                        Text(exercise.description)
-                            .font(StudioFont.body(14))
-                            .foregroundStyle(StudioColor.ink)
-                    }
-                    ForEach(Array(exercise.instructions.enumerated()), id: \.offset) { index, step in
-                        Text("\(index + 1). \(step)")
-                            .font(StudioFont.body(14))
-                            .foregroundStyle(StudioColor.ink)
+                    ForEach(groups, id: \.name) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(group.name)
+                                .font(StudioFont.body(15, weight: .semibold))
+                                .foregroundStyle(StudioColor.ink)
+                            ForEach(group.sets) { set in
+                                HStack {
+                                    Text("Set \(Int(set.setIndex) + 1)")
+                                        .foregroundStyle(StudioColor.inkSoft)
+                                    Spacer()
+                                    Text("\(Int(set.reps)) × \(TrainingMath.weightText(set.weightKg))\(set.weightKg.map { $0 > 0 ? " kg" : "" } ?? "")")
+                                        .foregroundStyle(StudioColor.ink)
+                                        .monospacedDigit()
+                                }
+                                .font(StudioFont.body(13))
+                            }
+                        }
+                        .studioCard()
                     }
                 }
                 .padding(24)
             }
             .background(StudioColor.env4.ignoresSafeArea())
-            .presentationDetents([.medium, .large])
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
         }
+        .task { detail.subscribe(to: "sombreyWorkouts:getWorkoutWithSets", with: ["workoutId": workout.id]) }
     }
 }
 

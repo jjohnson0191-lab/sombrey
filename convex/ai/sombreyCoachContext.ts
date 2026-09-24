@@ -3,6 +3,7 @@ import { internalQuery } from "../_generated/server";
 import { ConvexError } from "convex/values";
 import { labelledRecord, sessionRecord } from "../activities";
 import { describeActivitiesForCoach } from "../activityCoach";
+import { describeExerciseForCoach } from "../exerciseNormalization";
 
 /**
  * Fitness context for the Sombrey Coach — isolated from
@@ -89,6 +90,33 @@ export const getSombreyContext = internalQuery({
       lines.push(`Most recent training sessions: ${summary}`);
     } else {
       lines.push("Training session history: none logged yet");
+    }
+
+    // Exercises actually trained in the last 14 days, described in Sombrey's
+    // own exercise terms (convex/exerciseNormalization.ts) — never the
+    // exercise-data provider's.
+    const recentSets = await ctx.db
+      .query("sombreyWorkoutSets")
+      .withIndex("by_user_and_completedAt", (q) => q.eq("userId", user._id).gte("completedAt", Date.now() - 14 * 24 * 60 * 60 * 1000))
+      .take(500);
+    if (recentSets.length > 0) {
+      const byExercise = new Map<string, typeof recentSets>();
+      for (const set of recentSets) byExercise.set(set.exerciseId, [...(byExercise.get(set.exerciseId) ?? []), set]);
+      lines.push("Exercises trained in the last 14 days:");
+      for (const [exerciseId, sets] of [...byExercise.entries()].slice(0, 12)) {
+        const exercise = await ctx.db.get(sets[0].exerciseId);
+        const name = exercise?.name ?? sets[0].exerciseName ?? "Exercise";
+        const best = sets.reduce((a, b) => ((b.weightKg ?? 0) > (a.weightKg ?? 0) || ((b.weightKg ?? 0) === (a.weightKg ?? 0) && b.reps > a.reps) ? b : a));
+        const described = exercise
+          ? describeExerciseForCoach({
+            name, primaryMuscles: exercise.primaryMuscles, secondaryMuscles: exercise.secondaryMuscles,
+            equipment: exercise.equipment, difficulty: exercise.difficulty, mechanic: exercise.mechanic,
+          })
+          : name;
+        const bestText = best.weightKg ? `best ${best.weightKg} kg × ${best.reps}` : `best ${best.reps} reps (bodyweight)`;
+        void exerciseId;
+        lines.push(`- ${described} — ${sets.length} set${sets.length === 1 ? "" : "s"}, ${bestText} [user-logged]`);
+      }
     }
 
     // Legacy coach-assigned workout logs — still real data where present.

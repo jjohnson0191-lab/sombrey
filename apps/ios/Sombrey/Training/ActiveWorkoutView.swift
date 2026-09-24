@@ -234,10 +234,10 @@ struct ActiveWorkoutView: View {
             weightKg = last.weightKg
             prefilledFor = exercise.id
         } else if let target = session.planTargets[exercise.id], history.value != nil {
-            // The user's own plan sets the reps; load still comes only
-            // from what they actually lifted last time.
+            // The user's own plan sets the reps; load comes from what they
+            // actually lifted last time, else the target load they set.
             reps = target.reps
-            weightKg = lastTime?.lastSet?.weightKg
+            weightKg = lastTime?.lastSet?.weightKg ?? target.weightKg
             prefilledFor = exercise.id
         } else if let previous = lastTime?.lastSet {
             reps = previous.reps
@@ -786,35 +786,13 @@ private struct SetCorrectionSheet: View {
     }
 }
 
-/// Minimal sheet for adding an exercise mid-workout — reuses the same
-/// real `exercises:list` query as `TrainOverviewView`.
+/// Adding an exercise mid-workout — through the Sombrey Exercise Library.
 private struct AddExerciseDuringWorkoutView: View {
-    @Environment(\.dismiss) private var dismiss
     @Bindable var session: TrainingSessionManager
-    @State private var exercises = ConvexQuery<[Exercise]>()
-    @State private var searchTerm = ""
 
     var body: some View {
-        NavigationStack {
-            List {
-                ForEach(exercises.value ?? []) { exercise in
-                    Button(exercise.name) {
-                        session.addExerciseDuringWorkout(exercise)
-                        dismiss()
-                    }
-                }
-            }
-            .searchable(text: $searchTerm)
-            .onChange(of: searchTerm) { _, newValue in
-                exercises.subscribe(to: "exercises:list", with: ["searchTerm": newValue])
-            }
-            .navigationTitle("Add exercise")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
+        ExercisePickerSheet(title: "Add exercise") { exercise in
+            session.addExerciseDuringWorkout(exercise)
         }
-        .task { exercises.subscribe(to: "exercises:list") }
     }
 }

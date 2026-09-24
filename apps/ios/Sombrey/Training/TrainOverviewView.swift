@@ -258,7 +258,7 @@ private struct CurrentPlanHero: View {
     private var resolved: [(Exercise, TrainingSessionManager.PlanTarget)] {
         let byId = Dictionary((exercises.value ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return day.exercises.compactMap { item in
-            byId[item.exerciseId].map { ($0, .init(sets: Int(item.sets), reps: Int(item.reps), restSeconds: item.restSeconds.map { Int($0) })) }
+            byId[item.exerciseId].map { ($0, .init(sets: Int(item.sets), reps: Int(item.reps), restSeconds: item.restSeconds.map { Int($0) }, weightKg: item.targetWeightKg)) }
         }
     }
 
@@ -276,16 +276,16 @@ private struct CurrentPlanHero: View {
 
 // MARK: - Start Training (session builder)
 
-/// Build a session from the real exercise library: search, repeat the last
-/// workout, choose and order exercises, start. Your band records alongside
-/// automatically — there is nothing to pair.
+/// Build a session from the Sombrey Exercise Library: repeat the last
+/// workout, or search and choose exercises, order them, start. Your band
+/// records alongside automatically — there is nothing to pair.
 struct StartTrainingView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var session: TrainingSessionManager
     let onStart: () -> Void
-    @State private var exercises = ConvexQuery<[Exercise]>()
-    @State private var searchTerm = ""
+    @State private var library = ExerciseSearchModel()
     @State private var repeatTemplate = ConvexQuery<RepeatTemplate?>()
+    @State private var templateExercises = ConvexQuery<[Exercise]>()
 
     var body: some View {
         NavigationStack {
@@ -297,16 +297,19 @@ struct StartTrainingView: View {
                         selectedExercisesSection
                     }
 
-                    content
+                    ExerciseSearchPanel(model: library, onSelect: { session.toggle($0.asExercise) }) { exercise in
+                        let isSelected = session.selectedExercises.contains { $0.id == exercise.id }
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(isSelected ? StudioColor.accentInk : StudioColor.ink.opacity(0.25))
+                            .accessibilityLabel(isSelected ? "Selected" : "Not selected")
+                    }
                 }
                 .padding(20)
                 .padding(.bottom, 80)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(StudioColor.env5.ignoresSafeArea())
-            .searchable(text: $searchTerm, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search exercises")
-            .onChange(of: searchTerm) { _, newValue in
-                exercises.subscribe(to: "exercises:list", with: ["searchTerm": newValue])
-            }
             .navigationTitle("Start Training")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -327,9 +330,10 @@ struct StartTrainingView: View {
                 }
             }
         }
-        .task {
-            exercises.subscribe(to: "exercises:list")
-            repeatTemplate.subscribe(to: "sombreyWorkouts:getMostRecentWorkoutTemplate")
+        .task { repeatTemplate.subscribe(to: "sombreyWorkouts:getMostRecentWorkoutTemplate") }
+        .onChange(of: repeatTemplate.value.flatMap { $0 }?.exerciseIds) { _, ids in
+            guard let ids, !ids.isEmpty else { return }
+            templateExercises.subscribe(to: "exercises:getMany", with: ["ids": ids.map { $0 as ConvexEncodable? }])
         }
     }
 
@@ -337,8 +341,8 @@ struct StartTrainingView: View {
     private var repeatPreviousButton: some View {
         if let template = repeatTemplate.value, let template {
             Button {
-                let matched = template.exerciseIds.compactMap { id in exercises.value?.first { $0.id == id } }
-                session.loadRepeatTemplate(name: template.workoutName, exercises: matched)
+                let byId = Dictionary((templateExercises.value ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                session.loadRepeatTemplate(name: template.workoutName, exercises: template.exerciseIds.compactMap { byId[$0] })
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -354,6 +358,7 @@ struct StartTrainingView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(templateExercises.value == nil)
             .studioCard()
         }
     }
@@ -368,7 +373,13 @@ struct StartTrainingView: View {
                         Text(exercise.name)
                             .font(StudioFont.body(13))
                             .foregroundStyle(StudioColor.ink)
-                        LastTimeLine(exerciseId: exercise.id)
+                        if let target = session.planTargets[exercise.id] {
+                            Text("\(target.sets) × \(target.reps)\(target.weightKg.map { " · \(TrainingMath.weightText($0)) kg" } ?? "")")
+                                .font(StudioFont.body(11))
+                                .foregroundStyle(StudioColor.inkSoft)
+                        } else {
+                            LastTimeLine(exerciseId: exercise.id)
+                        }
                     }
                 }
                 .onMove { session.moveExercise(fromOffsets: $0, toOffset: $1) }
@@ -380,31 +391,6 @@ struct StartTrainingView: View {
             .listStyle(.plain)
             .frame(height: CGFloat(min(session.selectedExercises.count, 5)) * 56 + 8)
             .scrollDisabled(session.selectedExercises.count <= 5)
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if exercises.isLoading {
-            ProgressView().tint(StudioColor.ink).padding(.top, 24)
-        } else if let error = exercises.errorMessage {
-            Text("Couldn't load exercises: \(error)")
-                .font(StudioFont.body(12))
-                .foregroundStyle(StudioColor.danger)
-        } else if let list = exercises.value, !list.isEmpty {
-            VStack(spacing: 0) {
-                ForEach(list) { exercise in
-                    ExerciseRow(exercise: exercise, isSelected: session.selectedExercises.contains(exercise)) {
-                        session.toggle(exercise)
-                    }
-                    Divider().overlay(StudioColor.ink.opacity(0.08))
-                }
-            }
-        } else {
-            Text(searchTerm.isEmpty ? "No exercises available yet." : "No exercises match \"\(searchTerm)\".")
-                .font(StudioFont.body(13))
-                .foregroundStyle(StudioColor.inkFaint)
-                .padding(.top, 24)
         }
     }
 }
@@ -431,33 +417,4 @@ private struct LastTimeLine: View {
 struct RepeatTemplate: Decodable {
     let workoutName: String
     let exerciseIds: [String]
-}
-
-private struct ExerciseRow: View {
-    let exercise: Exercise
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(exercise.name)
-                        .font(StudioFont.body(15, weight: .medium))
-                        .foregroundStyle(StudioColor.ink)
-                    Text(exercise.muscleGroup.capitalized)
-                        .font(StudioFont.body(12))
-                        .foregroundStyle(StudioColor.inkSoft)
-                }
-                Spacer()
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? StudioColor.accentInk : StudioColor.ink.opacity(0.25))
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(exercise.name)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
 }

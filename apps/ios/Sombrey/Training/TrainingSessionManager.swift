@@ -171,6 +171,8 @@ final class TrainingSessionManager {
         let sets: Int
         let reps: Int
         let restSeconds: Int?
+        /// The user's own target load (kg); absent = no target set.
+        var weightKg: Double? = nil
     }
 
     static let defaultRestSeconds = 60
@@ -271,8 +273,9 @@ final class TrainingSessionManager {
     // MARK: - Building the session (works with or without AI)
 
     func toggle(_ exercise: Exercise) {
-        if let index = selectedExercises.firstIndex(of: exercise) {
+        if let index = selectedExercises.firstIndex(where: { $0.id == exercise.id }) {
             selectedExercises.remove(at: index)
+            planTargets[exercise.id] = nil
         } else {
             selectedExercises.append(exercise)
         }
@@ -284,11 +287,22 @@ final class TrainingSessionManager {
 
     /// Mid-workout addition — inserted right after the current exercise
     /// so it's next up, not appended to the end where it'd be missed.
-    func addExerciseDuringWorkout(_ exercise: Exercise) {
-        guard !selectedExercises.contains(exercise) else { return }
+    func addExerciseDuringWorkout(_ exercise: Exercise, target: PlanTarget? = nil) {
+        guard !selectedExercises.contains(where: { $0.id == exercise.id }) else { return }
         let insertAt = min(currentExerciseIndex + 1, selectedExercises.count)
         selectedExercises.insert(exercise, at: insertAt)
+        if let target { planTargets[exercise.id] = target }
         save()
+    }
+
+    /// From the Exercise Library: adds an exercise, with the user's own
+    /// targets, to the session being built for next time.
+    func addToNextSession(_ exercise: Exercise, target: PlanTarget?) {
+        guard phase == .overview else { return }
+        if !selectedExercises.contains(where: { $0.id == exercise.id }) {
+            selectedExercises.append(exercise)
+        }
+        if let target { planTargets[exercise.id] = target }
     }
 
     func skipCurrentExercise() {

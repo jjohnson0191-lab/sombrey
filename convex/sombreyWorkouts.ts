@@ -102,6 +102,9 @@ export const logSet = mutation({
     if (!workout || workout.userId !== user._id) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Workout not found" });
     }
+    // The exercise as it is now, kept with the set: history must read
+    // correctly even if the library entry later changes or disappears.
+    const exercise = await ctx.db.get(args.exerciseId);
     return await ctx.db.insert("sombreyWorkoutSets", {
       workoutId: args.workoutId,
       userId: user._id,
@@ -111,6 +114,8 @@ export const logSet = mutation({
       reps: args.reps,
       weightKg: args.weightKg,
       completedAt: args.completedAt,
+      exerciseName: exercise?.name,
+      exerciseMuscleGroup: exercise?.muscleGroup,
     });
   },
 });
@@ -205,7 +210,13 @@ export const getWorkoutWithSets = query({
       .query("sombreyWorkoutSets")
       .withIndex("by_workout", (q) => q.eq("workoutId", args.workoutId))
       .collect();
-    return { workout, sets: sets.sort((a, b) => a.orderIndex - b.orderIndex || a.setIndex - b.setIndex) };
+    // Each set names its exercise from what was kept when it was logged,
+    // falling back to the library only for sets from before that existed.
+    const named = await Promise.all(sets.map(async (set) => ({
+      ...set,
+      exerciseName: set.exerciseName ?? (await ctx.db.get(set.exerciseId))?.name ?? "Exercise",
+    })));
+    return { workout, sets: named.sort((a, b) => a.orderIndex - b.orderIndex || a.setIndex - b.setIndex) };
   },
 });
 
