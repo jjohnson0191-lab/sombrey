@@ -114,10 +114,13 @@ struct TrainingModeView: View {
             }
         } else {
             VStack(alignment: .leading, spacing: 14) {
-                TrainEyebrow(text: "Ready to train", tone: StudioColor.paperSoft)
-                Text("What are you training today?")
-                    .font(StudioFont.hero(30, weight: .semibold))
+                TrainEyebrow(text: session.selectedExercises.isEmpty ? "Ready to train" : "Your next session", tone: StudioColor.paperSoft)
+                Text(session.selectedExercises.isEmpty
+                     ? "What are you training today?"
+                     : session.selectedExercises.prefix(3).map(\.name).joined(separator: ", ") + (session.selectedExercises.count > 3 ? " +\(session.selectedExercises.count - 3)" : ""))
+                    .font(StudioFont.hero(session.selectedExercises.isEmpty ? 30 : 24, weight: .semibold))
                     .foregroundStyle(StudioColor.paper)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 if let readinessLine {
                     readinessLabel(readinessLine)
@@ -125,7 +128,7 @@ struct TrainingModeView: View {
                 Button {
                     sheet = .build
                 } label: {
-                    Text("Start Training").frame(maxWidth: .infinity)
+                    Text(session.selectedExercises.isEmpty ? "Start Training" : "Review and start").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.illuminatedCTA)
             }
@@ -300,8 +303,8 @@ struct StartTrainingView: View {
                     ExerciseSearchPanel(model: library, onSelect: { session.toggle($0.asExercise) }) { exercise in
                         let isSelected = session.selectedExercises.contains { $0.id == exercise.id }
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 20))
-                            .foregroundStyle(isSelected ? StudioColor.accentInk : StudioColor.ink.opacity(0.25))
+                            .font(.system(size: 22))
+                            .foregroundStyle(isSelected ? StudioColor.accentInkDark : StudioColor.paper.opacity(0.35))
                             .accessibilityLabel(isSelected ? "Selected" : "Not selected")
                     }
                 }
@@ -309,7 +312,7 @@ struct StartTrainingView: View {
                 .padding(.bottom, 80)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(StudioColor.env5.ignoresSafeArea())
+            .background(EnvironmentView(scene: .trainOverview) { Color.clear }.ignoresSafeArea())
             .navigationTitle("Start Training")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -17,10 +17,12 @@ struct LibraryExercise: Decodable, Identifiable, Hashable {
     let difficulty: String?
     let category: String?
     let hasMedia: Bool
+    /// The demonstration visual, in Sombrey storage — when one may be shown.
+    let mediaUrl: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
-        case name, description, muscleGroup, primaryMuscles, equipment, difficulty, category, hasMedia
+        case name, description, muscleGroup, primaryMuscles, equipment, difficulty, category, hasMedia, mediaUrl
     }
 
     /// The session/plan model's exercise value.
@@ -29,9 +31,15 @@ struct LibraryExercise: Decodable, Identifiable, Hashable {
                  primaryMuscles: primaryMuscles, equipment: equipment, difficulty: difficulty)
     }
 
-    /// "Glutes · Barbell" — the row's second line.
+    /// "Glutes · Barbell" — a compact second line.
     var summaryLine: String {
         ([primaryMuscles.first ?? ExerciseVocabulary.muscleGroup(muscleGroup)] + equipment.prefix(1)).joined(separator: " · ")
+    }
+
+    /// The card's classification line: primary muscle, then type.
+    var classification: String {
+        ([primaryMuscles.first ?? ExerciseVocabulary.muscleGroup(muscleGroup)] + [category.map(ExerciseVocabulary.category)].compactMap { $0 })
+            .joined(separator: " · ")
     }
 }
 
@@ -111,6 +119,20 @@ enum ExerciseVocabulary {
         value.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    /// A restrained mark for an exercise with no visual — its muscle group.
+    static func glyph(forMuscleGroup group: String) -> String {
+        switch group {
+        case "chest": return "figure.strengthtraining.traditional"
+        case "back": return "figure.rower"
+        case "shoulders": return "figure.arms.open"
+        case "arms": return "dumbbell"
+        case "legs": return "figure.step.training"
+        case "core": return "figure.core.training"
+        case "cardio": return "figure.run"
+        default: return "figure.strengthtraining.functional"
+        }
+    }
+
     static func movement(mechanic: String?, force: String?, unilateral: Bool?) -> String? {
         let parts = [mechanic?.capitalized, force.map { "\($0.capitalized) movement" }, unilateral == true ? "One side at a time" : nil].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -157,6 +179,14 @@ final class ExerciseSearchModel {
         equipment = nil
         difficulty = nil
         category = nil
+    }
+
+    /// Filters that live in the filter sheet (muscle has its own tabs).
+    var sheetFilterCount: Int { [equipment, difficulty, category].compactMap { $0 }.count }
+
+    /// Try again after a failure.
+    func retry() {
+        schedule(immediately: true)
     }
 
     /// Next page: more of what the library holds, and the next page from the
@@ -214,248 +244,535 @@ final class ExerciseSearchModel {
     }
 }
 
+// MARK: - Glass pill tabs
+
+/// Sombrey's glass pill language as a scrolling tab row: each value a 44pt
+/// glass key, the selected one lit (the same raised ivory key as the tab bar
+/// and Train's mode pills) and gliding to its new position.
+struct GlassPillTabs<Value: Hashable>: View {
+    let options: [(value: Value, label: String)]
+    @Binding var selection: Value
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var keySpace
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(options, id: \.value) { option in
+                        let isActive = option.value == selection
+                        Button {
+                            guard !isActive else { return }
+                            withAnimation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion)) {
+                                selection = option.value
+                                proxy.scrollTo(option.value, anchor: .center)
+                            }
+                        } label: {
+                            Text(option.label)
+                                .font(StudioFont.body(13, weight: isActive ? .semibold : .medium))
+                                .foregroundStyle(isActive ? StudioColor.ink : StudioColor.ink.opacity(0.62))
+                                .padding(.horizontal, 16)
+                                .frame(minHeight: 44)
+                                .background {
+                                    if isActive {
+                                        Capsule(style: .continuous)
+                                            .fill(Color.white.opacity(0.62))
+                                            .overlay { Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.75), lineWidth: 0.5) }
+                                            .shadow(color: StudioColor.env0.opacity(0.14), radius: 6, y: 3)
+                                            .matchedGeometryEffect(id: "key", in: keySpace)
+                                    } else {
+                                        Capsule(style: .continuous)
+                                            .fill(.ultraThinMaterial)
+                                            .environment(\.colorScheme, .light)
+                                            .overlay { Capsule(style: .continuous).strokeBorder(StudioColor.ink.opacity(0.07), lineWidth: 1) }
+                                    }
+                                }
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .id(option.value)
+                        .accessibilityAddTraits(isActive ? [.isSelected, .isButton] : .isButton)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollClipDisabled()
+        }
+        .sensoryFeedback(StudioHaptic.focus, trigger: selection)
+    }
+}
+
 // MARK: - Search panel (shared)
 
-/// The Sombrey Exercise Library's search surface — used by the library, the
-/// session builder, plan editing and adding an exercise mid-workout. What a
-/// row does is the caller's (`trailing` + `onSelect`).
+/// The Sombrey Exercise Library's search surface — search, muscle tabs,
+/// filters and results. The library, the session builder, plan editing and
+/// adding an exercise mid-workout all use it. What a card's accessory shows
+/// and what selecting does are the caller's.
 struct ExerciseSearchPanel<Trailing: View>: View {
     @Bindable var model: ExerciseSearchModel
     let onSelect: (LibraryExercise) -> Void
     @ViewBuilder var trailing: (LibraryExercise) -> Trailing
-    @FocusState private var searchFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showingFilters = false
+    @State private var selectedCount = 0
+
+    /// "all" stands for no muscle filter in the tab row.
+    private var muscleTab: Binding<String> {
+        Binding(get: { model.muscleGroup ?? "all" }, set: { model.muscleGroup = $0 == "all" ? nil : $0 })
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            searchField
-            filterBar
-            content
+        VStack(alignment: .leading, spacing: 16) {
+            LibrarySearchField(text: $model.term, isWorking: model.isFetchingMore && !model.term.isEmpty)
+
+            HStack(spacing: 8) {
+                GlassPillTabs(
+                    options: muscleOptions,
+                    selection: muscleTab
+                )
+                if hasSheetFilters {
+                    filtersButton
+                }
+            }
+
+            results
         }
         .task { model.start() }
+        .sheet(isPresented: $showingFilters) {
+            LibraryFilterSheet(model: model)
+                .presentationDetents([.medium, .large])
+        }
+        .sensoryFeedback(StudioHaptic.focus, trigger: selectedCount)
     }
 
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(StudioColor.inkSoft)
-            TextField("Search exercises, muscles, equipment", text: $model.term)
-                .font(StudioFont.body(15))
-                .foregroundStyle(StudioColor.ink)
-                .focused($searchFocused)
-                .submitLabel(.search)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            if !model.term.isEmpty {
-                Button {
-                    model.term = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(StudioColor.inkFaint)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 48)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(StudioColor.ink.opacity(0.08), lineWidth: 1) }
+    private var muscleOptions: [(value: String, label: String)] {
+        let groups = model.facets.value?.muscleGroups ?? ["chest", "back", "shoulders", "arms", "legs", "core", "cardio"]
+        return [(value: "all", label: "All")] + groups.map { (value: $0, label: ExerciseVocabulary.muscleGroup($0)) }
     }
 
-    private var filterBar: some View {
-        let facets = model.facets.value
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                FilterPill(title: "Muscle", value: model.muscleGroup.map(ExerciseVocabulary.muscleGroup),
-                           options: (facets?.muscleGroups ?? ["chest", "back", "shoulders", "arms", "legs", "core", "cardio"]).map { ($0, ExerciseVocabulary.muscleGroup($0)) },
-                           selection: $model.muscleGroup)
-                if let equipment = facets?.equipment, !equipment.isEmpty {
-                    FilterPill(title: "Equipment", value: equipment.first { $0.key == model.equipment }?.label,
-                               options: equipment.map { ($0.key, $0.label) }, selection: $model.equipment)
-                }
-                if let difficulties = facets?.difficulties, !difficulties.isEmpty {
-                    FilterPill(title: "Difficulty", value: model.difficulty.map(ExerciseVocabulary.difficulty),
-                               options: difficulties.map { ($0, ExerciseVocabulary.difficulty($0)) }, selection: $model.difficulty)
-                }
-                if let categories = facets?.categories, !categories.isEmpty {
-                    FilterPill(title: "Type", value: model.category.map(ExerciseVocabulary.category),
-                               options: categories.map { ($0, ExerciseVocabulary.category($0)) }, selection: $model.category)
-                }
-                if model.hasFilters {
-                    Button("Clear") { model.clearFilters() }
-                        .font(StudioFont.body(12, weight: .medium))
-                        .foregroundStyle(StudioColor.inkSoft)
-                        .frame(minHeight: 36)
+    private var hasSheetFilters: Bool {
+        guard let facets = model.facets.value else { return false }
+        return !facets.equipment.isEmpty || !facets.difficulties.isEmpty || facets.categories.count > 1
+    }
+
+    private var filtersButton: some View {
+        Button {
+            showingFilters = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 13, weight: .semibold))
+                if model.sheetFilterCount > 0 {
+                    Text("\(model.sheetFilterCount)")
+                        .font(StudioFont.body(12, weight: .semibold))
                 }
             }
-            .padding(.vertical, 2)
+            .foregroundStyle(model.sheetFilterCount > 0 ? StudioColor.paper : StudioColor.ink)
+            .padding(.horizontal, 14)
+            .frame(minWidth: 44, minHeight: 44)
+            .background {
+                if model.sheetFilterCount > 0 {
+                    Capsule(style: .continuous).fill(StudioColor.env0.opacity(0.85))
+                } else {
+                    Capsule(style: .continuous).fill(.ultraThinMaterial).environment(\.colorScheme, .light)
+                        .overlay { Capsule(style: .continuous).strokeBorder(StudioColor.ink.opacity(0.07), lineWidth: 1) }
+                }
+            }
+            .contentShape(Capsule())
         }
-        .scrollClipDisabled()
-        .sensoryFeedback(StudioHaptic.focus, trigger: [model.muscleGroup, model.equipment, model.difficulty, model.category].compactMap { $0 })
+        .buttonStyle(.plain)
+        .accessibilityLabel(model.sheetFilterCount > 0 ? "Filters, \(model.sheetFilterCount) on" : "Filters")
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var results: some View {
         let items = model.results.value?.items ?? []
         if model.results.isLoading && items.isEmpty {
-            HStack(spacing: 10) {
-                ProgressView().tint(StudioColor.ink)
-                Text("Searching the library…")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkSoft)
-            }
-            .frame(maxWidth: .infinity, minHeight: 80)
+            LibraryState(title: "Finding exercises…", working: true)
         } else if model.results.errorMessage != nil && items.isEmpty {
-            LibraryMessage(title: "Couldn't reach the exercise library",
-                           text: "Check your connection — the library comes back as soon as you're online.")
+            LibraryState(title: "We couldn't load the library.", message: "Check your connection and try again.",
+                         action: ("Try again", { model.retry() }))
         } else if items.isEmpty {
             emptyState
         } else {
-            VStack(spacing: 0) {
-                ForEach(items) { exercise in
-                    ExerciseRow(exercise: exercise, trailing: trailing(exercise)) { onSelect(exercise) }
-                    Divider().overlay(StudioColor.ink.opacity(0.07))
+            LazyVStack(alignment: .leading, spacing: 10) {
+                Text(resultsHeading)
+                    .font(StudioFont.body(10, weight: .semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(StudioColor.inkSoft)
+                    .padding(.bottom, 2)
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, exercise in
+                    ExerciseCard(exercise: exercise, trailing: trailing(exercise)) {
+                        selectedCount += 1
+                        onSelect(exercise)
+                    }
+                    .studioReveal(index: min(index, 6))
                 }
                 if model.results.value?.hasMore == true || !model.sourceUnavailable {
                     Button {
                         model.loadMore()
                     } label: {
                         HStack(spacing: 8) {
-                            if model.isFetchingMore { ProgressView().tint(StudioColor.ink) }
-                            Text("Show more")
+                            if model.isFetchingMore { ProgressView().tint(StudioColor.ink).controlSize(.small) }
+                            Text(model.isFetchingMore ? "Finding more…" : "Show more exercises")
                                 .font(StudioFont.body(13, weight: .medium))
                                 .foregroundStyle(StudioColor.inkSoft)
                         }
                         .frame(maxWidth: .infinity, minHeight: 48)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .studioCard()
+            .animation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion), value: items.map(\.id))
         }
+    }
+
+    private var resultsHeading: String {
+        let trimmed = model.term.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty { return "RESULTS FOR \u{201C}\(trimmed.uppercased())\u{201D}" }
+        if let group = model.muscleGroup { return ExerciseVocabulary.muscleGroup(group).uppercased() }
+        return "ALL EXERCISES"
     }
 
     @ViewBuilder
     private var emptyState: some View {
         let trimmed = model.term.trimmingCharacters(in: .whitespaces)
         if model.isFetchingMore {
+            LibraryState(title: "Finding exercises…", working: true)
+        } else if model.sourceUnavailable && (model.facets.value?.total ?? 0) == 0 {
+            LibraryState(title: "The library isn't ready yet.",
+                         message: "Exercises appear here as soon as it is. Workouts you've already logged aren't affected.",
+                         action: ("Try again", { model.retry() }))
+        } else if !trimmed.isEmpty || model.hasFilters {
+            LibraryState(title: trimmed.isEmpty ? "No exercises match these filters." : "No exercises match that search.",
+                         message: "Try another muscle, movement, or equipment.",
+                         action: model.hasFilters ? ("Clear filters", { model.clearFilters() }) : nil)
+        } else {
+            LibraryState(title: "Search for an exercise to begin.", message: "Try a movement (\u{201C}squat\u{201D}), a muscle (\u{201C}glutes\u{201D}) or equipment (\u{201C}dumbbell\u{201D}).")
+        }
+    }
+}
+
+/// The library's search surface: a glass field with a quiet working state.
+private struct LibrarySearchField: View {
+    @Binding var text: String
+    let isWorking: Bool
+    @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(focused ? StudioColor.ink : StudioColor.inkSoft)
+            TextField("", text: $text, prompt: Text("Search exercises").foregroundStyle(StudioColor.inkFaint))
+                .font(StudioFont.body(16))
+                .foregroundStyle(StudioColor.ink)
+                .focused($focused)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if isWorking {
+                ProgressView().tint(StudioColor.inkSoft).controlSize(.small)
+            } else if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(StudioColor.inkFaint)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, text.isEmpty && !isWorking ? 16 : 4)
+        .frame(minHeight: 54)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .light)
+                .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).fill(StudioColor.env5.opacity(focused ? 0.34 : 0.2)) }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.7), Color.white.opacity(0.1)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                }
+                .shadow(color: StudioColor.env0.opacity(focused ? 0.16 : 0.08), radius: 12, y: 6)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onTapGesture { focused = true }
+        .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: focused)
+    }
+}
+
+/// Loading, empty and failure — minimal, in Sombrey's voice.
+private struct LibraryState: View {
+    let title: String
+    var message: String? = nil
+    var working = false
+    var action: (label: String, run: () -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                ProgressView().tint(StudioColor.ink)
-                Text(trimmed.isEmpty ? "Loading exercises…" : "Looking for \u{201C}\(trimmed)\u{201D}…")
+                if working { ProgressView().tint(StudioColor.ink).controlSize(.small) }
+                Text(title)
+                    .font(StudioFont.body(16, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let message {
+                Text(message)
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: 80)
-        } else if model.sourceUnavailable && (model.facets.value?.total ?? 0) == 0 {
-            LibraryMessage(title: "The exercise library isn't available yet",
-                           text: "Exercises will appear here as soon as the library is ready. Workouts you've already logged are unaffected.")
-        } else if !trimmed.isEmpty || model.hasFilters {
-            LibraryMessage(title: "No exercises match",
-                           text: trimmed.isEmpty ? "Try fewer filters." : "Try another name, a muscle (\u{201C}glutes\u{201D}) or equipment (\u{201C}dumbbell\u{201D}).")
-        } else {
-            LibraryMessage(title: "The exercise library is empty",
-                           text: model.sourceUnavailable ? "Exercises will appear here as soon as the library is ready." : "Search for an exercise to begin.")
+            if let action {
+                Button(action.label, action: action.run)
+                    .font(StudioFont.body(13, weight: .semibold))
+                    .foregroundStyle(StudioColor.accentInk)
+                    .frame(minHeight: 44)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 20)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 
-private struct LibraryMessage: View {
-    let title: String
-    let text: String
+// MARK: - Exercise card
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(StudioFont.body(15, weight: .semibold))
-                .foregroundStyle(StudioColor.ink)
-            Text(text)
-                .font(StudioFont.body(13))
-                .foregroundStyle(StudioColor.inkSoft)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .studioCard()
-    }
-}
-
-/// A filter as a glass pill with a menu of the values the library holds.
-private struct FilterPill: View {
-    let title: String
-    let value: String?
-    let options: [(key: String, label: String)]
-    @Binding var selection: String?
-
-    var body: some View {
-        Menu {
-            Button("Any \(title.lowercased())") { selection = nil }
-            ForEach(options, id: \.key) { option in
-                Button {
-                    selection = option.key
-                } label: {
-                    if selection == option.key { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(value ?? title)
-                    .font(StudioFont.body(13, weight: .medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            .foregroundStyle(value == nil ? StudioColor.ink : StudioColor.paper)
-            .padding(.horizontal, 14)
-            .frame(minHeight: 38)
-            .background {
-                if value == nil {
-                    Capsule(style: .continuous).fill(.ultraThinMaterial)
-                        .overlay { Capsule(style: .continuous).strokeBorder(StudioColor.ink.opacity(0.08), lineWidth: 1) }
-                } else {
-                    Capsule(style: .continuous).fill(StudioColor.env0.opacity(0.85))
-                }
-            }
-        }
-        .accessibilityLabel(value.map { "\(title): \($0)" } ?? title)
-    }
-}
-
-private struct ExerciseRow<Trailing: View>: View {
+/// An exercise as a Sombrey card: graphite glass, the visual (or a quiet
+/// muscle mark) set into it, then the name, its classification and what it
+/// takes. The list shows the visual still; it moves on the exercise's page.
+struct ExerciseCard<Trailing: View>: View {
     let exercise: LibraryExercise
     let trailing: Trailing
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 14) {
+                ExerciseThumbnail(url: exercise.mediaUrl.flatMap(URL.init(string:)), muscleGroup: exercise.muscleGroup)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(exercise.classification.uppercased())
+                        .font(StudioFont.body(10, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(StudioColor.paperSoft)
+                        .lineLimit(1)
                     Text(exercise.name)
-                        .font(StudioFont.body(15, weight: .medium))
-                        .foregroundStyle(StudioColor.ink)
+                        .font(StudioFont.hero(18, weight: .semibold))
+                        .foregroundStyle(StudioColor.paper)
                         .lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text(exercise.summaryLine)
-                        if let difficulty = exercise.difficulty {
-                            Text("·")
-                            Text(ExerciseVocabulary.difficulty(difficulty))
-                        }
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = detailLine {
+                        Text(detail)
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.paperFaint)
+                            .lineLimit(1)
                     }
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.inkSoft)
-                    .lineLimit(1)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
                 trailing
             }
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+            .background { GraphiteSurface(cornerRadius: 22) }
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardPressStyle())
         .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the exercise")
+    }
+
+    private var detailLine: String? {
+        let parts = [exercise.equipment.first, exercise.difficulty.map(ExerciseVocabulary.difficulty)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// The cool graphite glass Sombrey uses for instruments — Home's hero bezel
+/// language, scaled down for cards.
+struct GraphiteSurface: View {
+    var cornerRadius: CGFloat = 22
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        ZStack {
+            shape.fill(StudioColor.env0.opacity(0.78))
+            LinearGradient(colors: [StudioColor.paper.opacity(0.07), .clear], startPoint: .top, endPoint: .center)
+                .clipShape(shape)
+        }
+        .overlay {
+            shape.strokeBorder(
+                LinearGradient(colors: [StudioColor.paper.opacity(0.18), StudioColor.paper.opacity(0.03)], startPoint: .top, endPoint: .bottom),
+                lineWidth: 1)
+        }
+        .shadow(color: StudioColor.env0.opacity(0.18), radius: 12, y: 6)
+    }
+}
+
+/// A physical press: the card settles slightly under the finger.
+private struct CardPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .animation(configuration.isPressed ? StudioMotion.press : StudioMotion.release, value: configuration.isPressed)
+    }
+}
+
+/// The visual set into a card: the demonstration's first frame on its own
+/// white ground, or — with no visual — the exercise's muscle group as a quiet mark.
+private struct ExerciseThumbnail: View {
+    let url: URL?
+    let muscleGroup: String
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        ZStack {
+            if let url {
+                shape.fill(Color.white)
+                ExerciseMediaView(url: url, still: true)
+                    .padding(4)
+            } else {
+                shape.fill(StudioColor.env1.opacity(0.7))
+                Image(systemName: ExerciseVocabulary.glyph(forMuscleGroup: muscleGroup))
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(StudioColor.paperSoft)
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(StudioColor.paper.opacity(0.1), lineWidth: 1) }
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Filter sheet
+
+/// Equipment, difficulty and type — the filters beyond muscle — as glass
+/// pills, only for values the library actually holds.
+private struct LibraryFilterSheet: View {
+    @Bindable var model: ExerciseSearchModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let facets = model.facets.value
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if let equipment = facets?.equipment, !equipment.isEmpty {
+                        group("Equipment", options: equipment.map { ($0.key, $0.label) }, selection: $model.equipment)
+                    }
+                    if let difficulties = facets?.difficulties, !difficulties.isEmpty {
+                        group("Difficulty", options: difficulties.map { ($0, ExerciseVocabulary.difficulty($0)) }, selection: $model.difficulty)
+                    }
+                    if let categories = facets?.categories, categories.count > 1 {
+                        group("Type", options: categories.map { ($0, ExerciseVocabulary.category($0)) }, selection: $model.category)
+                    }
+                }
+                .padding(20)
+            }
+            .background(StudioColor.env5.ignoresSafeArea())
+            .navigationTitle("Filters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Reset") {
+                        model.equipment = nil
+                        model.difficulty = nil
+                        model.category = nil
+                    }
+                    .disabled(model.sheetFilterCount == 0)
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+
+    private func group(_ title: String, options: [(key: String, label: String)], selection: Binding<String?>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TrainEyebrow(text: title)
+            FlowLayout(spacing: 8) {
+                ForEach(options, id: \.key) { option in
+                    let isOn = selection.wrappedValue == option.key
+                    Button {
+                        selection.wrappedValue = isOn ? nil : option.key
+                    } label: {
+                        Text(option.label)
+                            .font(StudioFont.body(13, weight: isOn ? .semibold : .medium))
+                            .foregroundStyle(isOn ? StudioColor.paper : StudioColor.ink)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 44)
+                            .background {
+                                if isOn {
+                                    Capsule(style: .continuous).fill(StudioColor.env0.opacity(0.85))
+                                } else {
+                                    Capsule(style: .continuous).fill(.ultraThinMaterial).environment(\.colorScheme, .light)
+                                        .overlay { Capsule(style: .continuous).strokeBorder(StudioColor.ink.opacity(0.08), lineWidth: 1) }
+                                }
+                            }
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
+                }
+            }
+        }
+        .sensoryFeedback(StudioHaptic.focus, trigger: selection.wrappedValue)
+    }
+}
+
+/// Wraps pills onto as many lines as they need — no horizontal overflow at
+/// any width or text size.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width {
+                y += rowHeight + spacing
+                x = 0
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, width), height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                y += rowHeight + spacing
+                x = bounds.minX
+                rowHeight = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 
 // MARK: - The library (Train › Exercise Library)
 
-/// Train › Exercise Library: search, filter, open an exercise, add it to a
-/// workout or plan.
+/// Train › Exercise Library: a Sombrey destination — search, muscle tabs,
+/// filters, exercise cards; open one, add it to a workout.
 struct ExerciseLibraryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model = ExerciseSearchModel()
@@ -464,17 +781,29 @@ struct ExerciseLibraryView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Exercise Library")
-                        .font(StudioFont.hero(30, weight: .semibold))
-                        .foregroundStyle(StudioColor.ink)
+                VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TrainEyebrow(text: "Train")
+                        Text("Exercise Library")
+                            .font(StudioFont.hero(34, weight: .semibold))
+                            .foregroundStyle(StudioColor.ink)
+                        Text("Every movement, clearly explained — and one tap from your next workout.")
+                            .font(StudioFont.body(14))
+                            .foregroundStyle(StudioColor.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .studioReveal(index: 0)
                     ExerciseSearchPanel(model: model, onSelect: { path.append($0.id) }) { _ in
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11))
-                            .foregroundStyle(StudioColor.inkFaint)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StudioColor.paperFaint)
+                            .accessibilityHidden(true)
                     }
+                    .studioReveal(index: 1)
                 }
-                .padding(20)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 32)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(EnvironmentView(scene: .trainOverview) { Color.clear }.ignoresSafeArea())
@@ -505,13 +834,14 @@ struct ExercisePickerSheet: View {
                     dismiss()
                 }) { _ in
                     Image(systemName: "plus.circle")
-                        .font(.system(size: 20))
-                        .foregroundStyle(StudioColor.accentInk)
+                        .font(.system(size: 22))
+                        .foregroundStyle(StudioColor.paper)
+                        .accessibilityHidden(true)
                 }
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(StudioColor.env5.ignoresSafeArea())
+            .background(EnvironmentView(scene: .trainOverview) { Color.clear }.ignoresSafeArea())
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

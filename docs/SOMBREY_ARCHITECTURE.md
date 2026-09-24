@@ -51,7 +51,7 @@ The UI must always make clear which of these a value is:
 
 | Provider | Sits behind | Status in production |
 |---|---|---|
-| WorkoutX (exercise data) | The Sombrey Exercise Library (`exerciseLibrary.ts` → `exerciseProviders/workoutx.ts`) | Key **not configured**, so the production exercise library is **empty** until `WORKOUTX_API_KEY` is set |
+| WorkoutX (exercise data) | The Sombrey Exercise Library (`exerciseLibrary.ts` → `exerciseProviders/workoutx.ts`) | Configured (Pro plan: unbranded visuals allowed); the library fills on demand |
 | Edamam (food nutrition) | Server-side camera meal analysis (`ai/cameraAnalysis.ts`) | Keys not configured; no food-search integration yet |
 | Gemini (vision) | Camera meal analysis | Key not configured |
 | OpenAI (text) | `aiCoach/providers` (single swap point) | Key **not configured**, so Sombrey Coach **cannot answer in production** |

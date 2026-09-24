@@ -21,6 +21,13 @@ import {
   MEDIA_RETRY_MS, QUERY_TTL_MS, RELATED_TTL_MS, isFresh, monthKey, monthlyBudget, pageSizeFor, queryKey, toDetail, toSummary,
 } from "./exerciseLibraryPolicy";
 
+/** A summary plus its visual's URL (Sombrey storage), when it has one — so
+ * library cards can show the demonstration without opening the exercise. */
+async function withMedia(ctx: QueryCtx, e: Doc<"exercises">) {
+  const url = e.mediaStatus === "cached" && e.mediaStorageId ? await ctx.storage.getUrl(e.mediaStorageId) : null;
+  return { ...toSummary(e), mediaUrl: url };
+}
+
 async function requireUser(ctx: QueryCtx | MutationCtx | ActionCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new ConvexError({ code: "UNAUTHENTICATED", message: "Not authenticated" });
@@ -73,7 +80,7 @@ export const search = query({
         .take(limit + 1);
     }
     return {
-      items: rows.slice(0, limit).map(toSummary),
+      items: await Promise.all(rows.slice(0, limit).map((e) => withMedia(ctx, e))),
       hasMore: rows.length > limit,
     };
   },
@@ -116,15 +123,15 @@ export const detail = query({
     const related = async (ids: Id<"exercises">[] | undefined) =>
       (await Promise.all((ids ?? []).slice(0, 12).map((id) => ctx.db.get(id))))
         .filter((r): r is Doc<"exercises"> => r !== null && r._id !== e._id)
-        .map(toSummary);
+        .map((r) => withMedia(ctx, r));
     const mediaUrl = e.mediaStatus === "cached" && e.mediaStorageId ? await ctx.storage.getUrl(e.mediaStorageId) : null;
     return {
       ...toDetail(e),
       mediaUrl,
       // "pending": may still arrive; "none": nothing to show (and never a placeholder).
       mediaState: mediaUrl ? "available" : e.mediaStatus === undefined && e.sourceProvider ? "pending" : "none",
-      alternatives: await related(e.alternativeIds),
-      similar: await related(e.similarIds),
+      alternatives: await Promise.all(await related(e.alternativeIds)),
+      similar: await Promise.all(await related(e.similarIds)),
       relatedState: e.relatedFetchedAt !== undefined || !e.sourceProvider ? "loaded" : "pending",
     };
   },
