@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { normalizeSportPlusType } from "./activityTaxonomy";
 import { findAppStartedMatch, isMalformed, isTimestampSuspect } from "./sportPlusImport";
+import { reconcileWorkoutsForSession } from "./workoutBandSync";
 
 // QCBand Sport+ activity sessions — the wearable's own physiological/
 // activity record, distinct from a sombreyWorkouts row (sets/reps/weight).
@@ -318,6 +319,11 @@ export const importBandSessions = mutation({
           });
         }
       }
+
+      // A workout this session belongs to takes the band's actual times,
+      // calories and heart rate now that its record is in.
+      const stored = await ctx.db.get(sessionId);
+      if (stored) await reconcileWorkoutsForSession(ctx, stored);
     }
     return { inserted, merged, refreshed, skipped };
   },

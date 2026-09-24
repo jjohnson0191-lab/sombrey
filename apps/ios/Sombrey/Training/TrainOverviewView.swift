@@ -62,6 +62,8 @@ struct TrainingModeView: View {
     @State private var readiness = ConvexQuery<ReadinessResultDTO?>()
     @State private var sheet: TrainSheet?
     @State private var startAfterBuilder = false
+    /// A planned workout was chosen in Log a Workout: review it next.
+    @State private var reviewAfterLog = false
 
     enum TrainSheet: String, Identifiable {
         case build, plans, log, sombrey, library, history, schedule
@@ -95,7 +97,12 @@ struct TrainingModeView: View {
             switch which {
             case .build: StartTrainingView(session: session) { startAfterBuilder = true }
             case .plans: TrainingPlansView(session: session)
-            case .log: LogWorkoutView()
+            case .log:
+                LogWorkoutView { choice in
+                    session.loadPlanDay(planId: choice.plan.id, planName: choice.plan.name, dayIndex: choice.dayIndex,
+                                        dayName: choice.plan.days[choice.dayIndex].name, exercises: choice.exercises)
+                    reviewAfterLog = true
+                }
             case .sombrey: SombreyWorkoutsView()
             case .library: ExerciseLibraryView()
             case .history: WorkoutHistoryView()
@@ -176,6 +183,12 @@ struct TrainingModeView: View {
     }
 
     private func startIfRequested() {
+        if reviewAfterLog {
+            reviewAfterLog = false
+            // The builder opens once the log sheet has gone.
+            DispatchQueue.main.async { sheet = .build }
+            return
+        }
         guard startAfterBuilder else { return }
         startAfterBuilder = false
         Task { await TrainingStart.begin(session: session, wearable: wearableManager) }
@@ -259,10 +272,7 @@ private struct CurrentPlanHero: View {
     }
 
     private var resolved: [(Exercise, TrainingSessionManager.PlanTarget)] {
-        let byId = Dictionary((exercises.value ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return day.exercises.compactMap { item in
-            byId[item.exerciseId].map { ($0, .init(sets: Int(item.sets), reps: Int(item.reps), restSeconds: item.restSeconds.map { Int($0) }, weightKg: item.targetWeightKg)) }
-        }
+        day.resolved(with: exercises.value ?? [])
     }
 
     private var canStart: Bool { !resolved.isEmpty }
@@ -287,6 +297,7 @@ struct StartTrainingView: View {
     @Bindable var session: TrainingSessionManager
     let onStart: () -> Void
     @State private var library = ExerciseSearchModel()
+    @State private var editing: Exercise?
     @State private var repeatTemplate = ConvexQuery<RepeatTemplate?>()
     @State private var templateExercises = ConvexQuery<[Exercise]>()
 
@@ -334,6 +345,10 @@ struct StartTrainingView: View {
             }
         }
         .task { repeatTemplate.subscribe(to: "sombreyWorkouts:getMostRecentWorkoutTemplate") }
+        .sheet(item: $editing) { exercise in
+            TargetEditorSheet(exercise: exercise, target: session.planTargets[exercise.id]) { session.setTarget($0, for: exercise.id) }
+                .presentationDetents([.medium])
+        }
         .onChange(of: repeatTemplate.value.flatMap { $0 }?.exerciseIds) { _, ids in
             guard let ids, !ids.isEmpty else { return }
             templateExercises.subscribe(to: "exercises:getMany", with: ["ids": ids.map { $0 as ConvexEncodable? }])
@@ -372,18 +387,28 @@ struct StartTrainingView: View {
             TrainEyebrow(text: "Selected — drag to reorder")
             List {
                 ForEach(session.selectedExercises) { exercise in
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(exercise.name)
-                            .font(StudioFont.body(13))
-                            .foregroundStyle(StudioColor.ink)
-                        if let target = session.planTargets[exercise.id] {
-                            Text("\(target.sets) × \(target.reps)\(target.weightKg.map { " · \(TrainingMath.weightText($0)) kg" } ?? "")")
-                                .font(StudioFont.body(11))
-                                .foregroundStyle(StudioColor.inkSoft)
-                        } else {
-                            LastTimeLine(exerciseId: exercise.id)
+                    Button { editing = exercise } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(exercise.name)
+                                    .font(StudioFont.body(13))
+                                    .foregroundStyle(StudioColor.ink)
+                                if let target = session.planTargets[exercise.id] {
+                                    Text(TargetText.summary(target))
+                                        .font(StudioFont.body(11))
+                                        .foregroundStyle(StudioColor.inkSoft)
+                                } else {
+                                    LastTimeLine(exerciseId: exercise.id)
+                                }
+                            }
+                            Spacer()
+                            Text("Edit")
+                                .font(StudioFont.body(11, weight: .semibold))
+                                .foregroundStyle(StudioColor.accentInk)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
                 .onMove { session.moveExercise(fromOffsets: $0, toOffset: $1) }
                 .onDelete { offsets in
@@ -413,6 +438,79 @@ private struct LastTimeLine: View {
             }
         }
         .task { history.subscribe(to: "sombreyWorkouts:getExerciseHistory", with: ["exerciseId": exerciseId, "limit": 30.0]) }
+    }
+}
+
+/// "3 × 8 · 60 kg · rest 2:00".
+enum TargetText {
+    static func summary(_ t: TrainingSessionManager.PlanTarget) -> String {
+        var parts = ["\(t.sets) × \(t.reps)"]
+        if let w = t.weightKg { parts.append("\(TrainingMath.weightText(w)) kg") }
+        if let r = t.restSeconds, r > 0 { parts.append("rest \(TrainingMath.clock(r))") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// Adjusting one exercise's target before the session starts.
+struct TargetEditorSheet: View {
+    let exercise: Exercise
+    let target: TrainingSessionManager.PlanTarget?
+    let onSave: (TrainingSessionManager.PlanTarget) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var sets = 3
+    @State private var reps = 10
+    @State private var rest = 90
+    @State private var weightText = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(exercise.name)
+                        .font(StudioFont.hero(24, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                    VStack(spacing: 0) {
+                        TargetStepper(label: "Sets", value: $sets, range: 1...20, step: 1, format: { "\($0)" })
+                        TargetStepper(label: "Reps", value: $reps, range: 1...100, step: 1, format: { "\($0)" })
+                        HStack {
+                            Text("Weight").font(StudioFont.body(15, weight: .medium)).foregroundStyle(StudioColor.ink)
+                            Spacer()
+                            TextField("", text: $weightText, prompt: Text("Bodyweight").foregroundStyle(StudioColor.inkFaint))
+                                .font(StudioFont.hero(20, weight: .semibold))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 140)
+                            Text("kg").font(StudioFont.body(13, weight: .medium)).foregroundStyle(StudioColor.inkSoft)
+                        }
+                        .frame(minHeight: 56)
+                        TargetStepper(label: "Rest", value: $rest, range: 0...600, step: 15, format: { TrainingMath.clock($0) })
+                    }
+                    .padding(.horizontal, 16)
+                    .studioCard()
+                }
+                .padding(20)
+            }
+            .background(StudioColor.env5.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let weight = Double(weightText.replacingOccurrences(of: ",", with: ".")).flatMap { $0 > 0 ? $0 : nil }
+                        onSave(.init(sets: sets, reps: reps, restSeconds: rest, weightKg: weight))
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if let target {
+                sets = target.sets
+                reps = target.reps
+                rest = target.restSeconds ?? 90
+                weightText = target.weightKg.map { TrainingMath.weightText($0) } ?? ""
+            }
+        }
     }
 }
 

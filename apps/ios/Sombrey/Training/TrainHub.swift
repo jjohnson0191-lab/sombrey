@@ -41,6 +41,26 @@ struct TrainingPlanDTO: Decodable, Identifiable, Equatable {
     }
 }
 
+extension TrainingPlanDTO.Day {
+    /// This day's exercises, in the plan's order, with the plan's own targets
+    /// (sets, reps, rest, weight) — the ones the library can still resolve.
+    func resolved(with exercises: [Exercise]) -> [(Exercise, TrainingSessionManager.PlanTarget)] {
+        let byId = Dictionary(exercises.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return self.exercises.compactMap { item in
+            byId[item.exerciseId].map {
+                ($0, TrainingSessionManager.PlanTarget(
+                    sets: Int(item.sets), reps: Int(item.reps),
+                    restSeconds: item.restSeconds.map { Int($0) }, weightKg: item.targetWeightKg))
+            }
+        }
+    }
+
+    /// "Monday" when the day is tied to a weekday.
+    var weekdayName: String? {
+        weekday.flatMap { w in (1...7).contains(Int(w)) ? Calendar.current.weekdaySymbols[Int(w) - 1] : nil }
+    }
+}
+
 /// A completed workout of any origin (`sombreyWorkouts:listHistory`).
 struct WorkoutHistoryDTO: Decodable, Identifiable {
     let id: String
@@ -53,11 +73,28 @@ struct WorkoutHistoryDTO: Decodable, Identifiable {
     let distanceMeters: Double?
     let userReportedCalories: Double?
     let sportPlusSessionId: String?
+    // What actually happened (from the band's record when it had one).
+    var actualStartedAt: Double? = nil
+    var actualEndedAt: Double? = nil
+    var actualDurationSeconds: Double? = nil
+    var calories: Double? = nil
+    var caloriesSource: String? = nil
+    var averageHeartRate: Double? = nil
+    var highestHeartRate: Double? = nil
+    var heartRateSource: String? = nil
+    var startTimeSource: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
         case name, startedAt, completedAt, durationSeconds, source, activityType, distanceMeters, userReportedCalories, sportPlusSessionId
+        case actualStartedAt, actualEndedAt, actualDurationSeconds, calories, caloriesSource, averageHeartRate, highestHeartRate
+        case heartRateSource, startTimeSource
     }
+
+    /// When it started and ended — actual times when known.
+    var startDate: Date { Date(timeIntervalSince1970: (actualStartedAt ?? startedAt) / 1000) }
+    var endDate: Date? { (actualEndedAt ?? completedAt).map { Date(timeIntervalSince1970: $0 / 1000) } }
+    var shownDurationSeconds: Double? { actualDurationSeconds ?? durationSeconds }
 }
 
 /// A Sport+ session (`sportPlusSessions:getRecentSessions`) — started on
@@ -155,12 +192,14 @@ enum WorkoutHistory {
             }
             var details: [String] = []
             if let meters = workout.distanceMeters, meters > 0 { details.append(String(format: "%.2f km", meters / 1000)) }
-            if let kcal = workout.userReportedCalories, kcal > 0 { details.append("\(Int(kcal)) kcal (your figure)") }
+            if let kcal = workout.calories, kcal > 0 { details.append("\(Int(kcal)) kcal") }
+            else if let kcal = workout.userReportedCalories, kcal > 0 { details.append("\(Int(kcal)) kcal (your figure)") }
+            if let hr = workout.averageHeartRate, hr > 0 { details.append("avg \(Int(hr)) bpm") }
             return Entry(
                 id: workout.id,
                 title: workout.name,
-                startedAt: Date(timeIntervalSince1970: workout.startedAt / 1000),
-                durationSeconds: workout.durationSeconds.map { Int($0) },
+                startedAt: workout.startDate,
+                durationSeconds: workout.shownDurationSeconds.map { Int($0) },
                 origin: origin,
                 detail: details.isEmpty ? nil : details.joined(separator: " · ")
             )
@@ -520,6 +559,11 @@ private struct PlanDayPayload: Encodable, ConvexEncodable {
 /// the AI and future training-load systems — never presented as band data.
 struct LogWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
+    /// A planned workout was chosen: load it into the session builder.
+    var onStartPlanned: ((PlannedWorkoutChoice) -> Void)? = nil
+
+    enum Mode: String { case create, plan }
+    @State private var mode: Mode = .create
 
     enum ActivityKind: String, CaseIterable, Identifiable {
         case gym, run, cycle, walk, swim, other
@@ -549,6 +593,35 @@ struct LogWorkoutView: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+                if onStartPlanned != nil {
+                    GlassPillTabs(options: [(value: Mode.create, label: "Create a workout"), (value: Mode.plan, label: "From a plan")], selection: $mode)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                }
+                switch mode {
+                case .create:
+                    createForm
+                case .plan:
+                    PlannedWorkoutPicker { choice in
+                        onStartPlanned?(choice)
+                        dismiss()
+                    }
+                }
+            }
+            .background(StudioColor.env4.ignoresSafeArea())
+            .navigationTitle("Log a workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                if mode == .create {
+                    ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "Saving…" : "Save", action: save).disabled(isSaving) }
+                }
+            }
+        }
+    }
+
+    private var createForm: some View {
             Form {
                 Section {
                     Picker("Activity", selection: $kind) {
@@ -574,14 +647,6 @@ struct LogWorkoutView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(StudioColor.env4.ignoresSafeArea())
-            .navigationTitle("Log a workout")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "Saving…" : "Save", action: save).disabled(isSaving) }
-            }
-        }
     }
 
     private func save() {
@@ -615,6 +680,144 @@ struct LogWorkoutView: View {
                 saveError = "Couldn't save: \(error)"
             }
             isSaving = false
+        }
+    }
+}
+
+/// A plan day chosen to perform, with its exercises resolved.
+struct PlannedWorkoutChoice {
+    let plan: TrainingPlanDTO
+    let dayIndex: Int
+    let exercises: [(Exercise, TrainingSessionManager.PlanTarget)]
+}
+
+/// Log a Workout › From a plan: the user's plans, then a plan's workouts.
+/// Choosing one loads it — exercises and the plan's targets — into the
+/// session builder to review and start; it stays tied to its plan.
+struct PlannedWorkoutPicker: View {
+    let onChoose: (PlannedWorkoutChoice) -> Void
+    @Environment(TrainingSessionManager.self) private var session
+    @State private var plans = ConvexQuery<[TrainingPlanDTO]>()
+    @State private var openPlan: TrainingPlanDTO?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if session.phase != .overview {
+                    note("A workout is in progress.", "Finish it first — then choose a planned workout here.")
+                } else if let openPlan {
+                    PlanDayList(plan: openPlan, onBack: { self.openPlan = nil }, onChoose: onChoose)
+                } else if plans.isLoading {
+                    ProgressView().tint(StudioColor.ink).padding(.top, 24)
+                } else if let list = plans.value, !list.isEmpty {
+                    TrainEyebrow(text: "Your plans")
+                    ForEach(list) { plan in
+                        Button { openPlan = plan } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(plan.name)
+                                        .font(StudioFont.hero(19, weight: .semibold))
+                                        .foregroundStyle(StudioColor.ink)
+                                    Text("\(plan.days.count) workout\(plan.days.count == 1 ? "" : "s")\(plan.isCurrent ? " · current plan" : "")")
+                                        .font(StudioFont.body(12))
+                                        .foregroundStyle(StudioColor.inkSoft)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(StudioColor.inkFaint)
+                            }
+                            .frame(minHeight: 52)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .studioCard()
+                    }
+                } else {
+                    note("You don't have a training plan yet.", "Create one in Train › Training Plans — its workouts will appear here.")
+                }
+            }
+            .padding(20)
+        }
+        .task { plans.subscribe(to: "trainingPlans:list") }
+        .sensoryFeedback(StudioHaptic.focus, trigger: openPlan?.id)
+    }
+
+    private func note(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(StudioFont.body(16, weight: .semibold))
+                .foregroundStyle(StudioColor.ink)
+            Text(text)
+                .font(StudioFont.body(13))
+                .foregroundStyle(StudioColor.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 12)
+    }
+}
+
+/// One plan's workouts ("Monday — Upper Body · 6 exercises"). The plan's
+/// exercises are resolved once, so choosing a day is immediate.
+private struct PlanDayList: View {
+    let plan: TrainingPlanDTO
+    let onBack: () -> Void
+    let onChoose: (PlannedWorkoutChoice) -> Void
+    @State private var exercises = ConvexQuery<[Exercise]>()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: onBack) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
+                    Text("Your plans").font(StudioFont.body(13, weight: .medium))
+                }
+                .foregroundStyle(StudioColor.inkSoft)
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            Text(plan.name.uppercased())
+                .font(StudioFont.body(11, weight: .semibold))
+                .tracking(1.4)
+                .foregroundStyle(StudioColor.inkSoft)
+            ForEach(Array(plan.days.enumerated()), id: \.offset) { index, day in
+                let resolved = day.resolved(with: exercises.value ?? [])
+                Button {
+                    onChoose(PlannedWorkoutChoice(plan: plan, dayIndex: index, exercises: resolved))
+                } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            if let weekday = day.weekdayName {
+                                Text(weekday.uppercased())
+                                    .font(StudioFont.body(10, weight: .semibold))
+                                    .tracking(1.2)
+                                    .foregroundStyle(StudioColor.paperSoft)
+                            }
+                            Text(day.name)
+                                .font(StudioFont.hero(19, weight: .semibold))
+                                .foregroundStyle(StudioColor.paper)
+                            Text(exercises.value == nil ? "\(day.exercises.count) exercises" : "\(resolved.count) exercise\(resolved.count == 1 ? "" : "s")\(index == Int(plan.nextDayIndex) ? " · next up" : "")")
+                                .font(StudioFont.body(12))
+                                .foregroundStyle(StudioColor.paperFaint)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StudioColor.paperFaint)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                    .background { GraphiteSurface(cornerRadius: 20) }
+                    .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(exercises.value == nil || resolved.isEmpty)
+                .accessibilityHint("Loads this workout to review and start")
+            }
+        }
+        .task(id: plan.id) {
+            let ids = plan.days.flatMap { $0.exercises.map(\.exerciseId) }
+            exercises.subscribe(to: "exercises:getMany", with: ["ids": ids.map { $0 as ConvexEncodable? }])
         }
     }
 }
@@ -723,6 +926,35 @@ struct WorkoutHistoryView: View {
     }
 }
 
+/// How a workout's times read: "Wed 24 Sep · 6:42 PM – 7:31 PM".
+enum WorkoutTimes {
+    static func range(start: Date, end: Date?) -> String {
+        let day = start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        let from = start.formatted(date: .omitted, time: .shortened)
+        guard let end else { return "\(day) · \(from)" }
+        return "\(day) · \(from) – \(end.formatted(date: .omitted, time: .shortened))"
+    }
+}
+
+/// Duration, calories and heart rate for a Sombrey workout — each from the
+/// band's record (or the session's own timing), "Not recorded" otherwise.
+struct WorkoutBandFigures: View {
+    let durationSeconds: Double?
+    let calories: Double?
+    let averageHeartRate: Double?
+    let peakHeartRate: Double?
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], alignment: .leading, spacing: 16) {
+            ActivityMetricTile(label: "Duration", value: durationSeconds.flatMap { $0 > 0 ? ActivityFormat.duration($0) : nil }, missingText: "Not recorded")
+            ActivityMetricTile(label: "Calories", value: calories.flatMap { $0 > 0 ? "\(Int($0.rounded()))" : nil }, unit: "kcal", missingText: "Not recorded")
+            ActivityMetricTile(label: "Avg heart rate", value: averageHeartRate.flatMap { $0 > 0 ? "\(Int($0))" : nil }, unit: "bpm", missingText: "Not recorded")
+            ActivityMetricTile(label: "Peak heart rate", value: peakHeartRate.flatMap { $0 > 0 ? "\(Int($0))" : nil }, unit: "bpm", missingText: "Not recorded")
+        }
+        .studioCard()
+    }
+}
+
 /// A logged Sombrey workout, exercise by exercise, set by set. Exercise
 /// names come from what was kept when each set was logged, so an old
 /// workout reads correctly even if the library has changed since.
@@ -771,9 +1003,17 @@ struct WorkoutSetsView: View {
                         Text(workout.name)
                             .font(StudioFont.hero(26, weight: .semibold))
                             .foregroundStyle(StudioColor.ink)
-                        Text(Date(timeIntervalSince1970: workout.startedAt / 1000).formatted(.dateTime.weekday(.wide).day().month().hour().minute()))
+                        Text(WorkoutTimes.range(start: workout.startDate, end: workout.endDate))
                             .font(StudioFont.body(12))
                             .foregroundStyle(StudioColor.inkSoft)
+                    }
+                    if workout.source != "manual" {
+                        WorkoutBandFigures(
+                            durationSeconds: workout.shownDurationSeconds,
+                            calories: workout.calories,
+                            averageHeartRate: workout.averageHeartRate,
+                            peakHeartRate: workout.highestHeartRate
+                        )
                     }
                     if detail.isLoading {
                         ProgressView().tint(StudioColor.ink)

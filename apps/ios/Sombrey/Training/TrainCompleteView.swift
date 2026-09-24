@@ -12,7 +12,18 @@ struct TrainCompleteView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var session: TrainingSessionManager
     @State private var heartRate = ConvexQuery<[WearableMeasurementDTO]>()
+    @State private var record = ConvexQuery<WorkoutRecordEnvelope?>()
     @State private var isRetrying = false
+    @State private var waitedForBand = false
+
+    struct WorkoutRecordEnvelope: Decodable {
+        let workout: WorkoutHistoryDTO
+    }
+
+    /// The stored workout, with its actual times, calories and heart rate
+    /// once the band's session has been matched to it.
+    private var stored: WorkoutHistoryDTO? { record.value.flatMap { $0 }?.workout }
+    private var timedByBand: Bool { stored?.startTimeSource == "band" }
 
     private var sets: [CompletedSet] { session.completedSets }
     private var trained: [Exercise] { TrainingMath.trainedExercises(sets) }
@@ -35,8 +46,17 @@ struct TrainCompleteView: View {
                     .padding(.top, 36)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    HeroNumberText(text: TrainingMath.clock(session.elapsedSeconds), size: .lg, tone: .ink)
-                    Text("ACTIVE TIME")
+                    if timedByBand, let seconds = stored?.actualDurationSeconds {
+                        HeroNumberText(text: ActivityFormat.duration(seconds), size: .lg, tone: .ink)
+                    } else {
+                        HeroNumberText(text: TrainingMath.clock(session.elapsedSeconds), size: .lg, tone: .ink)
+                    }
+                    if let stored {
+                        Text(WorkoutTimes.range(start: stored.startDate, end: stored.endDate))
+                            .font(StudioFont.body(12))
+                            .foregroundStyle(StudioColor.inkSoft)
+                    }
+                    Text(timedByBand ? "DURATION · FROM YOUR BAND" : "ACTIVE TIME")
                         .font(StudioFont.body(11, weight: .semibold))
                         .tracking(1.3)
                         .foregroundStyle(StudioColor.inkSoft)
@@ -61,7 +81,7 @@ struct TrainCompleteView: View {
                     .studioReveal(index: 2)
                 }
 
-                if workoutHeartRate != nil || session.sportSummary != nil {
+                if session.sportPlusSessionId != nil || workoutHeartRate != nil || stored?.calories != nil {
                     bandSection
                         .studioReveal(index: 3)
                 }
@@ -80,6 +100,15 @@ struct TrainCompleteView: View {
                 .studioReveal(index: 4)
             }
             .padding(.bottom, 24)
+        }
+        .task(id: session.convexWorkoutId) {
+            if let id = session.convexWorkoutId {
+                record.subscribe(to: "sombreyWorkouts:getWorkoutWithSets", with: ["workoutId": id])
+            }
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            waitedForBand = true
         }
         .task {
             guard let startedAt = session.startedAt else { return }
@@ -152,24 +181,36 @@ struct TrainCompleteView: View {
 
     // MARK: - Band
 
+    /// Calories and heart rate from the band: its full record when matched
+    /// to this workout (usually seconds after the end), else — for heart
+    /// rate — the band's own readings during the workout. "Not recorded"
+    /// when the band didn't measure it; nothing is estimated.
     private var bandSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let recordPending = session.sportPlusSessionId != nil && stored?.heartRateSource == nil && !waitedForBand
+        let average = stored?.averageHeartRate ?? workoutHeartRate?.mean
+        let peak = stored?.highestHeartRate ?? workoutHeartRate?.max
+        return VStack(alignment: .leading, spacing: 10) {
             Text("FROM YOUR BAND")
                 .font(StudioFont.body(10, weight: .semibold))
                 .tracking(1.3)
                 .foregroundStyle(StudioColor.inkSoft)
-            HStack(spacing: 24) {
-                if let hr = workoutHeartRate {
-                    MetricView(label: "Avg heart rate", value: "\(Int(hr.mean.rounded()))", unit: "bpm")
-                    MetricView(label: "Max heart rate", value: "\(Int(hr.max.rounded()))", unit: "bpm")
-                }
-                if let sport = session.sportSummary, sport.calories > 0 {
-                    MetricView(label: "Active calories", value: "\(Int(sport.calories.rounded()))", unit: "kcal")
-                }
+            HStack(alignment: .top, spacing: 16) {
+                ActivityMetricTile(label: "Calories", value: stored?.calories.flatMap { $0 > 0 ? "\(Int($0.rounded()))" : nil }, unit: "kcal",
+                                   missingText: recordPending ? "Waiting…" : "Not recorded")
+                ActivityMetricTile(label: "Avg heart rate", value: average.map { "\(Int($0.rounded()))" }, unit: "bpm",
+                                   missingText: recordPending ? "Waiting…" : "Not recorded")
+                ActivityMetricTile(label: "Peak", value: peak.map { "\(Int($0.rounded()))" }, unit: "bpm",
+                                   missingText: recordPending ? "Waiting…" : "Not recorded")
             }
-            if let sport = session.sportSummary {
-                let name = ActivityCatalog.resolve(activityKey: nil, vendorSportType: sport.sportType)?.name ?? "Activity"
-                Text("\(name) recorded by the band\(sport.distanceMeters > 0 ? " · \(sport.distanceMeters) m" : "")\(sport.steps > 0 ? " · \(sport.steps) steps" : "")")
+            if recordPending {
+                HStack(spacing: 8) {
+                    ProgressView().tint(StudioColor.ink).controlSize(.small)
+                    Text("Bringing in your band's record of this workout…")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkSoft)
+                }
+            } else if stored?.heartRateSource == nil && workoutHeartRate != nil {
+                Text("Heart rate from your band's readings during the workout.")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.inkFaint)
             }

@@ -640,7 +640,7 @@ struct AddToWorkoutSheet: View {
 
 /// A target value as an instrument: label, a display numeral, and − / +
 /// keys (44pt) with a selection tick on each change.
-private struct TargetStepper: View {
+struct TargetStepper: View {
     let label: String
     @Binding var value: Int
     let range: ClosedRange<Int>

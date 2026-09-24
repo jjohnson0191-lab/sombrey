@@ -119,7 +119,20 @@ enum ExerciseVocabulary {
         value.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
-    /// A restrained mark for an exercise with no visual — its muscle group.
+    /// Every library card's mark, from the exercise's normalized data: its
+    /// type when that says more than the muscle (cardio, balance,
+    /// flexibility, plyometric), otherwise its muscle group. One system for
+    /// every card — demonstrations appear on the exercise's own page.
+    static func glyph(category: String?, muscleGroup: String) -> String {
+        switch category {
+        case "cardio": return "figure.mixed.cardio"
+        case "balance": return "figure.mind.and.body"
+        case "flexibility", "stretching": return "figure.flexibility"
+        case "plyometric", "plyometrics": return "figure.jumprope"
+        default: return glyph(forMuscleGroup: muscleGroup)
+        }
+    }
+
     static func glyph(forMuscleGroup group: String) -> String {
         switch group {
         case "chest": return "figure.strengthtraining.traditional"
@@ -546,9 +559,9 @@ private struct LibraryState: View {
 
 // MARK: - Exercise card
 
-/// An exercise as a Sombrey card: graphite glass, the visual (or a quiet
-/// muscle mark) set into it, then the name, its classification and what it
-/// takes. The list shows the visual still; it moves on the exercise's page.
+/// An exercise as a Sombrey card: graphite glass, the exercise's mark, then
+/// the name, its classification and what it takes. The demonstration itself
+/// is on the exercise's page.
 struct ExerciseCard<Trailing: View>: View {
     let exercise: LibraryExercise
     let trailing: Trailing
@@ -557,7 +570,7 @@ struct ExerciseCard<Trailing: View>: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                ExerciseThumbnail(url: exercise.mediaUrl.flatMap(URL.init(string:)), muscleGroup: exercise.muscleGroup)
+                ExerciseMark(glyph: ExerciseVocabulary.glyph(category: exercise.category, muscleGroup: exercise.muscleGroup))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(exercise.classification.uppercased())
                         .font(StudioFont.body(10, weight: .semibold))
@@ -629,30 +642,20 @@ private struct CardPressStyle: ButtonStyle {
     }
 }
 
-/// The visual set into a card: the demonstration's first frame on its own
-/// white ground, or — with no visual — the exercise's muscle group as a quiet mark.
-private struct ExerciseThumbnail: View {
-    let url: URL?
-    let muscleGroup: String
+/// The card's mark: the exercise's type or muscle group as a quiet glyph
+/// on graphite — the same for every exercise in the library.
+struct ExerciseMark: View {
+    let glyph: String
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        ZStack {
-            if let url {
-                shape.fill(Color.white)
-                ExerciseMediaView(url: url, still: true)
-                    .padding(4)
-            } else {
-                shape.fill(StudioColor.env1.opacity(0.7))
-                Image(systemName: ExerciseVocabulary.glyph(forMuscleGroup: muscleGroup))
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundStyle(StudioColor.paperSoft)
-            }
-        }
-        .frame(width: 64, height: 64)
-        .clipShape(shape)
-        .overlay { shape.strokeBorder(StudioColor.paper.opacity(0.1), lineWidth: 1) }
-        .accessibilityHidden(true)
+        Image(systemName: glyph)
+            .font(.system(size: 24, weight: .regular))
+            .foregroundStyle(StudioColor.paperSoft)
+            .frame(width: 64, height: 64)
+            .background(StudioColor.env1.opacity(0.7), in: shape)
+            .overlay { shape.strokeBorder(StudioColor.paper.opacity(0.1), lineWidth: 1) }
+            .accessibilityHidden(true)
     }
 }
 

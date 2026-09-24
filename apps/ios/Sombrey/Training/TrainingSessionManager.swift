@@ -295,6 +295,13 @@ final class TrainingSessionManager {
         save()
     }
 
+    /// Adjusts an exercise's target in the session being built (before it
+    /// starts) — e.g. a planned workout's sets, reps, weight or rest.
+    func setTarget(_ target: PlanTarget, for exerciseId: String) {
+        guard phase == .overview, selectedExercises.contains(where: { $0.id == exerciseId }) else { return }
+        planTargets[exerciseId] = target
+    }
+
     /// From the Exercise Library: adds an exercise, with the user's own
     /// targets, to the session being built for next time.
     func addToNextSession(_ exercise: Exercise, target: PlanTarget?) {

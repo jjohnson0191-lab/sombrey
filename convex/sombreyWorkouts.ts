@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { reconcileWorkout } from "./workoutBandSync";
 
 // Sombrey-native training session persistence — exercises/sets/reps/weight
 // a user actually did, independent of whether AI Coach or the user built
@@ -82,6 +83,12 @@ export const logManualWorkout = mutation({
       distanceMeters: args.distanceMeters,
       userReportedCalories: args.userReportedCalories,
       notes: args.notes,
+      // Entered by the user: the times are theirs, and no band data applies.
+      actualStartedAt: args.startedAt,
+      actualEndedAt: args.startedAt + args.durationSeconds * 1000,
+      actualDurationSeconds: args.durationSeconds,
+      startTimeSource: "manual",
+      endTimeSource: "manual",
     });
   },
 });
@@ -169,6 +176,9 @@ export const finishWorkout = mutation({
       sportPlusSessionId: args.sportPlusSessionId,
       notes: args.notes,
     });
+    // Actual times, calories and heart rate from the band session when it
+    // has them — refined again when the band's full record is imported.
+    await reconcileWorkout(ctx, args.workoutId);
   },
 });
 

@@ -1378,9 +1378,27 @@ export default defineSchema({
     // Set when the workout came from one of the user's training plans.
     trainingPlanId: v.optional(v.id("trainingPlans")),
     trainingPlanDayIndex: v.optional(v.number()),
+    // ── What actually happened (convex/workoutBand.ts) ─────────────────────
+    // Filled for workouts finished from this version on; absent on older
+    // rows, which keep showing startedAt/completedAt/durationSeconds.
+    actualStartedAt: v.optional(v.number()),
+    actualEndedAt: v.optional(v.number()),
+    actualDurationSeconds: v.optional(v.number()),
+    startTimeSource: v.optional(v.union(v.literal("band"), v.literal("sombrey"), v.literal("manual"))),
+    endTimeSource: v.optional(v.union(v.literal("band"), v.literal("sombrey"), v.literal("manual"))),
+    // From the band session only (kcal as stored — never re-converted, never
+    // estimated from exercise data).
+    calories: v.optional(v.number()),
+    caloriesSource: v.optional(v.union(v.literal("band_record"), v.literal("band_live"))),
+    averageHeartRate: v.optional(v.number()),
+    lowestHeartRate: v.optional(v.number()),
+    highestHeartRate: v.optional(v.number()),
+    heartRateSource: v.optional(v.literal("band_record")),
+    bandReconciledAt: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
-    .index("by_user_and_completedAt", ["userId", "completedAt"]),
+    .index("by_user_and_completedAt", ["userId", "completedAt"])
+    .index("by_sportPlusSession", ["sportPlusSessionId"]),
 
   // One row per completed set — queryable independently for progression
   // analysis (e.g. "every set of this exercise for this user, in order")
