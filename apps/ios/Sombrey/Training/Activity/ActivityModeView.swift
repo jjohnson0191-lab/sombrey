@@ -14,19 +14,25 @@ struct ActivityModeView: View {
     @Environment(ActivitySessionManager.self) private var activitySession
     @State private var usage = ConvexQuery<[ActivityUsageDTO]>()
     @State private var detections = ConvexQuery<[DetectedActivityDTO]>()
+    @State private var reviews = ConvexQuery<[ActivityRecordDTO]>()
+    @State private var reviewedLocally = Set<String>()
+    @State private var openedSession: ActivityRecordDTO?
     @AppStorage("sombreyTrain.selectedActivity") private var selectedKey = ""
     @State private var browsing: BrowseIntent?
-    @State private var historyFor: SombreyActivity?
+    /// The activity whose own page is open.
+    @State private var openActivity: SombreyActivity?
     @State private var labelling: DetectedActivityDTO?
     @State private var dismissedLocally = Set<Double>()
 
     enum BrowseIntent: Identifiable {
         case choose
         case label(DetectedActivityDTO)
+        case classify(ActivityRecordDTO)
         var id: String {
             switch self {
             case .choose: return "choose"
             case .label(let window): return "label-\(window.startedAt)"
+            case .classify(let record): return "classify-\(record.id)"
             }
         }
     }
@@ -43,8 +49,24 @@ struct ActivityModeView: View {
         (detections.value ?? []).first { !dismissedLocally.contains($0.startedAt) }
     }
 
+    private var pendingReviews: [ActivityRecordDTO] {
+        (reviews.value ?? []).filter { !reviewedLocally.contains($0.id) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            ForEach(pendingReviews.prefix(2)) { record in
+                BandRecordCard(
+                    record: record,
+                    suggestions: detectionSuggestions,
+                    onOpen: { review(record, as: nil); openedSession = record },
+                    onClassify: { review(record, as: $0) },
+                    onOther: { browsing = .classify(record) },
+                    onDismiss: { review(record, as: nil) }
+                )
+                .transition(.opacity)
+            }
+
             if let window = pendingDetection {
                 NoticedActivityCard(
                     window: window,
@@ -56,7 +78,7 @@ struct ActivityModeView: View {
                 .transition(.opacity)
             }
 
-            ActivityHero(activity: selected, onChange: { browsing = .choose })
+            ActivityHero(activity: selected, onOpen: { openActivity = $0 }, onChange: { browsing = .choose })
 
             quickPicks
 
@@ -84,24 +106,32 @@ struct ActivityModeView: View {
             .studioCard()
 
             if let selected {
-                YourActivityCard(activity: selected) { historyFor = selected }
+                YourActivityCard(activity: selected) { openActivity = selected }
                     .id(selected.key)
             }
         }
         .task {
             usage.subscribe(to: "activities:usage")
             detections.subscribe(to: "activities:pendingDetections")
+            reviews.subscribe(to: "activities:pendingReviews")
         }
         .sheet(item: $browsing) { intent in
             ActivityBrowserView(recent: recent) { activity in
                 switch intent {
-                case .choose: selectedKey = activity.key
+                case .choose:
+                    selectedKey = activity.key
+                    // Choosing an activity opens its own page.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { openActivity = activity }
                 case .label(let window): label(window, as: activity)
+                case .classify(let record): review(record, as: activity)
                 }
             }
         }
-        .sheet(item: $historyFor) { activity in
-            ActivityHistoryView(activity: activity)
+        .sheet(item: $openActivity) { activity in
+            ActivityExperienceView(activity: activity)
+        }
+        .sheet(item: $openedSession) { record in
+            ActivitySessionSheet(record: record)
         }
         .sensoryFeedback(StudioHaptic.focus, trigger: selectedKey)
     }
@@ -132,6 +162,7 @@ struct ActivityModeView: View {
                     ForEach(activities) { activity in
                         ActivityChip(activity: activity, isSelected: activity == selected) {
                             selectedKey = activity.key
+                            openActivity = activity
                         }
                     }
                 }
@@ -151,6 +182,21 @@ struct ActivityModeView: View {
             keys.append(key)
         }
         return keys.compactMap { ActivityCatalog.byKey[$0] }
+    }
+
+    /// Marks a band record as seen; `activity` answers "what was it?" for a
+    /// record whose band mode was too generic.
+    private func review(_ record: ActivityRecordDTO, as activity: SombreyActivity?) {
+        reviewedLocally.insert(record.id)
+        Task {
+            var args: [String: ConvexEncodable?] = ["sessionId": record.id]
+            if let activity { args["activityKey"] = activity.key }
+            do {
+                try await ConvexClientProvider.client.mutation("activities:reviewSession", with: args)
+            } catch {
+                reviewedLocally.remove(record.id)
+            }
+        }
     }
 
     private func label(_ window: DetectedActivityDTO, as activity: SombreyActivity?) {
@@ -175,6 +221,7 @@ private struct ActivityHero: View {
     @Environment(WearableManager.self) private var wearableManager
     @Environment(ActivitySessionManager.self) private var activitySession
     let activity: SombreyActivity?
+    let onOpen: (SombreyActivity) -> Void
     let onChange: () -> Void
 
     var body: some View {
@@ -186,9 +233,9 @@ private struct ActivityHero: View {
             }
 
             if let activity {
-                Button(action: onChange) {
+                Button { onOpen(activity) } label: {
                     HStack(alignment: .center, spacing: 14) {
-                        Image(systemName: activity.profile.glyph)
+                        Image(systemName: activity.glyph)
                             .font(.system(size: 34, weight: .regular))
                             .foregroundStyle(StudioColor.paper)
                             .frame(width: 44)
@@ -198,18 +245,21 @@ private struct ActivityHero: View {
                                 .foregroundStyle(StudioColor.paper)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.6)
-                            Text("Change")
+                            Text(activity.categoryName)
                                 .font(StudioFont.body(12, weight: .medium))
                                 .foregroundStyle(StudioColor.paperFaint)
                         }
                         Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(StudioColor.paperFaint)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(activity.name). Change activity")
+                .accessibilityLabel("\(activity.name). Open")
 
-                Text(activity.profile.focus)
+                Text(activity.terms.focus)
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.paperSoft)
                     .fixedSize(horizontal: false, vertical: true)
@@ -222,6 +272,11 @@ private struct ActivityHero: View {
                 }
                 .buttonStyle(.illuminatedCTA)
                 .disabled(activitySession.isStarting)
+
+                Button("Choose a different activity", action: onChange)
+                    .font(StudioFont.body(12, weight: .medium))
+                    .foregroundStyle(StudioColor.paperSoft)
+                    .frame(minHeight: 36)
 
                 if let failure = activitySession.startFailure {
                     Text(failure)
@@ -242,7 +297,7 @@ private struct ActivityHero: View {
                 .buttonStyle(.illuminatedCTA)
             }
         }
-        .instrumentBezel(tint: activity?.profile.character.tint ?? StudioColor.env2)
+        .instrumentBezel(tint: activity?.terms.character.tint ?? StudioColor.env2)
         .onChange(of: activity?.key) { _, _ in activitySession.clearStartFailure() }
     }
 
@@ -265,6 +320,95 @@ private struct ActivityHero: View {
                 .foregroundStyle(StudioColor.paperSoft)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - From your band
+
+/// A session the band recorded on its own. When the band's mode says what it
+/// was, that's the source of truth and the card simply offers it; when the
+/// mode is too generic ("free training"), Sombrey asks — it never guesses.
+private struct BandRecordCard: View {
+    let record: ActivityRecordDTO
+    let suggestions: [SombreyActivity]
+    let onOpen: () -> Void
+    let onClassify: (SombreyActivity) -> Void
+    let onOther: () -> Void
+    let onDismiss: () -> Void
+
+    private var summary: String {
+        var parts = [record.startDate.formatted(.relative(presentation: .named))]
+        if let d = record.durationSeconds, d > 0 { parts.append(ActivityFormat.duration(d)) }
+        if let hr = record.averageHeartRate, record.heartRateSource != nil { parts.append("\(Int(hr)) avg bpm") }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                TrainEyebrow(text: "From your band", tone: StudioColor.accentInk)
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(StudioColor.inkFaint)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+            if record.needsClassification == true {
+                Text("Your band recorded an activity it couldn't name.")
+                    .font(StudioFont.body(17, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(record.displayName) on the band · \(summary)")
+                    .font(StudioFont.body(12))
+                    .foregroundStyle(StudioColor.inkSoft)
+                Text("What was it?")
+                    .font(StudioFont.body(13, weight: .medium))
+                    .foregroundStyle(StudioColor.ink)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(suggestions) { activity in
+                            ActivityChip(activity: activity, isSelected: false) { onClassify(activity) }
+                        }
+                        Button("Other…", action: onOther)
+                            .font(StudioFont.body(13, weight: .medium))
+                            .foregroundStyle(StudioColor.inkSoft)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                    }
+                }
+                .scrollClipDisabled()
+            } else {
+                Button(action: onOpen) {
+                    HStack(spacing: 14) {
+                        if let activity = record.activity {
+                            Image(systemName: activity.glyph)
+                                .font(.system(size: 24))
+                                .foregroundStyle(StudioColor.ink)
+                                .frame(width: 32)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(record.activity?.name ?? record.displayName)
+                                .font(StudioFont.hero(22, weight: .semibold))
+                                .foregroundStyle(StudioColor.ink)
+                            Text(summary)
+                                .font(StudioFont.body(12))
+                                .foregroundStyle(StudioColor.inkSoft)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StudioColor.inkFaint)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .studioCard()
     }
 }
 
@@ -336,7 +480,7 @@ private struct YourActivityCard: View {
                         .foregroundStyle(StudioColor.inkFaint)
                 }
                 content
-                if let note = activity.profile.notMeasured {
+                if let note = activity.terms.notMeasured {
                     Text(note)
                         .font(StudioFont.body(11))
                         .foregroundStyle(StudioColor.inkFaint)
@@ -358,7 +502,7 @@ private struct YourActivityCard: View {
                 Text("\(count)")
                     .font(StudioFont.hero(34, weight: .semibold))
                     .foregroundStyle(StudioColor.ink)
-                Text(count == 1 ? "session" : "sessions")
+                Text(count == 1 ? activity.terms.sessionNoun : "\(activity.terms.sessionNoun)s")
                     .font(StudioFont.body(13, weight: .medium))
                     .foregroundStyle(StudioColor.inkSoft)
             }
@@ -371,7 +515,7 @@ private struct YourActivityCard: View {
         } else if history.isLoading {
             ProgressView().tint(StudioColor.ink)
         } else {
-            Text("Your first \(activity.name) session starts your \(activity.name) history — Sombrey keeps every one.")
+            Text("Your first \(activity.name) \(activity.terms.sessionNoun) starts your \(activity.name) history — Sombrey keeps every one.")
                 .font(StudioFont.body(13))
                 .foregroundStyle(StudioColor.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
@@ -487,7 +631,7 @@ struct ActivityBrowserView: View {
                     dismiss()
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: activity.profile.glyph)
+                        Image(systemName: activity.glyph)
                             .font(.system(size: 16, weight: .regular))
                             .frame(width: 22)
                         Text(activity.name)

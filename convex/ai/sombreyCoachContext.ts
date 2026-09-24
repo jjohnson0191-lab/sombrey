@@ -1,6 +1,8 @@
 // V8 runtime — queries only (no "use node")
 import { internalQuery } from "../_generated/server";
 import { ConvexError } from "convex/values";
+import { labelledRecord, sessionRecord } from "../activities";
+import { describeActivitiesForCoach } from "../activityCoach";
 
 /**
  * Fitness context for the Sombrey Coach — isolated from
@@ -98,22 +100,22 @@ export const getSombreyContext = internalQuery({
       lines.push(`Coach-assigned workouts logged this week: ${legacyWorkoutsThisWeek.length}`);
     }
 
-    // ── Sport+ activity sessions ───────────────────────────────────────────
+    // ── Physical activities (band Sport+ sessions and named detections) ──
+    // One line per activity with its provenance (convex/activityCoach.ts),
+    // so the coach knows "tennis for 90 minutes yesterday", not "1 workout".
     const recentSportSessions = await ctx.db
       .query("sportPlusSessions")
       .withIndex("by_user_and_startedAt", (q) => q.eq("userId", user._id).gte("startedAt", weekAgoMs))
       .collect();
-    if (recentSportSessions.length > 0) {
-      const totalDistance = recentSportSessions.reduce((sum, s) => sum + (s.distanceMeters ?? 0), 0);
-      const totalCalories = recentSportSessions.reduce((sum, s) => sum + (s.calories ?? 0), 0);
-      lines.push(
-        `Wearable-tracked activity sessions this week: ${recentSportSessions.length}` +
-        (totalDistance > 0 ? `, ${(totalDistance / 1000).toFixed(1)}km total distance` : "") +
-        (totalCalories > 0 ? `, ~${Math.round(totalCalories)} kcal` : ""),
-      );
-    } else {
-      lines.push("Wearable-tracked activity sessions this week: none");
-    }
+    const recentLabels = await ctx.db
+      .query("activityLabels")
+      .withIndex("by_user_and_startedAt", (q) => q.eq("userId", user._id).gte("startedAt", weekAgoMs))
+      .collect();
+    const recentActivities = [
+      ...recentSportSessions.map(sessionRecord),
+      ...recentLabels.map(labelledRecord),
+    ].filter((r): r is NonNullable<typeof r> => r !== null);
+    lines.push(...describeActivitiesForCoach(recentActivities, Date.now()));
 
     // ── Nutrition ───────────────────────────────────────────────────────────
     // Nutrition-as-context expansion. Targets resolve the same way

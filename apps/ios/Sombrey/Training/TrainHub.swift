@@ -87,6 +87,9 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
     let timestampSuspect: Bool?
     let importedAt: Double?
     let appActiveSeconds: Double?
+    let sampleRateSeconds: Double?
+    let userActivityKey: String?
+    let reviewedAt: Double?
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
@@ -94,7 +97,7 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
         case activityKey, activityCategory, averageHeartRate, lowestHeartRate, highestHeartRate
         case averageSpeedMetersPerSecond, fastestSpeedMetersPerSecond, steps, stepFrequency, actionCount
         case averageAltitudeMeters, climbMeters, descentMeters, bandStartTimeSec, bandDurationRaw, timestampSuspect, importedAt
-        case appActiveSeconds
+        case appActiveSeconds, sampleRateSeconds, userActivityKey, reviewedAt
     }
 
     /// In progress (app-started, not stopped, no band record yet).
@@ -939,7 +942,7 @@ struct SportSessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var activity: SombreyActivity? {
-        ActivityCatalog.resolve(activityKey: session.activityKey, vendorSportType: session.sportType)
+        ActivityCatalog.resolve(activityKey: session.userActivityKey ?? session.activityKey, vendorSportType: session.sportType)
     }
 
     private var sportName: String {

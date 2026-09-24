@@ -12,6 +12,9 @@
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "incremental": true,
+    /* Lets pure modules import each other as "./x.ts", so node's test
+     * runner (tests/activity) can load them directly. */
+    "allowImportingTsExtensions": true,
 
     /* These compiler options are required by Convex */
     "target": "ESNext",

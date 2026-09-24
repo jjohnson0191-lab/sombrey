@@ -7,6 +7,7 @@ import { ageFromDateOfBirth, estimatedMaxHeartRate } from "./activityIntensity";
 import { summarizeActivity, usageOf } from "./activityProfile";
 import {
   activityCatalog,
+  isAmbiguousSportType,
   normalizeManualActivity,
   normalizeSombreyWorkout,
   normalizeSportPlusType,
@@ -38,6 +39,12 @@ export type ActivityRecord = {
   activityCategory: string;
   displayName: string;
   vendorSportType?: number;
+  // Who said what this activity was: the band's own mode, the user choosing
+  // it in the app before starting, or the user answering afterwards.
+  classificationSource: "band" | "app" | "user";
+  // The band's mode was too generic to say what was done, and the user
+  // hasn't said yet.
+  needsClassification?: boolean;
   startedAt: number;
   durationSeconds?: number;
   // "band": the band's own figure. "sombrey_timer": no band figure exists,
@@ -55,6 +62,16 @@ export type ActivityRecord = {
   caloriesSource?: "band_record" | "band_live" | "user_entered";
   distanceMeters?: number;
   steps?: number;
+  averageSpeedMetersPerSecond?: number;
+  fastestSpeedMetersPerSecond?: number;
+  cadence?: number;
+  actionCount?: number;
+  climbMeters?: number;
+  descentMeters?: number;
+  averageAltitudeMeters?: number;
+  // Where distance/steps/speed/cadence/altitude came from: the band's own
+  // session record, or its last live update (app-started, record pending).
+  movementSource?: "band_record" | "band_live";
   timestampSuspect?: boolean;
 };
 
@@ -90,6 +107,7 @@ export const listRecent = query({
       records.push({
         id: w._id,
         provenance: manual ? "manual" : "sombrey_workout",
+        classificationSource: "user",
         activityKey: activity.activityKey,
         activityCategory: activity.activityCategory,
         displayName: manual ? w.name : activity.displayName,
@@ -118,17 +136,26 @@ export const listRecent = query({
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function sessionRecord(s: Doc<"sportPlusSessions">): ActivityRecord | null {
+const catalogByKey = new Map(activityCatalog().map((a) => [a.key, a]));
+
+export function sessionRecord(s: Doc<"sportPlusSessions">): ActivityRecord | null {
   if (s.endedAt === undefined && s.bandStartTimeSec === undefined) return null; // still in progress
-  const activity = normalizeSportPlusType(s.sportType);
+  const band = normalizeSportPlusType(s.sportType);
+  const bandKey = s.activityKey ?? band.activityKey;
+  const key = s.userActivityKey ?? bandKey;
+  const catalogEntry = catalogByKey.get(key);
   const fromBandRecord = s.summarySource === "band_record";
+  const movementSource = fromBandRecord ? "band_record" as const : "band_live" as const;
+  const hasMovement = [s.distanceMeters, s.steps, s.averageSpeedMetersPerSecond].some((v) => v !== undefined);
   return {
     id: s._id,
     provenance: s.recordSource === "band" ? "band_sport_plus" : "app_sport_plus",
-    activityKey: s.activityKey ?? activity.activityKey,
-    activityCategory: s.activityCategory ?? activity.activityCategory,
-    displayName: activity.displayName,
+    activityKey: key,
+    activityCategory: s.userActivityCategory ?? s.activityCategory ?? catalogEntry?.category ?? band.activityCategory,
+    displayName: s.userActivityKey ? (catalogEntry?.name ?? band.displayName) : band.displayName,
     vendorSportType: s.sportType,
+    classificationSource: s.userActivityKey ? "user" : s.recordSource === "band" ? "band" : "app",
+    needsClassification: s.userActivityKey === undefined && isAmbiguousSportType(s.sportType) ? true : undefined,
     startedAt: s.startedAt,
     durationSeconds: s.durationSeconds ?? s.appActiveSeconds,
     durationSource: s.durationSeconds !== undefined ? "band" : s.appActiveSeconds !== undefined ? "sombrey_timer" : undefined,
@@ -140,16 +167,25 @@ function sessionRecord(s: Doc<"sportPlusSessions">): ActivityRecord | null {
     caloriesSource: s.calories === undefined ? undefined : fromBandRecord ? "band_record" : "band_live",
     distanceMeters: s.distanceMeters,
     steps: s.steps,
+    averageSpeedMetersPerSecond: s.averageSpeedMetersPerSecond,
+    fastestSpeedMetersPerSecond: s.fastestSpeedMetersPerSecond,
+    cadence: s.stepFrequency,
+    actionCount: s.actionCount,
+    climbMeters: s.climbMeters,
+    descentMeters: s.descentMeters,
+    averageAltitudeMeters: s.averageAltitudeMeters,
+    movementSource: hasMovement ? movementSource : undefined,
     timestampSuspect: s.timestampSuspect,
   };
 }
 
-function labelledRecord(label: Doc<"activityLabels">): ActivityRecord | null {
+export function labelledRecord(label: Doc<"activityLabels">): ActivityRecord | null {
   if (label.status !== "labelled" || label.activityKey === undefined) return null;
   const entry = activityCatalog().find((a) => a.key === label.activityKey);
   return {
     id: label._id,
     provenance: "user_labelled",
+    classificationSource: "user",
     activityKey: label.activityKey,
     activityCategory: label.activityCategory ?? entry?.category ?? "other",
     displayName: entry?.name ?? label.activityKey,
@@ -332,6 +368,59 @@ export const labelDetection = mutation({
       highestHeartRate: bpms.length > 0 ? Math.max(...bpms) : undefined,
       heartRateSampleCount: bpms.length,
       createdAt: Date.now(),
+    });
+  },
+});
+
+// ── Band records the user hasn't seen yet ─────────────────────────────────
+
+const REVIEW_WINDOW_MS = 7 * DAY_MS;
+
+/** Activities the band recorded on its own (started on the band) that the
+ * user hasn't looked at yet — newest first. Those whose band mode is too
+ * generic carry `needsClassification`: Sombrey asks what they were rather
+ * than guessing. */
+export const pendingReviews = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireAuth(ctx);
+    const sessions = await ctx.db
+      .query("sportPlusSessions")
+      .withIndex("by_user_and_startedAt", (q) => q.eq("userId", user._id).gte("startedAt", Date.now() - REVIEW_WINDOW_MS))
+      .order("desc")
+      .take(100);
+    return sessions
+      .filter((s) => s.recordSource === "band" && s.reviewedAt === undefined)
+      .map(sessionRecord)
+      .filter((r): r is ActivityRecord => r !== null)
+      .slice(0, 5);
+  },
+});
+
+/** Marks a band-started record as seen. `activityKey` answers "what was
+ * this?" for a record whose band mode was too generic; a specific band mode
+ * stays the source of truth and can't be overridden here. */
+export const reviewSession = mutation({
+  args: { sessionId: v.id("sportPlusSessions"), activityKey: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const session = await ctx.db.get(args.sessionId);
+    if (!session || session.userId !== user._id) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Session not found" });
+    }
+    if (args.activityKey === undefined) {
+      await ctx.db.patch(args.sessionId, { reviewedAt: Date.now() });
+      return;
+    }
+    if (!isAmbiguousSportType(session.sportType)) {
+      throw new ConvexError({ code: "INVALID", message: "The band already recorded what this activity was" });
+    }
+    const entry = catalogByKey.get(args.activityKey);
+    if (!entry) throw new ConvexError({ code: "INVALID", message: "Unknown activity" });
+    await ctx.db.patch(args.sessionId, {
+      userActivityKey: entry.key,
+      userActivityCategory: entry.category,
+      reviewedAt: Date.now(),
     });
   },
 });

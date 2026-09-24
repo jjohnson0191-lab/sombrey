@@ -107,6 +107,9 @@
 		00000000000000000000011A /* ActivityModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000119 /* ActivityModeView.swift */; };
 		00000000000000000000011C /* ActivitySessionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000011B /* ActivitySessionViews.swift */; };
 		00000000000000000000011E /* ActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000011D /* ActivityTests.swift */; };
+		000000000000000000000120 /* ActivityIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000011F /* ActivityIntelligence.swift */; };
+		000000000000000000000122 /* ActivityInstruments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000121 /* ActivityInstruments.swift */; };
+		000000000000000000000124 /* ActivityExperienceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000123 /* ActivityExperienceView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -229,6 +232,9 @@
 		000000000000000000000119 /* ActivityModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityModeView.swift"; sourceTree = "<group>"; };
 		00000000000000000000011B /* ActivitySessionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivitySessionViews.swift"; sourceTree = "<group>"; };
 		00000000000000000000011D /* ActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityTests.swift"; sourceTree = "<group>"; };
+		00000000000000000000011F /* ActivityIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityIntelligence.swift"; sourceTree = "<group>"; };
+		000000000000000000000121 /* ActivityInstruments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityInstruments.swift"; sourceTree = "<group>"; };
+		000000000000000000000123 /* ActivityExperienceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityExperienceView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -503,6 +509,9 @@
 			000000000000000000000117 /* TrainComponents.swift */,
 			000000000000000000000119 /* ActivityModeView.swift */,
 			00000000000000000000011B /* ActivitySessionViews.swift */,
+			00000000000000000000011F /* ActivityIntelligence.swift */,
+			000000000000000000000121 /* ActivityInstruments.swift */,
+			000000000000000000000123 /* ActivityExperienceView.swift */,
 			);
 			name = "Activity";
 			path = "Activity";
@@ -841,6 +850,9 @@
 				000000000000000000000118 /* TrainComponents.swift */,
 				00000000000000000000011A /* ActivityModeView.swift */,
 				00000000000000000000011C /* ActivitySessionViews.swift */,
+				000000000000000000000120 /* ActivityIntelligence.swift */,
+				000000000000000000000122 /* ActivityInstruments.swift */,
+				000000000000000000000124 /* ActivityExperienceView.swift */,
 				00000000000000000000006A /* TrainOverviewView.swift */,
 				00000000000000000000006B /* ActiveWorkoutView.swift */,
 				00000000000000000000006C /* TrainCompleteView.swift */,
@@ -966,7 +978,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -997,7 +1009,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1022,7 +1034,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1048,7 +1060,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1070,7 +1082,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1095,7 +1107,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

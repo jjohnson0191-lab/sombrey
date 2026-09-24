@@ -39,6 +39,15 @@ A short, controlled session is enough; the heart-rate and calorie values from a 
 | A9 | Intensity | With a date of birth on the account, the summary shows a zone labelled "estimated from your age"; without one, no intensity label appears |
 | A10 | Noticed activity | After ≥20 min of genuinely elevated heart rate without starting anything, Train › ACTIVITY asks "What were you doing?"; naming it adds it to that activity's history; "Not an activity" makes it go away for good |
 
+## Activity Intelligence (per-activity experience)
+
+| # | Test | Pass when |
+|---|---|---|
+| B1 | Record a session **on the band** (not the app) in a specific mode (e.g. Golf), then open Train › ACTIVITY | A "From your band" card shows Golf with its duration; tapping it opens the session in Golf's terms ("Your round", steps/distance first) |
+| B2 | Record a session on the band in a **generic** mode ("Other exercise" / "Free training" / "Fitness") | The card says the band couldn't name it and asks "What was it?"; choosing an activity moves it into that activity's history; the band's original mode is still shown under Recording details |
+| B3 | Open two different activities' pages (e.g. Tennis and Running) | Different section titles, headline metrics and notes; nothing shown that wasn't recorded |
+| B4 | For each sport you test, note which fields the band filled in | Fill the capability table below — this is the per-sport field map the SDK doesn't document |
+
 Record results here, per sport tested, before treating any capability as confirmed:
 
 | Capability | SDK | Physical band (result, date) |

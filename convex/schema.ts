@@ -1237,6 +1237,13 @@ export default defineSchema({
     // the app (wall clock minus pauses) — kept apart from durationSeconds,
     // which is always the band's own figure.
     appActiveSeconds: v.optional(v.number()),
+    // The user's answer when the band's mode was too generic to say what
+    // the activity was (activityTaxonomy AMBIGUOUS_VENDOR_IDS) — sportType
+    // and activityKey above stay exactly as the band reported them.
+    userActivityKey: v.optional(v.string()),
+    userActivityCategory: v.optional(v.string()),
+    // When the user saw (and, if asked, classified) a band-started record.
+    reviewedAt: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_bandStart", ["userId", "bandStartTimeSec"]),

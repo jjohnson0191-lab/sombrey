@@ -143,7 +143,7 @@ struct ActivityChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                Image(systemName: activity.profile.glyph)
+                Image(systemName: activity.glyph)
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 18)
                 Text(activity.name)

@@ -3,22 +3,34 @@ import SwiftUI
 // MARK: - Catalog
 
 /// One physical activity as Sombrey presents it — Tennis, Golf, Surfing —
-/// generated from the server's taxonomy (`convex/activityTaxonomy.ts`, see
-/// `ActivityCatalog.generated.swift`). `vendorSportType` is the band mode
-/// used to record it; it is never shown.
+/// generated from the server's activity model (`convex/activityTaxonomy.ts`
+/// + `convex/activityFamilies.ts`, see `ActivityCatalog.generated.swift`).
+/// `vendorSportType` is the band mode used to record it; it is never shown.
 struct SombreyActivity: Identifiable, Hashable, Sendable {
     let key: String
     let name: String
     let category: String
     let group: String
     let vendorSportType: Int
+    /// The band mode is too generic to say what was done ("free training");
+    /// a band record in it prompts the user rather than being trusted.
+    let isAmbiguous: Bool
 
     var id: String { key }
 
     /// The band's mode for this activity.
     var sportType: SombreySportType? { SombreySportType.byRawValue[vendorSportType] }
 
-    var profile: ActivityProfile { ActivityProfile.for(self) }
+    /// How Sombrey talks about and reads this activity — its family's terms
+    /// with its own overrides (the Activity Intelligence Framework's data).
+    var terms: ActivityTerms {
+        ActivityCatalog.activityTerms[key] ?? ActivityCatalog.familyTerms[category] ?? ActivityCatalog.familyTerms["other"]!
+    }
+
+    var glyph: String { ActivityGlyphs.glyph(for: self) }
+
+    /// The category in everyday words ("Racquet", "Water sport").
+    var categoryName: String { ActivityCatalog.categoryNames[category] ?? category.replacingOccurrences(of: "_", with: " ").capitalized }
 }
 
 struct ActivityGroup: Identifiable, Hashable, Sendable {
@@ -34,6 +46,14 @@ enum ActivityCatalog {
     static let popularKeys = [
         "tennis", "run", "golf", "walk", "bike", "swim",
         "hiking", "football", "basketball", "surf", "strength_training", "yoga",
+    ]
+
+    static let categoryNames: [String: String] = [
+        "running": "Running", "walking": "Walking", "hiking": "Hiking", "cycling": "Cycling", "swimming": "Swimming",
+        "racquet": "Racquet sport", "golf": "Golf", "team_sport": "Team sport", "water_sport": "Water sport",
+        "winter_sport": "Winter sport", "strength": "Strength", "cardio": "Cardio", "mobility": "Mind & body",
+        "dance": "Dance", "combat": "Combat sport", "outdoor_adventure": "Outdoor", "leisure": "Leisure",
+        "motorsport": "Motorsport", "games": "Game", "other": "Activity",
     ]
 
     static func activities(in group: ActivityGroup) -> [SombreyActivity] {
@@ -60,105 +80,61 @@ enum ActivityCatalog {
     }
 }
 
-// MARK: - Profile: what matters for this activity
+// MARK: - Framework terms
 
-/// A measurement an activity can show. Each has one meaning everywhere.
-enum ActivityMetric: String, CaseIterable, Hashable {
-    case heartRate, calories, steps, distance, pace, speed, climb, cadence
+/// Everything an activity experience can show. Each has one meaning, and
+/// each is only ever shown from a real recorded value (see
+/// `ActivityReadings`). Raw values match `convex/activityFamilies.ts`.
+enum ActivityMetric: String, CaseIterable, Hashable, Sendable {
+    case duration, heartRate = "heart_rate", intensity, distance, pace, speed
+    case fastestSpeed = "fastest_speed", steps, cadence, calories, climb, descent, altitude, actions
+}
 
-    var label: String {
+enum ActivityPaceUnit: Sendable { case perKm, per100m }
+
+/// An activity's language and emphasis — generated data, never hand-built
+/// per screen. See `convex/activityFamilies.ts` for the meaning of each.
+struct ActivityTerms: Equatable, Sendable {
+    let sessionNoun: String
+    let verbPast: String
+    let performanceTitle: String
+    let movementTitle: String
+    let effortTitle: String
+    let primary: [ActivityMetric]
+    let secondary: [ActivityMetric]
+    let notMeasured: String?
+    let focus: String
+    let recoveryNote: String
+    let actionsLabel: String
+    let paceUnit: ActivityPaceUnit
+    let character: ActivityCharacter
+}
+
+/// The quiet backlight an activity's hero takes on — the same Studio bezel
+/// everywhere, tinted toward where the activity happens.
+enum ActivityCharacter: Equatable, Sendable {
+    case court, road, trail, water, studio
+
+    var tint: Color {
         switch self {
-        case .heartRate: return "Heart rate"
-        case .calories: return "Energy"
-        case .steps: return "Steps"
-        case .distance: return "Distance"
-        case .pace: return "Pace"
-        case .speed: return "Speed"
-        case .climb: return "Climb"
-        case .cadence: return "Cadence"
+        case .court: return StudioColor.activityCourt
+        case .road: return StudioColor.activityRoad
+        case .trail: return StudioColor.activityTrail
+        case .water: return StudioColor.activityWater
+        case .studio: return StudioColor.env2
         }
     }
 }
 
-/// How Sombrey understands one activity: what to put first, what is
-/// worth showing only when the band actually reports it, and — just as
-/// important — what the band cannot measure for it, said plainly rather
-/// than implied. One profile per category (plus a few activity-specific
-/// touches), so 172 activities never become 172 screens.
-struct ActivityProfile: Equatable {
-    /// Always shown — as "Not measured" when absent, never as zero.
-    let expected: [ActivityMetric]
-    /// Shown only when the band reported a real value.
-    let optional: [ActivityMetric]
-    /// A plain statement of what the band doesn't measure for this
-    /// activity — so the interface is sport-aware without pretending.
-    let notMeasured: String?
-    /// How Sombrey reads this activity, in one line.
-    let focus: String
-    let glyph: String
-    let character: ActivityCharacter
-
-    static func `for`(_ activity: SombreyActivity) -> ActivityProfile {
-        let glyph = glyphs[activity.key] ?? categoryGlyphs[activity.category] ?? "figure.mixed.cardio"
-        let name = activity.name
-        switch activity.category {
-        case "running":
-            return .init(expected: [.heartRate, .distance, .pace, .calories], optional: [.steps, .cadence, .climb],
-                         notMeasured: nil,
-                         focus: "Distance, pace and how hard your heart worked to hold it.",
-                         glyph: glyph, character: .road)
-        case "walking", "hiking":
-            return .init(expected: [.heartRate, .distance, .steps, .calories], optional: [.pace, .climb],
-                         notMeasured: nil,
-                         focus: "Distance, steps and the climb — and your heart's response to them.",
-                         glyph: glyph, character: .trail)
-        case "cycling":
-            return .init(expected: [.heartRate, .distance, .speed, .calories], optional: [.climb],
-                         notMeasured: "Power and pedal cadence aren't measured by the band.",
-                         focus: "Distance, speed and your heart-rate response.",
-                         glyph: glyph, character: .road)
-        case "swimming":
-            return .init(expected: [.heartRate, .calories], optional: [.distance],
-                         notMeasured: "Laps, strokes and SWOLF aren't measured by the band.",
-                         focus: "Time in the water and how hard your heart worked.",
-                         glyph: glyph, character: .water)
-        case "racquet":
-            return .init(expected: [.heartRate, .steps, .calories], optional: [.distance],
-                         notMeasured: "Shots, serves and rallies aren't measured — Sombrey reads your body's response to \(name) instead.",
-                         focus: "Intensity, time on court, movement — and how your heart rate rises and recovers.",
-                         glyph: glyph, character: .court)
-        case "golf":
-            return .init(expected: [.steps, .distance, .heartRate, .calories], optional: [.climb],
-                         notMeasured: "Shots and swings aren't measured — Sombrey follows your round through movement and heart rate.",
-                         focus: "Your round on foot: steps, distance walked and effort.",
-                         glyph: glyph, character: .trail)
-        case "team_sport":
-            return .init(expected: [.heartRate, .steps, .calories], optional: [.distance, .speed],
-                         notMeasured: "Touches, shots and positions aren't measured by the band.",
-                         focus: "Intensity, movement volume and how your heart handled the match.",
-                         glyph: glyph, character: .court)
-        case "water_sport":
-            return .init(expected: [.heartRate, .calories], optional: [.distance, .speed],
-                         notMeasured: activity.key.contains("surf")
-                            ? "Waves aren't counted — Sombrey follows your session through heart rate and effort."
-                            : nil,
-                         focus: "Time on the water and how hard your heart worked.",
-                         glyph: glyph, character: .water)
-        case "winter_sport", "outdoor_adventure":
-            return .init(expected: [.heartRate, .calories], optional: [.distance, .speed, .climb, .steps],
-                         notMeasured: nil,
-                         focus: "Effort over time, and the terrain when the band records it.",
-                         glyph: glyph, character: .trail)
-        default:
-            return .init(expected: [.heartRate, .calories], optional: [.steps],
-                         notMeasured: nil,
-                         focus: "Intensity and time — how hard your heart worked, and for how long.",
-                         glyph: glyph, character: .studio)
-        }
+/// SF Symbols' workout set (iOS 16+) — only names that exist. The one part
+/// of an activity's identity that is platform-specific, so it lives here
+/// rather than in the shared model.
+enum ActivityGlyphs {
+    static func glyph(for activity: SombreyActivity) -> String {
+        byKey[activity.key] ?? byCategory[activity.category] ?? "figure.mixed.cardio"
     }
 
-    // SF Symbols' workout set (iOS 16+) — only names that exist.
-    private static let glyphs: [String: String] = [
+    private static let byKey: [String: String] = [
         "tennis": "figure.tennis", "badminton": "figure.badminton", "pingpong": "figure.table.tennis",
         "squash": "figure.squash", "racquetball": "figure.racquetball", "pickleball": "figure.pickleball",
         "golf": "figure.golf", "run": "figure.run", "treadmill": "figure.run", "trail_running": "figure.run",
@@ -184,34 +160,19 @@ struct ActivityProfile: Equatable {
         "stair_climber": "figure.stair.stepper", "stair_stepper": "figure.stair.stepper", "step_training": "figure.step.training",
         "gymnastics": "figure.gymnastics", "boxing": "figure.boxing", "kickboxing": "figure.kickboxing",
         "martial_arts": "figure.martial.arts", "wrestling": "figure.wrestling", "fencing": "figure.fencing",
-        "rock_climbing": "figure.climbing", "climb": "figure.climbing", "archery": "figure.archery",
-        "fishing": "figure.fishing", "hunt": "figure.hunting", "bowling": "figure.bowling",
-        "frisbee": "figure.disc.sports", "dance": "figure.dance",
+        "rock_climbing": "figure.climbing", "archery": "figure.archery", "fishing": "figure.fishing",
+        "hunt": "figure.hunting", "bowling": "figure.bowling", "frisbee": "figure.disc.sports", "dance": "figure.dance",
+        "polo": "figure.equestrian.sports",
     ]
 
-    private static let categoryGlyphs: [String: String] = [
+    private static let byCategory: [String: String] = [
         "running": "figure.run", "walking": "figure.walk", "hiking": "figure.hiking", "cycling": "figure.outdoor.cycle",
         "swimming": "figure.pool.swim", "racquet": "figure.tennis", "golf": "figure.golf", "team_sport": "figure.soccer",
         "water_sport": "figure.water.fitness", "winter_sport": "figure.skiing.downhill", "strength": "figure.strengthtraining.functional",
         "cardio": "figure.mixed.cardio", "mobility": "figure.mind.and.body", "dance": "figure.dance",
         "combat": "figure.martial.arts", "outdoor_adventure": "figure.hiking", "leisure": "figure.play",
+        "motorsport": "steeringwheel", "games": "puzzlepiece",
     ]
-}
-
-/// The quiet backlight an activity's hero takes on — the same Studio bezel
-/// everywhere, tinted toward where the activity happens.
-enum ActivityCharacter: Equatable {
-    case court, road, trail, water, studio
-
-    var tint: Color {
-        switch self {
-        case .court: return StudioColor.activityCourt
-        case .road: return StudioColor.activityRoad
-        case .trail: return StudioColor.activityTrail
-        case .water: return StudioColor.activityWater
-        case .studio: return StudioColor.env2
-        }
-    }
 }
 
 // MARK: - Intensity
@@ -237,35 +198,6 @@ enum ActivityIntensity {
     }
 }
 
-// MARK: - Compared with your own sessions
-
-/// This session against the user's own previous sessions of the same
-/// activity — real averages over sessions that measured the value, and
-/// only once there are at least two to compare with.
-enum ActivityComparison {
-    static let minimumSessions = 2
-
-    static func lines(durationSeconds: Double, averageHeartRate: Double?, previous: [ActivityRecordDTO]) -> [String] {
-        var lines: [String] = []
-        let durations = previous.compactMap { $0.durationSeconds }.filter { $0 > 0 }
-        if durations.count >= minimumSessions, durationSeconds > 0 {
-            let typical = durations.reduce(0, +) / Double(durations.count)
-            let delta = Int(((durationSeconds - typical) / 60).rounded())
-            let base = "your average of \(ActivityFormat.duration(typical)) over \(durations.count) sessions"
-            lines.append(delta == 0 ? "About as long as \(base)." : "\(abs(delta)) min \(delta > 0 ? "longer" : "shorter") than \(base).")
-        }
-        let heartRates = previous.filter { $0.heartRateSource != nil }.compactMap { $0.averageHeartRate }.filter { $0 > 0 }
-        if let averageHeartRate, averageHeartRate > 0, heartRates.count >= minimumSessions {
-            let typical = heartRates.reduce(0, +) / Double(heartRates.count)
-            let delta = Int((averageHeartRate - typical).rounded())
-            lines.append(delta == 0
-                         ? "Average heart rate in line with your usual \(Int(typical.rounded())) bpm."
-                         : "Average heart rate \(abs(delta)) bpm \(delta > 0 ? "above" : "below") your usual \(Int(typical.rounded())) bpm.")
-        }
-        return lines
-    }
-}
-
 // MARK: - Measurement formatting (real values only)
 
 enum ActivityFormat {
@@ -284,6 +216,13 @@ enum ActivityFormat {
         guard metersPerSecond > 0.3 else { return nil }
         let secondsPerKm = Int((1000 / metersPerSecond).rounded())
         return String(format: "%d:%02d", secondsPerKm / 60, secondsPerKm % 60)
+    }
+
+    /// Swim pace per 100 m from an average speed in m/s.
+    static func pacePer100m(metersPerSecond: Double) -> String? {
+        guard metersPerSecond > 0.1 else { return nil }
+        let seconds = Int((100 / metersPerSecond).rounded())
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     static func speed(metersPerSecond: Double) -> String {
@@ -318,8 +257,21 @@ struct ActivityRecordDTO: Decodable, Identifiable, Equatable {
     let distanceMeters: Double?
     let steps: Double?
     let timestampSuspect: Bool?
+    // Added with the Activity Intelligence Framework; optional so every
+    // earlier shape still decodes.
+    var classificationSource: String? = nil
+    var needsClassification: Bool? = nil
+    var averageSpeedMetersPerSecond: Double? = nil
+    var fastestSpeedMetersPerSecond: Double? = nil
+    var cadence: Double? = nil
+    var actionCount: Double? = nil
+    var climbMeters: Double? = nil
+    var descentMeters: Double? = nil
+    var averageAltitudeMeters: Double? = nil
+    var movementSource: String? = nil
 
     var startDate: Date { Date(timeIntervalSince1970: startedAt / 1000) }
+    var activity: SombreyActivity? { ActivityCatalog.resolve(activityKey: activityKey, vendorSportType: vendorSportType) }
 
     /// Where this activity's figures came from, in the user's terms.
     var sourceLine: String {

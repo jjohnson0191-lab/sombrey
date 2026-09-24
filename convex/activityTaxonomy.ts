@@ -35,6 +35,8 @@ export const ACTIVITY_CATEGORIES = [
   "combat",
   "outdoor_adventure",
   "leisure",
+  "motorsport",
+  "games",
   "other",
 ] as const;
 
@@ -74,7 +76,7 @@ export const VENDOR_SPORT_TYPES: Record<number, VendorEntry> = {
   9: { key: "bike", name: "Ride", category: "cycling" },
   10: { key: "other_exercise", name: "Other Exercise", category: "other" },
   11: { key: "racquet_swing", name: "Swing Practice", category: "racquet" },
-  20: { key: "climb", name: "Climbing", category: "outdoor_adventure" },
+  20: { key: "hill_climb", name: "Hill Climb", category: "hiking" },
   21: { key: "badminton", name: "Badminton", category: "racquet" },
   22: { key: "yoga", name: "Yoga", category: "mobility" },
   23: { key: "aerobics", name: "Aerobics", category: "cardio" },
@@ -111,9 +113,9 @@ export const VENDOR_SPORT_TYPES: Record<number, VendorEntry> = {
   63: { key: "hunt", name: "Hunt", category: "outdoor_adventure" },
   64: { key: "skateboard", name: "Skateboard", category: "outdoor_adventure" },
   65: { key: "parkour", name: "Parkour", category: "outdoor_adventure" },
-  66: { key: "atv", name: "ATV", category: "outdoor_adventure" },
-  67: { key: "motocross", name: "Motocross", category: "outdoor_adventure" },
-  68: { key: "racing", name: "Racing", category: "outdoor_adventure" },
+  66: { key: "atv", name: "ATV", category: "motorsport" },
+  67: { key: "motocross", name: "Motocross", category: "motorsport" },
+  68: { key: "racing", name: "Racing", category: "motorsport" },
   69: { key: "hand_crank", name: "Hand Crank", category: "cycling" },
   70: { key: "marathon", name: "Marathon", category: "running" },
   71: { key: "obstacle_course", name: "Obstacle Course", category: "outdoor_adventure" },
@@ -186,15 +188,15 @@ export const VENDOR_SPORT_TYPES: Record<number, VendorEntry> = {
   165: { key: "dodge_ball", name: "Dodge Ball", category: "team_sport" },
   166: { key: "water_polo", name: "Water Polo", category: "team_sport" },
   167: { key: "ice_hockey", name: "Ice Hockey", category: "team_sport" },
-  168: { key: "shuttlecock", name: "Shuttlecock", category: "racquet" },
+  168: { key: "jianzi", name: "Shuttlecock Kicking", category: "team_sport" },
   169: { key: "indoor_football", name: "Indoor Soccer", category: "team_sport" },
-  170: { key: "sandbag", name: "Sandbag", category: "strength" },
+  170: { key: "sandbag_ball", name: "Sandbag Ball", category: "leisure" },
   171: { key: "bocce", name: "Bocce", category: "leisure" },
   172: { key: "jai_alai", name: "Jai Alai", category: "racquet" },
   173: { key: "floor_ball", name: "Floor Ball", category: "team_sport" },
   174: { key: "australian_rules_football", name: "Australian Rules Football", category: "team_sport" },
   175: { key: "pickleball", name: "Pickleball", category: "racquet" },
-  180: { key: "outdoor_boating", name: "Outdoor Boating", category: "water_sport" },
+  180: { key: "outdoor_rowing", name: "Rowing", category: "water_sport" },
   181: { key: "sailing", name: "Sailing", category: "water_sport" },
   182: { key: "dragon_boat", name: "Dragon Boat", category: "water_sport" },
   183: { key: "surf", name: "Surfing", category: "water_sport" },
@@ -215,33 +217,33 @@ export const VENDOR_SPORT_TYPES: Record<number, VendorEntry> = {
   198: { key: "curling", name: "Curling", category: "winter_sport" },
   199: { key: "bobsleigh", name: "Bobsleigh", category: "winter_sport" },
   200: { key: "sled", name: "Sled", category: "winter_sport" },
-  201: { key: "snowmobile", name: "Snowmobile", category: "winter_sport" },
+  201: { key: "snowmobile", name: "Snowmobile", category: "motorsport" },
   202: { key: "snowshoeing", name: "Snowshoeing", category: "winter_sport" },
   210: { key: "hula_hoop", name: "Hula Hoop", category: "cardio" },
   211: { key: "frisbee", name: "Frisbee", category: "leisure" },
   212: { key: "darts", name: "Darts", category: "leisure" },
   213: { key: "fly_a_kite", name: "Kite Flying", category: "leisure" },
   214: { key: "tug_of_war", name: "Tug Of War", category: "leisure" },
-  215: { key: "esports", name: "Esports", category: "leisure" },
-  216: { key: "stroller", name: "Stroller Walk", category: "walking" },
+  215: { key: "esports", name: "Esports", category: "games" },
+  216: { key: "air_walker", name: "Air Walker", category: "cardio" },
   217: { key: "swing", name: "Swing", category: "leisure" },
   218: { key: "shuffleboard", name: "Shuffleboard", category: "leisure" },
-  219: { key: "table_soccer", name: "Table Soccer", category: "leisure" },
+  219: { key: "table_soccer", name: "Table Soccer", category: "games" },
   220: { key: "somatosensory_game", name: "Motion Gaming", category: "leisure" },
   221: { key: "bungee_jumping", name: "Bungee Jumping", category: "outdoor_adventure" },
   222: { key: "parachute", name: "Parachute", category: "outdoor_adventure" },
   223: { key: "anusara", name: "Anusara Yoga", category: "mobility" },
   224: { key: "yin_yoga", name: "Yin Yoga", category: "mobility" },
   225: { key: "pregnancy_yoga", name: "Pregnancy Yoga", category: "mobility" },
-  230: { key: "international_chess", name: "Chess", category: "leisure" },
-  231: { key: "go", name: "Go", category: "leisure" },
-  232: { key: "checkers", name: "Checkers", category: "leisure" },
-  233: { key: "board_game", name: "Board Game", category: "leisure" },
-  234: { key: "bridge", name: "Bridge", category: "leisure" },
+  230: { key: "international_chess", name: "Chess", category: "games" },
+  231: { key: "go", name: "Go", category: "games" },
+  232: { key: "checkers", name: "Checkers", category: "games" },
+  233: { key: "board_game", name: "Board Game", category: "games" },
+  234: { key: "bridge", name: "Bridge", category: "games" },
   235: { key: "triathlon", name: "Triathlon", category: "other" },
   236: { key: "archery", name: "Archery", category: "outdoor_adventure" },
   237: { key: "compound_movement", name: "Compound Movement", category: "strength" },
-  238: { key: "drive", name: "Driving", category: "leisure" },
+  238: { key: "drive", name: "Driving", category: "motorsport" },
   10086: { key: "other", name: "Other", category: "other" },
 };
 
@@ -260,7 +262,7 @@ export const ACTIVITY_GROUPS: { id: string; name: string; categories: ActivityCa
   { id: "dance", name: "Dance", categories: ["dance"] },
   { id: "combat", name: "Combat", categories: ["combat"] },
   { id: "winter", name: "Winter", categories: ["winter_sport"] },
-  { id: "other", name: "Games & Other", categories: ["leisure", "other"] },
+  { id: "other", name: "Leisure & Other", categories: ["leisure", "motorsport", "games", "other"] },
 ];
 
 // Several vendor modes share one Sombrey activity (GPS Run, Run and
@@ -319,6 +321,16 @@ export function activityCatalog(): CatalogActivity[] {
   }
   const order = ACTIVITY_GROUPS.map((g) => g.id);
   return [...byKey.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || a.name.localeCompare(b.name));
+}
+
+// Band modes too generic to say what the user actually did ("band
+// exercise", "free training", "fitness", the catch-all extension). A record
+// in one of these — or an id this taxonomy doesn't know — is shown as the
+// band reported it, and the user is asked what it was.
+export const AMBIGUOUS_VENDOR_IDS = new Set([10, 86, 90, 98, 10086]);
+
+export function isAmbiguousSportType(vendorId: number): boolean {
+  return AMBIGUOUS_VENDOR_IDS.has(vendorId) || VENDOR_SPORT_TYPES[vendorId] === undefined;
 }
 
 /** Normalizes a vendor Sport+ id. Unknown ids (e.g. from a newer firmware)

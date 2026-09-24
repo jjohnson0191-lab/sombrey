@@ -76,7 +76,21 @@ Consumers never see a provider's name. Plans and workouts reference Sombrey ids 
 Train separates **Training** (structured exercise: `TrainingSessionManager`, `sombreyWorkouts`) from **Activity** (what the user physically does: `ActivitySessionManager`, `sportPlusSessions`). They are separate state machines and never one "workout" concept.
 
 - **Catalog.** `ActivityCatalog.generated.swift` is generated from `convex/activityTaxonomy.ts` by `scripts/generate-activity-catalog.ts`; `tests/activity` fails when they drift. It has 172 startable activities in 13 browsing groups, and each carries its band mode internally.
-- **Activity-specific experiences** come from one `ActivityProfile` per category rather than one screen per sport. A profile sets the expected metrics (shown as "Not measured" when absent), the optional metrics (shown only when measured), a plain statement of what the band can't measure for that activity, a glyph and a hero tint.
+- **Activity Intelligence Framework.** Every activity experience is one structure filled by data plus one engine. There is no per-sport screen.
+  - **Data** (`convex/activityFamilies.ts`, generated into Swift): per-category families plus per-activity overrides. They set:
+    - terminology: session noun, verb, section titles;
+    - headline and secondary indicators;
+    - what the band can't measure;
+    - general recovery guidance (marked as not from the user's data);
+    - units and hero tint.
+  - **Engine** (`ActivityIntelligence.swift`): turns real readings plus the user's own history into:
+    - indicators, each with its source;
+    - one "not recorded this <session>" line instead of placeholders;
+    - a heart-rate range and time-in-zone profile;
+    - deterministic insights, each with its basis.
+  - **Structure:** Header → Performance → Heart-rate behaviour → Session data → Sombrey's read → About. It is used for an activity's page, the live session and every recorded session.
+- **Band records** (`activities:pendingReviews` / `reviewSession`). A session the band recorded on its own is offered for review. The band's mode is the source of truth, unless it is too generic (`AMBIGUOUS_VENDOR_IDS`: "band exercise", "free training", "fitness", …). Then the user is asked what it was, stored as `userActivityKey` beside the untouched band mode.
+- **AI Coach** gets one line per activity with provenance (`convex/activityCoach.ts`), e.g. "Tennis (racquet) — yesterday, 1 h 30 min, avg HR 142 bpm (band record)", instead of a session count.
 - **Intelligence foundation** (`convex/activities.ts`):
   - `usage`: recent and frequent activities.
   - `history`: "Your Tennis" — averages only over the sessions that measured each value.

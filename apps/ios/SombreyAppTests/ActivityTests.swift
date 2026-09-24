@@ -39,24 +39,124 @@ struct ActivityCatalogTests {
     }
 }
 
-struct ActivityProfileTests {
-    @Test func profilesNeverPromiseSportSpecificSensors() {
+struct ActivityFrameworkTests {
+    @Test func everyActivityResolvesConsistentTerms() {
         for activity in ActivityCatalog.all {
-            let profile = activity.profile
-            // Heart rate is always expected; nothing is both expected and optional.
-            #expect(profile.expected.contains(.heartRate))
-            #expect(Set(profile.expected).isDisjoint(with: profile.optional))
+            let terms = activity.terms
+            #expect(!terms.primary.isEmpty, "\(activity.key)")
+            #expect(Set(terms.primary).isDisjoint(with: terms.secondary), "\(activity.key)")
+            #expect(!terms.sessionNoun.isEmpty && !terms.performanceTitle.isEmpty)
         }
-        let tennis = ActivityCatalog.byKey["tennis"]!.profile
-        #expect(tennis.character == .court)
-        #expect(tennis.notMeasured?.contains("Shots") == true)
-        #expect(!tennis.expected.contains(.pace))
-        let swim = ActivityCatalog.byKey["swim"]!.profile
-        #expect(swim.notMeasured?.contains("SWOLF") == true)
-        #expect(!swim.expected.contains(.distance)) // only when the band reports it
-        let run = ActivityCatalog.byKey["run"]!.profile
-        #expect(run.expected.contains(.pace))
-        #expect(run.expected.contains(.distance))
+    }
+
+    @Test func termsAdaptToTheActivity() {
+        let golf = ActivityCatalog.byKey["golf"]!.terms
+        #expect(golf.sessionNoun == "round")
+        #expect(Array(golf.primary.prefix(3)) == [.duration, .steps, .distance])
+        let run = ActivityCatalog.byKey["run"]!.terms
+        #expect(run.primary.first == .distance)
+        #expect(ActivityCatalog.byKey["swim"]!.terms.paceUnit == .per100m)
+        #expect(ActivityCatalog.byKey["surf"]!.terms.notMeasured?.contains("Waves") == true)
+        #expect(ActivityCatalog.byKey["tennis"]!.terms.character == .court)
+        #expect(ActivityCatalog.byKey["rope_skipping"]!.terms.actionsLabel == "Skips")
+        #expect(ActivityCatalog.byKey["free_training"]?.isAmbiguous == true)
+        #expect(ActivityCatalog.byKey["tennis"]?.isAmbiguous == false)
+    }
+}
+
+struct ActivityEngineTests {
+    private let tennis = ActivityCatalog.byKey["tennis"]!
+    private let golf = ActivityCatalog.byKey["golf"]!
+    private let run = ActivityCatalog.byKey["run"]!
+
+    private func record(_ id: String, daysAgo: Double, minutes: Double?, hr: Double? = nil, distance: Double? = nil,
+                        steps: Double? = nil, speed: Double? = nil) -> ActivityRecordDTO {
+        var r = ActivityRecordDTO(id: id, provenance: "band_sport_plus", activityKey: "tennis", activityCategory: "racquet",
+                                  displayName: "Tennis", vendorSportType: 29,
+                                  startedAt: (Date().timeIntervalSince1970 - daysAgo * 86400) * 1000,
+                                  durationSeconds: minutes.map { $0 * 60 }, averageHeartRate: hr, lowestHeartRate: nil,
+                                  highestHeartRate: nil, heartRateSource: hr == nil ? nil : "band_record",
+                                  calories: nil, caloriesSource: nil, distanceMeters: distance, steps: steps, timestampSuspect: nil)
+        r.averageSpeedMetersPerSecond = speed
+        return r
+    }
+
+    @Test func nothingUnrecordedIsShownAndMissingHeadlinesAreListedOnce() {
+        let readings = ActivityReadings(durationSeconds: 3480, averageHeartRate: 142)
+        let experience = ActivityIntelligence.experience(for: golf, readings: readings, previous: [], maxHeartRate: nil)
+        // Golf's headline is duration, steps, distance — only duration was recorded.
+        #expect(experience.primary.map(\.metric) == [.duration])
+        #expect(experience.notRecorded == ["steps", "distance"])
+        // Heart rate is secondary for golf, and shown because it was recorded.
+        #expect(experience.secondary.map(\.metric) == [.heartRate])
+        #expect(experience.secondary.allSatisfy { $0.value != "0" })
+    }
+
+    @Test func zeroIsNeverAReading() {
+        let tally = SportSessionLiveUpdate(sportType: 29, state: 1, durationSeconds: 600, heartRate: 0, steps: 0, distanceMeters: 0, calories: 0)
+        let readings = ActivityReadings.live(tally: tally, heartRate: nil, activeSeconds: 600)
+        let experience = ActivityIntelligence.experience(for: tennis, readings: readings, previous: [], maxHeartRate: 180)
+        #expect(experience.primary.map(\.metric) == [.duration])
+        #expect(experience.secondary.isEmpty)
+        #expect(experience.notRecorded.isEmpty) // live: still filling in
+        #expect(experience.insights.isEmpty)
+    }
+
+    @Test func paceComesFromTheBandsSpeedOrIsLabelledCalculated() {
+        var readings = ActivityReadings(durationSeconds: 600, distanceMeters: 2400, averageSpeed: 4)
+        let fromBand = ActivityIntelligence.indicator(.pace, readings: readings, terms: run.terms, maxHeartRate: nil)
+        #expect(fromBand?.value == "4:10")
+        #expect(fromBand?.source == .bandRecord)
+        readings.averageSpeed = nil
+        let derived = ActivityIntelligence.indicator(.pace, readings: readings, terms: run.terms, maxHeartRate: nil)
+        #expect(derived?.value == "4:10")
+        #expect(derived?.source == .calculated)
+        let swim = ActivityCatalog.byKey["swim"]!
+        let swimPace = ActivityIntelligence.indicator(.pace, readings: ActivityReadings(averageSpeed: 1), terms: swim.terms, maxHeartRate: nil)
+        #expect(swimPace?.value == "1:40")
+        #expect(swimPace?.unit == "/100 m")
+    }
+
+    @Test func intensityIsAnEstimateAndNeedsAnAge() {
+        let readings = ActivityReadings(averageHeartRate: 142)
+        #expect(ActivityIntelligence.indicator(.intensity, readings: readings, terms: tennis.terms, maxHeartRate: nil) == nil)
+        let zone = ActivityIntelligence.indicator(.intensity, readings: readings, terms: tennis.terms, maxHeartRate: 180)
+        #expect(zone?.value == "Moderate")
+        #expect(zone?.source == .estimated)
+    }
+
+    @Test func insightsCompareOnlyWithRecordedHistory() {
+        let previous = [
+            record("a", daysAgo: 10, minutes: 50, hr: 138),
+            record("b", daysAgo: 20, minutes: 52, hr: 140),
+            record("c", daysAgo: 30, minutes: nil, hr: nil),
+        ]
+        let readings = ActivityReadings(durationSeconds: 58 * 60, averageHeartRate: 142)
+        let insights = ActivityIntelligence.sessionInsights(activity: tennis, readings: readings, previous: previous, zones: nil, now: Date())
+        #expect(insights.contains { $0.text.hasPrefix("7 min longer than your usual Tennis session") })
+        #expect(insights.contains { $0.text.contains("average 142 bpm against your typical 139") })
+        #expect(insights.allSatisfy { !$0.basis.isEmpty })
+    }
+
+    @Test func aFirstSessionSaysSoInsteadOfComparing() {
+        let insights = ActivityIntelligence.sessionInsights(activity: golf, readings: ActivityReadings(durationSeconds: 3600), previous: [], zones: nil, now: Date())
+        #expect(insights.count == 1)
+        #expect(insights[0].text.contains("first Golf round"))
+    }
+
+    @Test func movementInsightUsesTheActivitysOwnHeadline() {
+        let previous = [record("a", daysAgo: 5, minutes: 240, steps: 10000), record("b", daysAgo: 12, minutes: 250, steps: 10400)]
+        let insights = ActivityIntelligence.sessionInsights(activity: golf, readings: ActivityReadings(durationSeconds: 14400, steps: 13000), previous: previous, zones: nil, now: Date())
+        #expect(insights.contains { $0.text.contains("steps — more than your usual round of") })
+    }
+
+    @Test func zoneProfileNeedsASeriesAndAnEstimate() {
+        #expect(ActivityIntelligence.zones(series: [140, 150], sampleRateSeconds: 60, maxHeartRate: 180) == nil)
+        #expect(ActivityIntelligence.zones(series: [140, 150, 160, 170], sampleRateSeconds: 60, maxHeartRate: nil) == nil)
+        let zones = ActivityIntelligence.zones(series: [80, 140, 150, 160, 170, 175], sampleRateSeconds: 60, maxHeartRate: 180)
+        #expect(zones?.totalSamples == 6)
+        #expect(zones?.minutes(4) == 2) // 150 (83%), 160 (89%)
+        #expect(zones?.samplesByZone[0] == 1) // 80 (44%) is below zone 1
     }
 }
 
@@ -68,56 +168,6 @@ struct ActivityIntensityTests {
         #expect(ActivityIntensity.zone(heartRate: 80, maxHeartRate: 180) == nil)
         #expect(ActivityIntensity.zone(heartRate: 142, maxHeartRate: nil) == nil)
         #expect(ActivityIntensity.zone(heartRate: 0, maxHeartRate: 180) == nil)
-    }
-}
-
-struct ActivityLiveValueTests {
-    private func tally(steps: Int = 0, distance: Int = 0, calories: Double = 0) -> SportSessionLiveUpdate {
-        SportSessionLiveUpdate(sportType: 29, state: 1, durationSeconds: 600, heartRate: 130, steps: steps, distanceMeters: distance, calories: calories)
-    }
-
-    @Test func zerosAreNeverShownAsReadings() {
-        let empty = tally()
-        for metric in ActivityMetric.allCases {
-            #expect(ActiveActivityView.liveValue(metric, tally: empty, activeSeconds: 600) == nil)
-        }
-        #expect(ActiveActivityView.liveValue(.steps, tally: nil, activeSeconds: 600) == nil)
-    }
-
-    @Test func realReadingsAreFormatted() {
-        let t = tally(steps: 1240, distance: 2400, calories: 88.4)
-        #expect(ActiveActivityView.liveValue(.distance, tally: t, activeSeconds: 600)?.value == "2.40")
-        #expect(ActiveActivityView.liveValue(.distance, tally: t, activeSeconds: 600)?.unit == "km")
-        #expect(ActiveActivityView.liveValue(.calories, tally: t, activeSeconds: 600)?.value == "88")
-        // 2.4 km in 10 min → 4:10 /km average.
-        #expect(ActiveActivityView.liveValue(.pace, tally: t, activeSeconds: 600)?.value == "4:10")
-        // Climb and cadence aren't in the live update at all.
-        #expect(ActiveActivityView.liveValue(.climb, tally: t, activeSeconds: 600) == nil)
-    }
-}
-
-struct ActivityComparisonTests {
-    private func record(_ id: String, minutes: Double?, hr: Double? = nil, hrSource: String? = nil) -> ActivityRecordDTO {
-        ActivityRecordDTO(id: id, provenance: "band_sport_plus", activityKey: "tennis", activityCategory: "racquet",
-                          displayName: "Tennis", vendorSportType: 29, startedAt: 0, durationSeconds: minutes.map { $0 * 60 },
-                          averageHeartRate: hr, lowestHeartRate: nil, highestHeartRate: nil, heartRateSource: hrSource,
-                          calories: nil, caloriesSource: nil, distanceMeters: nil, steps: nil, timestampSuspect: nil)
-    }
-
-    @Test func needsAtLeastTwoPreviousSessions() {
-        #expect(ActivityComparison.lines(durationSeconds: 3480, averageHeartRate: 142, previous: [record("a", minutes: 50, hr: 140, hrSource: "band_record")]).isEmpty)
-    }
-
-    @Test func comparesOnlyWithMeasuredValues() {
-        let previous = [
-            record("a", minutes: 50, hr: 138, hrSource: "band_record"),
-            record("b", minutes: 52, hr: 140, hrSource: "band_record"),
-            record("c", minutes: nil, hr: 180, hrSource: nil), // no band heart-rate record — ignored
-        ]
-        let lines = ActivityComparison.lines(durationSeconds: 58 * 60, averageHeartRate: 142, previous: previous)
-        #expect(lines.count == 2)
-        #expect(lines[0].hasPrefix("7 min longer"))
-        #expect(lines[1] == "Average heart rate 3 bpm above your usual 139 bpm.")
     }
 }
 
