@@ -51,6 +51,7 @@ export const finishSession = mutation({
     highestHeartRate: v.optional(v.number()),
     averageSpeedMetersPerSecond: v.optional(v.number()),
     steps: v.optional(v.number()),
+    appActiveSeconds: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
@@ -64,7 +65,7 @@ export const finishSession = mutation({
     // min/avg/max when it's imported (importBandSessions). If the band
     // record already landed, its figures are left untouched.
     if (session.summarySource === "band_record") {
-      await ctx.db.patch(args.sessionId, { endedAt: session.endedAt ?? args.endedAt });
+      await ctx.db.patch(args.sessionId, { endedAt: session.endedAt ?? args.endedAt, appActiveSeconds: args.appActiveSeconds });
       return;
     }
     await ctx.db.patch(args.sessionId, {
@@ -74,6 +75,7 @@ export const finishSession = mutation({
       calories: args.calories,
       averageSpeedMetersPerSecond: args.averageSpeedMetersPerSecond,
       steps: args.steps,
+      appActiveSeconds: args.appActiveSeconds,
       summarySource: "live_final_tick",
     });
   },

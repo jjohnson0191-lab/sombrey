@@ -73,6 +73,9 @@ protocol QCBandService: AnyObject {
     func pauseSportSession(_ deviceId: DeviceID) async throws
     func resumeSportSession(_ deviceId: DeviceID) async throws
     func stopSportSession(_ deviceId: DeviceID) async throws
+    /// Re-attaches to a session the band is still running after the app
+    /// was relaunched (no command is sent), so it can be paused/stopped.
+    func adoptSportSession(_ deviceId: DeviceID, sportType: Int)
     /// Live push while a Sport+ session is running — empty for
     /// `MockQCBandService`, matching `measurements(for:)`'s honest-absence
     /// convention.

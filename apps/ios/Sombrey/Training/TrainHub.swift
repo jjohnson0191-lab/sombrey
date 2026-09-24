@@ -86,6 +86,7 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
     let bandDurationRaw: Double?
     let timestampSuspect: Bool?
     let importedAt: Double?
+    let appActiveSeconds: Double?
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
@@ -93,6 +94,7 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
         case activityKey, activityCategory, averageHeartRate, lowestHeartRate, highestHeartRate
         case averageSpeedMetersPerSecond, fastestSpeedMetersPerSecond, steps, stepFrequency, actionCount
         case averageAltitudeMeters, climbMeters, descentMeters, bandStartTimeSec, bandDurationRaw, timestampSuspect, importedAt
+        case appActiveSeconds
     }
 
     /// In progress (app-started, not stopped, no band record yet).
@@ -190,142 +192,6 @@ enum WorkoutHistory {
             ))
         }
         return entries.sorted { $0.startedAt > $1.startedAt }
-    }
-}
-
-// MARK: - Hub
-
-/// Train's destinations, above the session builder: the current plan's
-/// next day (one tap to start), and each part of training — plans, manual
-/// logging, Sombrey workouts, the exercise library, history and workout
-/// days. Every destination reads and writes real data; none invents a
-/// workout, a plan or a history entry.
-struct TrainHubSection: View {
-    @Bindable var session: TrainingSessionManager
-    @State private var plans = ConvexQuery<[TrainingPlanDTO]>()
-    @State private var sheet: TrainSheet?
-
-    enum TrainSheet: String, Identifiable {
-        case plans, log, sombrey, library, history, schedule
-        var id: String { rawValue }
-    }
-
-    private var currentPlan: TrainingPlanDTO? { plans.value?.first(where: \.isCurrent) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let plan = currentPlan, let next = plan.nextDay {
-                CurrentPlanCard(plan: plan, dayIndex: next.index, day: next.day, session: session)
-            }
-            VStack(spacing: 0) {
-                hubRow("My training plans", detail: plansDetail) { sheet = .plans }
-                hubRow("Log a workout", detail: "Done outside Sombrey") { sheet = .log }
-                hubRow("Sombrey workouts", detail: nil) { sheet = .sombrey }
-                hubRow("Exercise library", detail: nil) { sheet = .library }
-                hubRow("Workout history", detail: nil) { sheet = .history }
-                hubRow("Workout days & reminders", detail: nil) { sheet = .schedule }
-            }
-        }
-        .task { plans.subscribe(to: "trainingPlans:list") }
-        .sheet(item: $sheet) { which in
-            switch which {
-            case .plans: TrainingPlansView(session: session)
-            case .log: LogWorkoutView()
-            case .sombrey: SombreyWorkoutsView()
-            case .library: ExerciseLibraryView()
-            case .history: WorkoutHistoryView()
-            case .schedule: WorkoutScheduleView()
-            }
-        }
-    }
-
-    private var plansDetail: String? {
-        guard let count = plans.value?.count, count > 0 else { return nil }
-        return "\(count) plan\(count == 1 ? "" : "s")"
-    }
-
-    private func hubRow(_ title: String, detail: String?, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .font(StudioFont.body(15, weight: .medium))
-                    .foregroundStyle(StudioColor.ink)
-                Spacer()
-                if let detail {
-                    Text(detail)
-                        .font(StudioFont.body(12))
-                        .foregroundStyle(StudioColor.inkFaint)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-            .frame(minHeight: 48)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(StudioColor.ink.opacity(0.07)).frame(height: 1)
-        }
-    }
-}
-
-/// The current plan's next day, startable in one tap.
-private struct CurrentPlanCard: View {
-    let plan: TrainingPlanDTO
-    let dayIndex: Int
-    let day: TrainingPlanDTO.Day
-    @Bindable var session: TrainingSessionManager
-    @State private var exercises = ConvexQuery<[Exercise]>()
-    @State private var isStarting = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("NEXT IN \(plan.name.uppercased())")
-                .font(StudioFont.body(10, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.accentInk)
-            Text(day.name)
-                .font(StudioFont.hero(26, weight: .semibold))
-                .foregroundStyle(StudioColor.ink)
-            Text("\(day.exercises.count) exercise\(day.exercises.count == 1 ? "" : "s") · day \(dayIndex + 1) of \(plan.days.count)")
-                .font(StudioFont.body(12))
-                .foregroundStyle(StudioColor.inkSoft)
-            Button {
-                start()
-            } label: {
-                Text(isStarting ? "Starting…" : "Start \(day.name)").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.illuminatedCTA)
-            .disabled(isStarting || !canStart)
-            if !canStart && exercises.value != nil {
-                Text("This day's exercises aren't in the exercise library right now.")
-                    .font(StudioFont.body(11))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-        }
-        .studioCard()
-        .task(id: day.exercises.map(\.exerciseId)) {
-            exercises.subscribe(to: "exercises:getMany", with: ["ids": day.exercises.map { $0.exerciseId as ConvexEncodable? }])
-        }
-    }
-
-    private var resolved: [(Exercise, TrainingSessionManager.PlanTarget)] {
-        let byId = Dictionary((exercises.value ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return day.exercises.compactMap { item in
-            byId[item.exerciseId].map { ($0, .init(sets: Int(item.sets), reps: Int(item.reps), restSeconds: item.restSeconds.map { Int($0) })) }
-        }
-    }
-
-    private var canStart: Bool { !resolved.isEmpty }
-
-    private func start() {
-        isStarting = true
-        session.loadPlanDay(planId: plan.id, planName: plan.name, dayIndex: dayIndex, dayName: day.name, exercises: resolved)
-        Task {
-            await session.startWorkout()
-            isStarting = false
-        }
     }
 }
 
@@ -799,7 +665,7 @@ struct WorkoutHistoryView: View {
 
     private var entries: [WorkoutHistory.Entry] {
         WorkoutHistory.merge(workouts: workouts.value ?? [], sessions: sessions.value ?? []) { raw in
-            SombreySportType.byRawValue[raw]?.displayName ?? "Band activity"
+            ActivityCatalog.resolve(activityKey: nil, vendorSportType: raw)?.name ?? "Activity"
         }
     }
 
@@ -877,8 +743,8 @@ struct WorkoutHistoryView: View {
         case .sombrey: return "SOMBREY"
         case .plan: return "PLAN"
         case .manual(let type): return "LOGGED · \(type.uppercased())"
-        case .band: return "BAND · SPORT+"
-        case .appSport: return "APP · SPORT+"
+        case .band: return "BAND ACTIVITY"
+        case .appSport: return "ACTIVITY"
         }
     }
 }
@@ -1064,15 +930,20 @@ private struct HistoryRow: View {
     }
 }
 
-/// Everything Sombrey holds for one Sport+ session — what the band
+/// Everything Sombrey holds for one band-recorded activity — what the band
 /// measured, what it didn't ("Not measured", never a zero), where each
-/// figure came from, and the band's raw timing for verification.
+/// figure came from, and (tucked at the end) the band's raw timing, kept
+/// for verifying the band's clock.
 struct SportSessionDetailView: View {
     let session: SportSessionHistoryDTO
     @Environment(\.dismiss) private var dismiss
 
+    private var activity: SombreyActivity? {
+        ActivityCatalog.resolve(activityKey: session.activityKey, vendorSportType: session.sportType)
+    }
+
     private var sportName: String {
-        session.sportType.flatMap { SombreySportType.byRawValue[$0]?.displayName } ?? "Band activity"
+        activity?.name ?? session.sportType.flatMap { SombreySportType.byRawValue[$0]?.displayName } ?? "Activity"
     }
 
     var body: some View {
@@ -1083,9 +954,11 @@ struct SportSessionDetailView: View {
                         Text(sportName)
                             .font(StudioFont.hero(26, weight: .semibold))
                             .foregroundStyle(StudioColor.ink)
-                        Text([session.activityCategory?.replacingOccurrences(of: "_", with: " ").capitalized, session.sportType.map { "Sport+ \($0)" }].compactMap { $0 }.joined(separator: " · "))
-                            .font(StudioFont.body(12))
-                            .foregroundStyle(StudioColor.inkSoft)
+                        if let group = activity.flatMap({ a in ActivityCatalog.groups.first { $0.id == a.group } }) {
+                            Text(group.name)
+                                .font(StudioFont.body(12))
+                                .foregroundStyle(StudioColor.inkSoft)
+                        }
                         Text(provenance)
                             .font(StudioFont.body(12, weight: .medium))
                             .foregroundStyle(StudioColor.accentInk)
@@ -1098,6 +971,9 @@ struct SportSessionDetailView: View {
                     group("SESSION") {
                         line("Started", Date(timeIntervalSince1970: session.startedAt / 1000).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute().second()))
                         line("Duration", session.durationSeconds.map { TrainingMath.clock(Int($0)) })
+                        if let appActiveSeconds = session.appActiveSeconds {
+                            line("Active time (timed by Sombrey)", TrainingMath.clock(Int(appActiveSeconds)))
+                        }
                     }
                     group("HEART RATE") {
                         line("Lowest", hr(session.lowestHeartRate))
@@ -1115,7 +991,7 @@ struct SportSessionDetailView: View {
                         line("Average altitude", session.averageAltitudeMeters.map { "\(Int($0)) m" })
                         line("Climb / descent", session.climbMeters.map { c in "\(Int(c)) m / \(session.descentMeters.map { "\(Int($0)) m" } ?? "—")" })
                     }
-                    group("SOURCE") {
+                    group("RECORDING DETAILS") {
                         line("Figures from", summarySourceText)
                         line("Band start (raw)", session.bandStartTimeSec.map { String(format: "%.0f", $0) })
                         line("Band duration (raw)", session.bandDurationRaw.map { String(format: "%.0f", $0) })
@@ -1125,7 +1001,7 @@ struct SportSessionDetailView: View {
                 .padding(24)
             }
             .background(StudioColor.env4.ignoresSafeArea())
-            .navigationTitle("Band activity")
+            .navigationTitle("Activity")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -1143,8 +1019,8 @@ struct SportSessionDetailView: View {
 
     private var summarySourceText: String {
         switch session.summarySource {
-        case "band_record": return "The band's own session record"
-        case "live_final_tick": return "The band's last live update (its full record hasn't been imported yet)"
+        case "band_record": return "Your band's full record"
+        case "live_final_tick": return "Your band's last live update (full record not in yet)"
         default: return "—"
         }
     }

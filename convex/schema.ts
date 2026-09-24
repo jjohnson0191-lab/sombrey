@@ -1233,9 +1233,31 @@ export default defineSchema({
     // future) — kept, flagged, never silently "corrected".
     timestampSuspect: v.optional(v.boolean()),
     importedAt: v.optional(v.number()),
+    // Active time as timed by the Sombrey app for an activity started in
+    // the app (wall clock minus pauses) — kept apart from durationSeconds,
+    // which is always the band's own figure.
+    appActiveSeconds: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_bandStart", ["userId", "bandStartTimeSec"]),
+
+  // Activities the user named after Sombrey noticed them ("We noticed
+  // activity" — convex/activityDetection.ts), and prompts they dismissed.
+  // The heart-rate figures are calculated by Sombrey from the band's own
+  // readings inside the window; the activity itself is the user's label.
+  activityLabels: defineTable({
+    userId: v.id("users"),
+    startedAt: v.number(),                 // epoch ms, first elevated band reading
+    endedAt: v.number(),                   // epoch ms, last elevated band reading
+    status: v.union(v.literal("labelled"), v.literal("dismissed")),
+    activityKey: v.optional(v.string()),
+    activityCategory: v.optional(v.string()),
+    vendorSportType: v.optional(v.number()),
+    averageHeartRate: v.optional(v.number()),
+    highestHeartRate: v.optional(v.number()),
+    heartRateSampleCount: v.optional(v.number()),
+    createdAt: v.number(),
+  }).index("by_user_and_startedAt", ["userId", "startedAt"]),
 
   // Per-session detail — heart-rate/speed timelines and, for GPS-tagged sport
   // types, the phone-CoreLocation-derived route (the band has no onboard GPS

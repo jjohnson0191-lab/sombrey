@@ -5,7 +5,7 @@ The consumer app has exactly five primary destinations. Each answers one questio
 | Tab | Question | Owns |
 |---|---|---|
 | **Home** | What is happening with me right now? | Sombrey Score (readiness), live heart rate / band state, today's vitals, activity, sleep, training, a nutrition glance, today's insight |
-| **Train** | What am I doing physically? | Start a session, training plans, manual workout logging, Sombrey workouts, exercise library, workout history, workout days & reminders |
+| **Train** | What am I doing physically? | Two modes. **Training** (structured exercise): start a session, training plans, manual workout logging, Sombrey workouts, exercise library, workout history, workout days & reminders. **Activity** (real-world sports): choose → start → the band records; recent/frequent activities, "Your <activity>" history, "we noticed activity" |
 | **Progress** | How am I changing? | Vitals (full band history), readiness history, sleep, training history, weight, photos (and future strain, recovery and nutrition trends) |
 | **AI** | What should I do? | Sombrey Coach, and **Nutrition** (dashboard, meal logging, food search, targets / AI Macro Calculator, meal times & reminders) |
 | **Settings** | Account & controls | Account, app, privacy & data, legal, support. Developer diagnostics exist only in DEBUG builds. |
@@ -70,6 +70,19 @@ Consumers never see a provider's name. Plans and workouts reference Sombrey ids 
   The import is de-duplicated on the band's raw start time and merged with a matching app-started row (`sportPlusSessions:importBandSessions`; rules in `convex/sportPlusImport.ts`).
 - `activities:listRecent` returns every activity in one normalized shape, with provenance: `band_sport_plus`, `app_sport_plus`, `manual` or `sombrey_workout`. This is what the AI Coach will read.
 - Physical-band validation: `docs/SPORT_PLUS_VALIDATION.md`.
+
+### Training vs Activity (Train tab)
+
+Train separates **Training** (structured exercise: `TrainingSessionManager`, `sombreyWorkouts`) from **Activity** (what the user physically does: `ActivitySessionManager`, `sportPlusSessions`). They are separate state machines and never one "workout" concept.
+
+- **Catalog.** `ActivityCatalog.generated.swift` is generated from `convex/activityTaxonomy.ts` by `scripts/generate-activity-catalog.ts`; `tests/activity` fails when they drift. It has 172 startable activities in 13 browsing groups, and each carries its band mode internally.
+- **Activity-specific experiences** come from one `ActivityProfile` per category rather than one screen per sport. A profile sets the expected metrics (shown as "Not measured" when absent), the optional metrics (shown only when measured), a plain statement of what the band can't measure for that activity, a glyph and a hero tint.
+- **Intelligence foundation** (`convex/activities.ts`):
+  - `usage`: recent and frequent activities.
+  - `history`: "Your Tennis" — averages only over the sessions that measured each value.
+  - `intensityContext`: the five-zone %HRmax scale against the age-predicted max (220 − age), labelled as an estimate everywhere. It is absent without a date of birth.
+  - `pendingDetections` / `labelDetection`: "we noticed activity", from band heart rate. It asks the user rather than classifying, and stores the answer in `activityLabels`.
+- There is no load, Strain or AI interpretation yet. Every record carries activity key, category, duration (with its source), heart-rate response, energy, distance, steps, provenance and timestamps, ready for them.
 
 ## Future metrics: where they will appear
 

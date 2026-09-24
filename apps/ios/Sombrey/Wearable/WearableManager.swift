@@ -351,8 +351,10 @@ final class WearableManager {
     /// — the two-object model the Phase 3 training-architecture spec
     /// calls for (a Sport+ session is not a Sombrey training session).
     /// `TrainingSessionManager` calls this, not the other way around.
-    func startSportSession(type: SombreySportType) async {
-        guard let device = pairedDevice else { return }
+    /// Returns whether the band session and its record both started.
+    @discardableResult
+    func startSportSession(type: SombreySportType) async -> Bool {
+        guard let device = pairedDevice else { return false }
         lastError = nil
         do {
             try await service.startSportSession(device.id, sportType: type.rawValue)
@@ -370,9 +372,21 @@ final class WearableManager {
                     gpsTracker.startTracking()
                 }
             }
+            return true
         } catch {
             lastError = String(describing: error)
+            return false
         }
+    }
+
+    /// Picks a running session back up after the app was relaunched: the
+    /// band is still recording, but this process no longer knew about it.
+    /// Nothing is sent to the band; pause/stop work again afterwards.
+    func adoptSportSession(sportType: Int, convexSessionId: String, startedAt: Date) {
+        guard activeSportSession == nil, let device = pairedDevice else { return }
+        service.adoptSportSession(device.id, sportType: sportType)
+        activeSportSession = ActiveSportSession(sportType: sportType, convexSessionId: convexSessionId, startedAt: startedAt, liveUpdate: nil)
+        subscribeToSportUpdates(deviceId: device.id)
     }
 
     func pauseSportSession() async {
@@ -400,8 +414,11 @@ final class WearableManager {
     /// against that — see the Phase 3 implementation report). Returns the
     /// Convex session id so a caller (`TrainingSessionManager`) can
     /// associate it with a Sombrey workout.
+    /// `appActiveSeconds`: the app's own active time for the session
+    /// (pauses excluded), when the app timed it — stored apart from the
+    /// band's figures.
     @discardableResult
-    func stopSportSession() async -> String? {
+    func stopSportSession(appActiveSeconds: Int? = nil) async -> String? {
         guard let device = pairedDevice, let active = activeSportSession else { return nil }
         sportUpdateTask?.cancel()
         sportUpdateTask = nil
@@ -436,6 +453,9 @@ final class WearableManager {
                 // average. The band's own record supplies real min/avg/max
                 // when it's imported (below).
                 args["steps"] = Double(liveUpdate.steps)
+            }
+            if let appActiveSeconds, appActiveSeconds > 0 {
+                args["appActiveSeconds"] = Double(appActiveSeconds)
             }
             try await ConvexClientProvider.client.mutation("sportPlusSessions:finishSession", with: args)
         } catch {

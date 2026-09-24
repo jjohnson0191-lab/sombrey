@@ -15,12 +15,13 @@ struct AuthenticatedRootView: View {
     @Environment(AppState.self) private var appState
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(TrainingSessionManager.self) private var trainingSession
+    @Environment(ActivitySessionManager.self) private var activitySession
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The bar hides only during a workout's active and completion
-    /// moments — exactly where those screens already hid navigation.
+    /// The bar hides only during a workout's or an activity's live and
+    /// completion moments — exactly where those screens hide navigation.
     private var showsNav: Bool {
-        !(appState.selectedTab == .train && trainingSession.phase != .overview)
+        !(appState.selectedTab == .train && (trainingSession.phase != .overview || activitySession.phase != .idle))
     }
 
     var body: some View {

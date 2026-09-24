@@ -539,7 +539,7 @@ struct HomeScreen: View {
     }
 
     private func sportTypeName(_ rawValue: Int) -> String {
-        SombreySportType.all.first { $0.rawValue == rawValue }?.displayName ?? "Activity"
+        ActivityCatalog.resolve(activityKey: nil, vendorSportType: rawValue)?.name ?? "Activity"
     }
 
     private func durationText(seconds: Int) -> String {

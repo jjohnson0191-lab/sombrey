@@ -400,6 +400,10 @@ final class QCBandSDKService: NSObject, QCBandService {
         activeSportType = nil
     }
 
+    func adoptSportSession(_ deviceId: DeviceID, sportType: Int) {
+        activeSportType = sportType
+    }
+
     func sportSessionUpdates(for deviceId: DeviceID) -> AsyncStream<SportSessionLiveUpdate> {
         AsyncStream { continuation in
             self.sportUpdateContinuation = continuation

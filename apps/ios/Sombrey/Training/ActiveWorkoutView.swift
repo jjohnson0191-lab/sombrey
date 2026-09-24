@@ -372,7 +372,7 @@ private struct LiveSignalLine: View {
     @ViewBuilder
     private func bandActivity(at now: Date) -> some View {
         if let sport = wearableManager.activeSportSession {
-            let name = SombreySportType.byRawValue[sport.sportType]?.displayName ?? "Activity"
+            let name = ActivityCatalog.resolve(activityKey: nil, vendorSportType: sport.sportType)?.name ?? "Activity"
             let connected = wearableManager.displayState == .connected || wearableManager.displayState == .syncing
             let fresh = sport.liveUpdateAt.map { now.timeIntervalSince($0) < 60 } ?? false
             VStack(alignment: .trailing, spacing: 1) {

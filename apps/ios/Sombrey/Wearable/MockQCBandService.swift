@@ -82,6 +82,8 @@ final class MockQCBandService: QCBandService {
 
     func stopSportSession(_ deviceId: DeviceID) async throws {}
 
+    func adoptSportSession(_ deviceId: DeviceID, sportType: Int) {}
+
     func sportSessionUpdates(for deviceId: DeviceID) -> AsyncStream<SportSessionLiveUpdate> {
         AsyncStream { continuation in continuation.finish() }
     }

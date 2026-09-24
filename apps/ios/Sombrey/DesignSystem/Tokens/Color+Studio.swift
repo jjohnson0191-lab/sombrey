@@ -38,6 +38,14 @@ enum StudioColor {
     static let training = Color(hex: 0x4C7A9E)
     static let nutrition = Color(hex: 0x7C8F5F)
     static let danger = Color(hex: 0x9C4A3A)
+
+    // MARK: Activity character — the low-opacity backlight inside an
+    // activity's hero bezel only (see `ActivityCharacter`): where the
+    // activity happens, never a surface fill or a text color.
+    static let activityCourt = Color(hex: 0xB0654A)
+    static let activityRoad = Color(hex: 0x56687A)
+    static let activityTrail = Color(hex: 0x6F7E5A)
+    static let activityWater = Color(hex: 0x3F6F80)
 }
 
 extension Color {

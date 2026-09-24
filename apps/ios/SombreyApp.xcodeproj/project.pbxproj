@@ -82,7 +82,6 @@
 		0000000000000000000000D5 /* BandPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000D4 /* BandPairingView.swift */; };
 		0000000000000000000000D7 /* Phase3TrainingArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000D6 /* Phase3TrainingArchitectureTests.swift */; };
 		0000000000000000000000D9 /* WearableBandSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000D8 /* WearableBandSection.swift */; };
-		0000000000000000000000DB /* SportTypePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DA /* SportTypePickerView.swift */; };
 		0000000000000000000000DD /* ReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000DC /* ReadinessTests.swift */; };
 		0000000000000000000000E9 /* NotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000EA /* NotificationTests.swift */; };
 		0000000000000000000000F4 /* VitalsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F5 /* VitalsTests.swift */; };
@@ -101,6 +100,13 @@
 		0000000000000000000000E3 /* NotificationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E2 /* NotificationSettingsView.swift */; };
 		0000000000000000000000E5 /* MealScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E4 /* MealScheduleView.swift */; };
 		0000000000000000000000E7 /* WorkoutScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E6 /* WorkoutScheduleView.swift */; };
+		000000000000000000000112 /* ActivityCatalog.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000111 /* ActivityCatalog.generated.swift */; };
+		000000000000000000000114 /* ActivityModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000113 /* ActivityModel.swift */; };
+		000000000000000000000116 /* ActivitySessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000115 /* ActivitySessionManager.swift */; };
+		000000000000000000000118 /* TrainComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000117 /* TrainComponents.swift */; };
+		00000000000000000000011A /* ActivityModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000119 /* ActivityModeView.swift */; };
+		00000000000000000000011C /* ActivitySessionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000011B /* ActivitySessionViews.swift */; };
+		00000000000000000000011E /* ActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000011D /* ActivityTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -198,7 +204,6 @@
 		0000000000000000000000D4 /* BandPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BandPairingView.swift"; sourceTree = "<group>"; };
 		0000000000000000000000D6 /* Phase3TrainingArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Phase3TrainingArchitectureTests.swift"; sourceTree = "<group>"; };
 		0000000000000000000000D8 /* WearableBandSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableBandSection.swift"; sourceTree = "<group>"; };
-		0000000000000000000000DA /* SportTypePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SportTypePickerView.swift"; sourceTree = "<group>"; };
 		0000000000000000000000DE /* NotificationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NotificationModels.swift"; sourceTree = "<group>"; };
 		0000000000000000000000E0 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NotificationManager.swift"; sourceTree = "<group>"; };
 		0000000000000000000000E2 /* NotificationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NotificationSettingsView.swift"; sourceTree = "<group>"; };
@@ -217,6 +222,13 @@
 		00000000000000000000010A /* SleepTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SleepTimeline.swift"; sourceTree = "<group>"; };
 		00000000000000000000010C /* SombreyBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyBrand.swift"; sourceTree = "<group>"; };
 		0000000000000000000000F1 /* WearableDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WearableDiagnosticsView.swift"; sourceTree = "<group>"; };
+		000000000000000000000111 /* ActivityCatalog.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityCatalog.generated.swift"; sourceTree = "<group>"; };
+		000000000000000000000113 /* ActivityModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityModel.swift"; sourceTree = "<group>"; };
+		000000000000000000000115 /* ActivitySessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivitySessionManager.swift"; sourceTree = "<group>"; };
+		000000000000000000000117 /* TrainComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainComponents.swift"; sourceTree = "<group>"; };
+		000000000000000000000119 /* ActivityModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityModeView.swift"; sourceTree = "<group>"; };
+		00000000000000000000011B /* ActivitySessionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivitySessionViews.swift"; sourceTree = "<group>"; };
+		00000000000000000000011D /* ActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityTests.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -476,10 +488,24 @@
 			00000000000000000000002A /* TrainOverviewView.swift */,
 			00000000000000000000002B /* ActiveWorkoutView.swift */,
 			00000000000000000000002C /* TrainCompleteView.swift */,
-			0000000000000000000000DA /* SportTypePickerView.swift */
+			000000000000000000000110 /* Activity */
 			);
 			name = "Training";
 			path = "Training";
+			sourceTree = "<group>";
+		};
+		000000000000000000000110 /* Activity */ = {
+			isa = PBXGroup;
+			children = (
+			000000000000000000000111 /* ActivityCatalog.generated.swift */,
+			000000000000000000000113 /* ActivityModel.swift */,
+			000000000000000000000115 /* ActivitySessionManager.swift */,
+			000000000000000000000117 /* TrainComponents.swift */,
+			000000000000000000000119 /* ActivityModeView.swift */,
+			00000000000000000000011B /* ActivitySessionViews.swift */,
+			);
+			name = "Activity";
+			path = "Activity";
 			sourceTree = "<group>";
 		};
 		000000000000000000000090 /* Progress */ = {
@@ -558,7 +584,8 @@
 			0000000000000000000000D6 /* Phase3TrainingArchitectureTests.swift */,
 			0000000000000000000000DC /* ReadinessTests.swift */,
 			0000000000000000000000EA /* NotificationTests.swift */,
-			0000000000000000000000F5 /* VitalsTests.swift */
+			0000000000000000000000F5 /* VitalsTests.swift */,
+			00000000000000000000011D /* ActivityTests.swift */
 			);
 			name = "SombreyAppTests";
 			path = "SombreyAppTests";
@@ -808,6 +835,12 @@
 				000000000000000000000068 /* ChatModels.swift */,
 				000000000000000000000069 /* TrainingSessionManager.swift */,
 				00000000000000000000010F /* TrainHub.swift */,
+				000000000000000000000112 /* ActivityCatalog.generated.swift */,
+				000000000000000000000114 /* ActivityModel.swift */,
+				000000000000000000000116 /* ActivitySessionManager.swift */,
+				000000000000000000000118 /* TrainComponents.swift */,
+				00000000000000000000011A /* ActivityModeView.swift */,
+				00000000000000000000011C /* ActivitySessionViews.swift */,
 				00000000000000000000006A /* TrainOverviewView.swift */,
 				00000000000000000000006B /* ActiveWorkoutView.swift */,
 				00000000000000000000006C /* TrainCompleteView.swift */,
@@ -819,7 +852,6 @@
 				0000000000000000000000D3 /* GPSTracker.swift */,
 				0000000000000000000000D5 /* BandPairingView.swift */,
 				0000000000000000000000D9 /* WearableBandSection.swift */,
-				0000000000000000000000DB /* SportTypePickerView.swift */,
 				0000000000000000000000DF /* NotificationModels.swift */,
 				0000000000000000000000EC /* VitalsScreen.swift */,
 				0000000000000000000000EE /* MetricHistoryChart.swift */,
@@ -851,6 +883,7 @@
 				0000000000000000000000DD /* ReadinessTests.swift */,
 				0000000000000000000000E9 /* NotificationTests.swift */,
 				0000000000000000000000F4 /* VitalsTests.swift */,
+				00000000000000000000011E /* ActivityTests.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -933,7 +966,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -964,7 +997,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -989,7 +1022,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1015,7 +1048,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1037,7 +1070,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1062,7 +1095,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

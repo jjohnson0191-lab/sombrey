@@ -11,6 +11,9 @@ struct SombreyApp: App {
     /// links (each tab's screen is rebuilt on selection — see
     /// `AuthenticatedRootView`), and restored after an app kill.
     @State private var trainingSession = TrainingSessionManager()
+    /// App-level for the same reasons: a physical activity in progress
+    /// (Tennis, a run) survives tab switches and app kills.
+    @State private var activitySession = ActivitySessionManager()
     private var notificationManager: NotificationManager { NotificationManager.shared }
     @Environment(\.scenePhase) private var scenePhase
 
@@ -29,6 +32,7 @@ struct SombreyApp: App {
                 .environment(appState)
                 .environment(wearableManager)
                 .environment(trainingSession)
+                .environment(activitySession)
                 .environment(notificationManager)
                 .onChange(of: scenePhase) { _, newPhase in
                     wearableManager.handleScenePhaseChange(isActive: newPhase == .active)
@@ -39,13 +43,16 @@ struct SombreyApp: App {
                 }
                 .task {
                     trainingSession.restoreIfNeeded()
+                    activitySession.restoreIfNeeded()
                     await notificationManager.reconcileAll()
                     await wearableManager.resumeIfPaired()
+                    activitySession.reattachIfNeeded(wearable: wearableManager)
                 }
                 .onChange(of: appState.authPhase) { _, newPhase in
                     if case .signedOut = newPhase {
                         wearableManager.handleSignOut()
                         trainingSession.reset()
+                        activitySession.reset()
                         notificationManager.cancelAllScheduled()
                     }
                 }

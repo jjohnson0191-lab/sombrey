@@ -168,7 +168,7 @@ struct TrainCompleteView: View {
                 }
             }
             if let sport = session.sportSummary {
-                let name = SombreySportType.byRawValue[sport.sportType]?.displayName ?? "Band activity"
+                let name = ActivityCatalog.resolve(activityKey: nil, vendorSportType: sport.sportType)?.name ?? "Activity"
                 Text("\(name) recorded by the band\(sport.distanceMeters > 0 ? " · \(sport.distanceMeters) m" : "")\(sport.steps > 0 ? " · \(sport.steps) steps" : "")")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.inkFaint)
