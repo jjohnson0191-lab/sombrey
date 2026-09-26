@@ -158,6 +158,7 @@ struct ProgressSeriesChart: View {
         }
         .chartYScale(domain: d)
         .chartXSelection(value: $selectedDate)
+        .primaryNavigationExclusion()
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { _ in
                 AxisValueLabel(format: .dateTime.day().month(.abbreviated)).font(StudioFont.body(9)).foregroundStyle(StudioColor.inkFaint)

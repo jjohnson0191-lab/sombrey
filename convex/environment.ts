@@ -42,6 +42,18 @@ const snapshotFields = {
   uvIndex: v.optional(v.number()),
   precipitationMm: v.optional(v.number()),
   condition: v.optional(v.string()),
+  conditionCode: v.optional(v.string()),
+  isNight: v.optional(v.boolean()),
+  forecast: v.optional(v.array(v.object({
+    date: v.string(),
+    highC: v.number(),
+    lowC: v.number(),
+    condition: v.optional(v.string()),
+    conditionCode: v.optional(v.string()),
+    precipitationMm: v.optional(v.number()),
+    precipitationProbability: v.optional(v.number()),
+    partial: v.optional(v.boolean()),
+  }))),
 };
 
 /** Fetch current weather for the phone's position. Coordinates are rounded,
@@ -96,7 +108,10 @@ export const latest = query({
     const snapshot: EnvironmentSnapshot | null = row ? {
       observedAt: row.observedAt, fetchedAt: row.fetchedAt, timeZone: row.timeZone, locality: row.locality,
       temperatureC: row.temperatureC, feelsLikeC: row.feelsLikeC, humidityPct: row.humidityPct, windMs: row.windMs,
-      uvIndex: row.uvIndex, precipitationMm: row.precipitationMm, condition: row.condition, source: "met_norway",
+      uvIndex: row.uvIndex, precipitationMm: row.precipitationMm, condition: row.condition,
+      conditionCode: row.conditionCode as EnvironmentSnapshot["conditionCode"], isNight: row.isNight,
+      forecast: row.forecast?.map((f) => ({ ...f, conditionCode: f.conditionCode as EnvironmentSnapshot["conditionCode"] })),
+      source: "met_norway",
     } : null;
     const state = environmentState(snapshot, Date.now(), args.locationDenied ?? false, args.timeZone);
     return { ...state, refreshAfterMs: WEATHER_REFRESH_MS, attribution: "Weather data: MET Norway (CC BY 4.0)" };
@@ -115,7 +130,8 @@ export const captureForSession = mutation({
     if (!current || Date.now() - current.fetchedAt > 2 * 60 * 60 * 1000) return { captured: false };
     const existing = await ctx.db.query("environmentSnapshots")
       .withIndex("by_user_and_session", (q) => q.eq("userId", user._id).eq("sessionId", args.sessionId)).first();
-    const { _id, _creationTime, ...fields } = current;
+    // The conditions at the session — not the forecast.
+    const { _id, _creationTime, forecast: _forecast, ...fields } = current;
     const row = { ...fields, kind: "session" as const, sessionKind: args.sessionKind, sessionId: args.sessionId };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert("environmentSnapshots", row);

@@ -27,7 +27,7 @@ export type IntelligenceContext = {
   timeZone: string;
   localDate: string;
   currentDay: {
-    sessions: { name: string; kind: string; minutes: number; loadBasis: string; confidence: string }[];
+    sessions: { name: string; kind: string; minutes: number; loadBasis: string; confidence: string; rpe?: number }[];
     activeMinutes: number;
     loadConfidence: string;
     strainState: string;
@@ -80,11 +80,12 @@ export function buildIntelligenceContext(p: {
         minutes: Math.round(l.minutes),
         loadBasis: [l.aerobicBasis === "cardio" ? "heart rate" : l.aerobicBasis === "activity" ? "activity type (no usable heart rate)" : undefined, (l.resistance?.completedSets ?? 0) > 0 ? `${l.resistance!.completedSets} sets` : undefined].filter(Boolean).join(" + ") || "duration only",
         confidence: l.confidence,
+        rpe: l.rpe,
       })),
       activeMinutes: i.today.activeMinutes,
       loadConfidence: i.today.confidence,
       strainState: i.strain.state,
-      strainValueShown: i.strain.approved && i.strain.value !== undefined ? i.strain.value : false,
+      strainValueShown: i.strain.value !== undefined ? i.strain.value : false,
       loadUnits: i.today.load,
       components: { cardio: i.today.components.cardio, resistance: i.today.components.resistance, activity: i.today.components.activity },
       relativeToBaseline: ref ? Math.round((i.today.load / ref) * 100) / 100 : undefined,
@@ -112,7 +113,8 @@ export function buildIntelligenceContext(p: {
       baseline: `${i.baseline.status} — ${i.baseline.historyDays} days of history, ${i.baseline.activeDays} active days, ${i.baseline.qualitySessions} good-quality sessions`,
     },
     rules: [
-      "Sombrey Strain is not validated yet: no strain number exists for the user. Do not estimate one, and do not base recommendations on strain or load scores.",
+      "Sombrey Strain v1 is shown to the user but NOT yet validated on their band. Quote it with that caveat; never estimate a Strain yourself, and do not base recommendations on Strain alone.",
+      "RPE (1–10) is the user's own report of how hard a session felt — a separate signal from measured load. Compare them descriptively; Sombrey has not learned a relationship between them.",
       "Weather is context only — it never changes load or strain.",
       "Relationships are patterns in this user's own history; say 'tended to', never 'causes'.",
       "Readiness and Strain are separate scores and are never combined: Strain = today's physical load; Readiness = sleep, cardiovascular recovery, recent load context and physiological signals. Interpret them together; do not merge them.",
@@ -124,8 +126,8 @@ export function buildIntelligenceContext(p: {
 export function renderIntelligenceContext(c: IntelligenceContext): string[] {
   const lines = [`Sombrey intelligence (local day ${c.localDate}, time zone ${c.timeZone}):`];
   const d = c.currentDay;
-  lines.push(`- Today: ${d.sessions.length} session${d.sessions.length === 1 ? "" : "s"}, ${d.activeMinutes} active min; data confidence ${d.loadConfidence.replace(/_/g, " ").toLowerCase()}; strain state ${d.strainState.replace(/_/g, " ").toLowerCase()} (no strain number shown).`);
-  for (const s of d.sessions) lines.push(`  · ${s.name} (${s.kind}) ${s.minutes} min — load from ${s.loadBasis}; ${s.confidence.replace(/_/g, " ").toLowerCase()}`);
+  lines.push(`- Today: ${d.sessions.length} session${d.sessions.length === 1 ? "" : "s"}, ${d.activeMinutes} active min; data confidence ${d.loadConfidence.replace(/_/g, " ").toLowerCase()}; strain ${d.strainValueShown !== false ? `${d.strainValueShown}/100 (v1, not yet validated)` : `state ${d.strainState.replace(/_/g, " ").toLowerCase()}`}.`);
+  for (const s of d.sessions) lines.push(`  · ${s.name} (${s.kind}) ${s.minutes} min — load from ${s.loadBasis}; ${s.confidence.replace(/_/g, " ").toLowerCase()}${s.rpe !== undefined ? `; felt ${s.rpe}/10 (user-reported RPE)` : ""}`);
   lines.push(`  · Load today: ${d.loadUnits} units (cardio ${d.components.cardio}, resistance ${d.components.resistance}, activity ${d.components.activity})${d.relativeToBaseline !== undefined ? ` = ${d.relativeToBaseline}× your typical training day` : " — no personal baseline yet"}`);
   if (c.yesterday) {
     const y = c.yesterday;

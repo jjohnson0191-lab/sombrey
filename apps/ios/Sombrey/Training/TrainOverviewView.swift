@@ -33,6 +33,11 @@ struct TrainOverviewView: View {
                 TrainModePills(selection: mode)
                     .studioReveal(index: 1)
 
+                // A session the band recorded (or Sombrey noticed) that you
+                // haven't rated yet — one at a time.
+                PendingRPECard()
+                    .studioReveal(index: 1)
+
                 Group {
                     switch mode.wrappedValue {
                     case .training:

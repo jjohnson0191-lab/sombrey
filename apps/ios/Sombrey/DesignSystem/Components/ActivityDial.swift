@@ -203,6 +203,7 @@ struct ActivityDialInstrument: View {
         }
         .frame(width: dialSize, height: dialSize)
         .gesture(isExpanded ? scrub : nil)
+        .primaryNavigationExclusion()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(steps.map { "\(Int($0.value)) steps today" } ?? "No steps recorded today")
     }

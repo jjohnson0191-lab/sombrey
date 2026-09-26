@@ -10,8 +10,8 @@ import ConvexMobile
 /// Everything is derived from the user's recorded history on the server
 /// (`progress:overview` / `progress:performance`, convex/progress/*); a
 /// section with too little data says so rather than inventing a value.
-/// Daily Strain has no validated formula yet — the hero says so and shows
-/// only measured load.
+/// Daily Strain (v1) is shown with its state and marked "not yet validated"
+/// until the band passes physical validation.
 struct ProgressScreen: View {
     @Environment(AppState.self) private var appState
     @State private var overview = ConvexQuery<ProgressOverviewDTO>()
@@ -49,6 +49,7 @@ struct ProgressScreen: View {
     private var content: some View {
         if let o = overview.value {
             StrainHero(overview: o).studioReveal(index: 1)
+            StrainHistorySection(overview: o).studioReveal(index: 1)
             BodySection(summary: o.body, baseline: $bodyBaseline, photoCount: photos.value?.count ?? 0).studioReveal(index: 2)
             PerformanceSection().studioReveal(index: 3)
             YouVsYouSection(insights: o.insights).studioReveal(index: 4)

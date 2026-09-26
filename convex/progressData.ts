@@ -40,6 +40,7 @@ function workoutSession(w: Doc<"sombreyWorkouts">): ProgressSession | null {
     movementSource: w.distanceMeters !== undefined ? "manual" : undefined,
     fromPlan: w.source === "plan",
     bandSessionId: w.sportPlusSessionId,
+    rpe: w.rpe,
   };
 }
 
@@ -100,8 +101,8 @@ export async function loadProgressData(ctx: QueryCtx, userId: Id<"users">, nowMs
   const sessions: ProgressSession[] = [
     ...workouts.map(workoutSession).filter((s): s is ProgressSession => s !== null),
     // A band session that belongs to a workout is that workout — counted once.
-    ...sportRows.filter((s) => !attached.has(s._id)).map(sessionRecord).filter((r): r is ActivityRecord => r !== null).map(activitySession),
-    ...labels.map(labelledRecord).filter((r): r is ActivityRecord => r !== null).map(activitySession),
+    ...sportRows.filter((s) => !attached.has(s._id)).map((s) => ({ s, r: sessionRecord(s) })).filter((x) => x.r !== null).map((x) => ({ ...activitySession(x.r!), rpe: x.s.rpe })),
+    ...labels.map((l) => ({ l, r: labelledRecord(l) })).filter((x) => x.r !== null).map((x) => ({ ...activitySession(x.r!), rpe: x.l.rpe })),
   ].sort((a, b) => a.startedAt - b.startedAt);
 
   const names = new Map<string, string>();

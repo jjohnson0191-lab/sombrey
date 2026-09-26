@@ -108,6 +108,8 @@
 	     location — the band has no onboard GPS chip (see GPSTracker.swift
 	     and the Phase 3 wearable audit). When-in-use only; never requests
 	     Always. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Sombrey uses the camera only when you choose to take a new profile photo.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Sombrey uses your location to record the route during outdoor GPS workouts like running and cycling, and your approximate location to show local weather. Coordinates are never stored.</string>
 </dict>

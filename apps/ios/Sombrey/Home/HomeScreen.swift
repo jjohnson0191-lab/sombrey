@@ -36,6 +36,7 @@ struct HomeScreen: View {
     @State private var workouts = ConvexQuery<[SombreyWorkoutSummaryDTO]>()
     @State private var nutritionProgress = ConvexQuery<NutritionProgress>()
     @State private var todayHeartRate = ConvexQuery<[WearableMeasurementDTO]>()
+    @State private var strain = ConvexQuery<TodayStrainDTO>()
 
     var body: some View {
         @Bindable var appState = appState
@@ -48,6 +49,13 @@ struct HomeScreen: View {
                 readinessHero
                     .padding(.top, 22)
                     .studioReveal(index: 1)
+
+                // Daily Strain — the load companion to the Sombrey Score.
+                StrainInstrument(strain: strain.value, isLoading: strain.isLoading) {
+                    appState.selectedTab = .progress
+                }
+                .padding(.top, 12)
+                .studioReveal(index: 1)
 
                 if let error = appState.userLoadError {
                     Text("Couldn't load your account: \(error)")
@@ -109,6 +117,7 @@ struct HomeScreen: View {
         }
         .task {
             readiness.subscribe(to: "readiness:getLatest")
+            strain.subscribe(to: "intelligence:todayStrain", with: ["timeZone": TimeZone.current.identifier])
             sleep.subscribe(to: "wearable:getRecentSleepSessions")
             sportSessions.subscribe(to: "sportPlusSessions:getRecentSessions")
             workouts.subscribe(to: "sombreyWorkouts:listHistory")
@@ -126,15 +135,27 @@ struct HomeScreen: View {
     /// understated greeting. Real device time only (see `HomeClock`).
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center) {
+            HStack(alignment: .center, spacing: 10) {
                 SombreyWordmark(score: currentScore)
                 Spacer()
                 WearableStatusBadge(
                     state: wearableManager.displayState,
                     batteryPct: wearableManager.status?.batteryPct
                 )
+                // Your face on your instrument — tap to manage it in Settings.
+                Button { appState.selectedTab = .settings } label: {
+                    ProfileAvatar(url: appState.currentUser?.avatarUrl, name: appState.currentUser?.name, size: 36)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens your profile in Settings")
+                .accessibilityIdentifier("home.profileAvatar")
             }
-            HomeClock(firstName: firstName)
+            VStack(alignment: .leading, spacing: 2) {
+                HomeClock(firstName: firstName)
+                WeatherContextView()
+            }
         }
     }
 
@@ -652,8 +673,6 @@ struct HomeScreen: View {
 private struct HomeClock: View {
     let firstName: String?
     @State private var timeChange = 0
-    @State private var showWeatherDetail = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var environment: EnvironmentService { EnvironmentService.shared }
 
     var body: some View {
@@ -677,7 +696,6 @@ private struct HomeClock: View {
                 Text("\(part.greeting)\(firstName.map { ", \($0)" } ?? "") · \(context.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.paperSoft)
-                weather
             }
             .id(timeChange)
         }
@@ -688,31 +706,4 @@ private struct HomeClock: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Ambient weather — context only, one quiet line; tap for the detail.
-    @ViewBuilder
-    private var weather: some View {
-        if let line = EnvironmentLine.text(environment.latest.value, access: environment.access) {
-            let detail = EnvironmentLine.detail(environment.latest.value)
-            Button {
-                guard detail != nil, environment.access != .denied else { return }
-                withAnimation(StudioMotion.resolve(StudioMotion.unfold, reduceMotion: reduceMotion)) { showWeatherDetail.toggle() }
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(line)
-                        .font(StudioFont.body(12, weight: .medium))
-                        .foregroundStyle(StudioColor.paperFaint)
-                    if showWeatherDetail, let detail, environment.access != .denied {
-                        Text(detail)
-                            .font(StudioFont.body(11))
-                            .foregroundStyle(StudioColor.paperFaint)
-                            .transition(.opacity)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .sensoryFeedback(trigger: showWeatherDetail) { _, open in open ? StudioHaptic.expand : StudioHaptic.collapse }
-            .accessibilityLabel([line, detail].compactMap { $0 }.joined(separator: ". "))
-        }
-    }
 }

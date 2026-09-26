@@ -8,6 +8,7 @@ import SwiftUI
 /// backlight changing state, not a page transition.
 struct EnvironmentView<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.primaryPanelOffset) private var panelOffset
     let scene: StudioScene
     @ViewBuilder var content: Content
 
@@ -18,6 +19,16 @@ struct EnvironmentView<Content: View>: View {
                 .id(scene)
                 .transition(.opacity)
                 .animation(StudioMotion.resolve(StudioMotion.sceneShift, reduceMotion: reduceMotion), value: scene)
+            // The environmental wordmark: behind the content, outside any
+            // scroll view (so it never scrolls), held still against a tab
+            // swipe and clipped to this screen's own panel.
+            if let brand = scene.brandStyle {
+                Color.clear
+                    .overlay { SombreyEnvironmentBranding(style: brand).offset(x: -panelOffset) }
+                    .clipped()
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
             content
         }
     }

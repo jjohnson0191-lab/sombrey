@@ -168,6 +168,7 @@ struct ActivityModeView: View {
                 }
                 .padding(.vertical, 2)
             }
+            .primaryNavigationExclusion()
             .scrollClipDisabled()
         }
     }
@@ -380,6 +381,7 @@ private struct BandRecordCard: View {
                             .frame(minHeight: 44)
                     }
                 }
+            .primaryNavigationExclusion()
                 .scrollClipDisabled()
             } else {
                 Button(action: onOpen) {
@@ -450,6 +452,7 @@ private struct NoticedActivityCard: View {
                         .frame(minHeight: 44)
                 }
             }
+            .primaryNavigationExclusion()
             .scrollClipDisabled()
             Button("Not an activity", action: onDismiss)
                 .font(StudioFont.body(12, weight: .medium))

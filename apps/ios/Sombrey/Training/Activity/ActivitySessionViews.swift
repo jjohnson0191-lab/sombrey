@@ -333,6 +333,9 @@ struct ActivitySummaryView: View {
 
             ActivitySessionBody(activity: activity, readings: r, previous: previous, maxHeartRate: intensity.value?.estimatedMaxHeartRate)
 
+            // The user's own voice beside what the band measured.
+            RPESelector(kind: "band_activity", sessionId: activitySession.sessionId)
+
             VStack(spacing: 10) {
                 Button {
                     activitySession.reset()

@@ -4,7 +4,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { isValidTimeZone, localDayKey } from "./strain/time";
 import { computeReadinessScore, deriveSleepSignal, median, overnightRestingHR, scoreBand, confidenceBand, sleepMidpointAfterNoon, type DailyAggregate, type RecentLoadInput } from "./readiness/scoring";
 import { loadProgressData } from "./progressData";
-import { loadIntelligence, upsertDailyLoadSnapshots } from "./intelligenceData";
+import { loadIntelligence, upsertDailyLoadSnapshots, upsertSessionLoadSnapshots } from "./intelligenceData";
 
 // Sombrey Readiness Score — see `readiness/scoring.ts` for the algorithm
 // itself and its documented scientific basis/limitations. This file only
@@ -154,6 +154,7 @@ export const computeAndStore = mutation({
     // The daily load record for longitudinal validation: every past day in
     // the window, recomputed (so a late import corrects its day), versioned.
     await upsertDailyLoadSnapshots(ctx, user._id, intelligence, now);
+    await upsertSessionLoadSnapshots(ctx, user._id, intelligence, now);
 
     const sleepComponent = result.components.find((c) => c.metric === "sleep");
     const sleepSignal = deriveSleepSignal(sleepComponent);

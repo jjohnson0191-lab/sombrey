@@ -448,6 +448,7 @@ private struct ExerciseStage: View {
                         }
                     }
                 }
+            .primaryNavigationExclusion()
             }
         }
     }

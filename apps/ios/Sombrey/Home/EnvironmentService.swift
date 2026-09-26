@@ -20,6 +20,23 @@ struct EnvironmentDTO: Decodable, Equatable {
         let uvIndex: Double?
         let precipitationMm: Double?
         let condition: String?
+        /// Sombrey's neutral condition code (never a provider symbol).
+        let conditionCode: String?
+        let isNight: Bool?
+        let forecast: [ForecastDay]?
+    }
+    struct ForecastDay: Decodable, Equatable, Identifiable {
+        let date: String
+        let highC: Double
+        let lowC: Double
+        let condition: String?
+        let conditionCode: String?
+        let precipitationMm: Double?
+        /// Only where the provider publishes it.
+        let precipitationProbability: Double?
+        /// Today: high/low cover only the hours still ahead.
+        let partial: Bool?
+        var id: String { date }
     }
     let state: String           // "available" | "stale" | "unavailable"
     let snapshot: Snapshot?

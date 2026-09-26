@@ -206,9 +206,9 @@ test("strain states: NOT_ENOUGH_DATA, BUILDING_BASELINE, LOW_CONFIDENCE, READY",
   const s = strainFor(day("t", 1), ready);
   assert.equal(s.state, "READY");
   assert.equal(s.proposedValue, 50);                    // a typical day ≈ 50
-  assert.equal(STRAIN_FORMULA_APPROVED, false);
-  assert.equal(s.value, undefined);                      // not shown until approved
-  assert.equal(strainFor(day("t", 1), ready, true).value, 50);
+  assert.equal(STRAIN_FORMULA_APPROVED, false);          // not physically validated…
+  assert.equal(s.approved, false);
+  assert.equal(s.value, 50);                             // …but shown (product decision, build 40)
   assert.equal(proposedStrain(2, 1), 75);
   assert.ok(proposedStrain(100, 1) <= 100);
 });

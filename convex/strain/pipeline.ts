@@ -52,6 +52,8 @@ export type IntelligenceInput = {
 export type IntelligenceDays = {
   today: DailyLoadResult;
   todaySessions: SessionLoad[];
+  /** Every counted session in the span with its local day (de-duplicated). */
+  sessionLoads: (SessionLoad & { date: string })[];
   /** Oldest → newest, ending today. */
   days: DailyLoadResult[];
   baseline: Baseline;
@@ -112,6 +114,7 @@ export function computeIntelligence(input: IntelligenceInput): IntelligenceDays 
   return {
     today,
     todaySessions: byDay.get(today.date) ?? [],
+    sessionLoads: loads.map((l) => ({ ...l, date: localDayKey(l.startMs, input.zone) })),
     days,
     baseline,
     strain: strainFor(today, baseline),

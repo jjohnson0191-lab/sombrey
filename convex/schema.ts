@@ -1337,6 +1337,11 @@ export default defineSchema({
     userActivityCategory: v.optional(v.string()),
     // When the user saw (and, if asked, classified) a band-started record.
     reviewedAt: v.optional(v.number()),
+    // The user's rating of how hard this session felt (convex/strain/effort.ts):
+    // a separate measured signal — never a Strain input in strain-1.0.
+    rpe: v.optional(v.number()),
+    rpeRecordedAt: v.optional(v.number()),
+    rpeScale: v.optional(v.string()),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_bandStart", ["userId", "bandStartTimeSec"]),
@@ -1365,6 +1370,33 @@ export default defineSchema({
     computedAt: v.number(),
   }).index("by_user_and_date", ["userId", "date"]),
 
+  // One row per session per methodology version: what the pipeline measured
+  // for that session beside what the user reported (RPE), so a future Strain
+  // calibration can compare physiological, external and perceived load
+  // without rebuilding the data. Rewritten on recompute, never appended.
+  sessionLoadSnapshots: defineTable({
+    userId: v.id("users"),
+    sessionId: v.string(),
+    sessionKind: v.string(),               // workout | activity
+    origin: v.string(),
+    date: v.string(),
+    category: v.optional(v.string()),
+    minutes: v.number(),
+    strainVersion: v.string(),
+    aerobicBasis: v.string(),              // cardio | activity | none
+    cardioLoad: v.optional(v.number()),    // zone-weighted minutes
+    minutesByZone: v.optional(v.array(v.number())),
+    hrCoverage: v.optional(v.number()),
+    activityMetMinutes: v.optional(v.number()),
+    resistanceSetEquivalents: v.optional(v.number()),
+    volumeLoadKg: v.optional(v.number()),
+    confidence: v.string(),
+    rpe: v.optional(v.number()),
+    sessionRpeLoad: v.optional(v.number()), // RPE × minutes (context only)
+    computedAt: v.number(),
+  }).index("by_user_and_date", ["userId", "date"])
+    .index("by_user_and_session", ["userId", "sessionId"]),
+
   // Weather context (convex/environment.ts). NEVER coordinates: the app's
   // position is rounded to ~1 km only to ask the provider, then discarded.
   // One "current" row per user (upserted), plus one row per finished
@@ -1386,6 +1418,19 @@ export default defineSchema({
     uvIndex: v.optional(v.number()),
     precipitationMm: v.optional(v.number()),
     condition: v.optional(v.string()),
+    conditionCode: v.optional(v.string()),
+    isNight: v.optional(v.boolean()),
+    // Daily forecast in `timeZone` (current row only).
+    forecast: v.optional(v.array(v.object({
+      date: v.string(),
+      highC: v.number(),
+      lowC: v.number(),
+      condition: v.optional(v.string()),
+      conditionCode: v.optional(v.string()),
+      precipitationMm: v.optional(v.number()),
+      precipitationProbability: v.optional(v.number()),
+      partial: v.optional(v.boolean()),
+    }))),
     source: v.literal("met_norway"),
   }).index("by_user_and_kind", ["userId", "kind"])
     .index("by_user_and_session", ["userId", "sessionId"]),
@@ -1405,6 +1450,11 @@ export default defineSchema({
     averageHeartRate: v.optional(v.number()),
     highestHeartRate: v.optional(v.number()),
     heartRateSampleCount: v.optional(v.number()),
+    // The user's rating of how hard this session felt (convex/strain/effort.ts):
+    // a separate measured signal — never a Strain input in strain-1.0.
+    rpe: v.optional(v.number()),
+    rpeRecordedAt: v.optional(v.number()),
+    rpeScale: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_user_and_startedAt", ["userId", "startedAt"]),
 
@@ -1475,6 +1525,11 @@ export default defineSchema({
     highestHeartRate: v.optional(v.number()),
     heartRateSource: v.optional(v.literal("band_record")),
     bandReconciledAt: v.optional(v.number()),
+    // The user's rating of how hard this session felt (convex/strain/effort.ts):
+    // a separate measured signal — never a Strain input in strain-1.0.
+    rpe: v.optional(v.number()),
+    rpeRecordedAt: v.optional(v.number()),
+    rpeScale: v.optional(v.string()),
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_completedAt", ["userId", "completedAt"])

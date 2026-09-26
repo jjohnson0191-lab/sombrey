@@ -247,6 +247,7 @@ private struct Hypnogram: View {
                 }
                 .contentShape(Rectangle())
                 .gesture(expanded ? scrubGesture(plotWidth: plotWidth) : nil)
+                .primaryNavigationExclusion()
             }
             .sensoryFeedback(StudioHaptic.focus, trigger: scrubbedBlock?.id)
             .accessibilityElement(children: .ignore)

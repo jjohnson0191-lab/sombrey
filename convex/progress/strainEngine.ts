@@ -12,7 +12,7 @@
 import { type ProgressSession, type Zone, dayKey, dayKeyDaysAgo, median, minutes } from "./model.ts";
 import type { IntelligenceDays } from "../strain/pipeline.ts";
 import { BASELINE_REQUIREMENTS } from "../strain/baseline.ts";
-import { STRAIN_FORMULA_APPROVED, STRAIN_FORMULA_VERSION } from "../strain/strainScore.ts";
+import { STRAIN_FORMULA_APPROVED, STRAIN_FORMULA_VERSION, relativeLabel, strainBand } from "../strain/strainScore.ts";
 import { SIGNALS } from "../strain/signals.ts";
 
 /** What the band and Sombrey provide today, for the strain audit (from the
@@ -66,6 +66,17 @@ export type StrainIntelligence = {
     trend?: string;
   };
   strainVersion: string;
+  validated: boolean;
+  /** Today's Strain value when displayable (band/label are presentation). */
+  value?: number;
+  band?: string;
+  relative?: number;
+  relativeLabel?: string;
+  /** The last 28 days + today, oldest → newest (unknown days carry no value). */
+  series: { date: string; status: string; load: number; relative?: number; strain?: number; state: string }[];
+  windows: { id: "d3" | "d7" | "d14" | "d28"; days: number; knownDays: number; unknownDays: number; activeDays: number; highLoadDays: number; total: number; relativeToBaseline?: number; averageStrain?: number }[];
+  reference?: number;
+  monotony7?: number;
 };
 
 /** A day's measured load — facts, not a score. */
@@ -113,8 +124,22 @@ export type StrainDay = {
   week: DailyLoad[];
 };
 
+const round2 = (x: number) => Math.round(x * 100) / 100;
+
 function describeIntelligence(i: IntelligenceDays): StrainIntelligence {
   const r = BASELINE_REQUIREMENTS;
+  const ref = i.baseline.reference;
+  const series = i.days.slice(-29).map((d, k, arr) => {
+    const idx = i.days.length - arr.length + k;
+    const status = i.loadDays[idx].status;
+    const st = i.strainByDay[idx];
+    return {
+      date: d.date, status, load: d.load,
+      relative: ref && status !== "no_data" ? round2(d.load / ref) : undefined,
+      strain: status === "no_data" ? undefined : st.value,
+      state: st.state,
+    };
+  });
   return {
     state: i.strain.state,
     confidence: i.today.confidence,
@@ -139,6 +164,20 @@ function describeIntelligence(i: IntelligenceDays): StrainIntelligence {
       trend: i.rolling.trend,
     },
     strainVersion: i.strain.version,
+    validated: i.strain.approved,
+    value: i.strain.value,
+    band: i.strain.value !== undefined ? strainBand(i.strain.value) : undefined,
+    relative: ref ? round2(i.today.load / ref) : undefined,
+    relativeLabel: ref && i.today.sessions > 0 ? relativeLabel(i.today.load / ref) : undefined,
+    series,
+    windows: (["d3", "d7", "d14", "d28"] as const).map((id) => {
+      const w = i.rolling.windows[id];
+      const n = w.days;
+      const known = series.slice(-(n + 1), -1).filter((d) => d.strain !== undefined).map((d) => d.strain!);
+      return { id, days: n, knownDays: w.knownDays, unknownDays: w.unknownDays, activeDays: w.activeDays, highLoadDays: w.highLoadDays, total: w.total, relativeToBaseline: w.relativeToBaseline, averageStrain: known.length ? Math.round(known.reduce((a, b) => a + b, 0) / known.length) : undefined };
+    }),
+    reference: ref,
+    monotony7: i.rolling.monotony7,
   };
 }
 
@@ -184,7 +223,7 @@ export function strainDay(sessions: ProgressSession[], nowMs: number, zone: Zone
   }
   if (usual === undefined && load.sessionCount > 0) context.push("Not enough data to establish your baseline.");
 
-  const approvedValue = intelligence && STRAIN_FORMULA_APPROVED ? intelligence.strain.value : undefined;
+  const approvedValue = intelligence?.strain.value;
   return {
     date: today,
     load,

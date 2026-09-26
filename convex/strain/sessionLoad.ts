@@ -33,6 +33,9 @@ export type SessionInput = {
   sets: ResistanceSet[];
   timestampSuspect?: boolean;
   durationSource?: string;
+  /** User-reported effort (1–10). Carried for context and calibration only;
+   * strain-1.0 never uses it. */
+  rpe?: number;
 };
 
 export type SessionLoad = {
@@ -50,6 +53,7 @@ export type SessionLoad = {
   aerobicBasis: "cardio" | "activity" | "none";
   confidence: Confidence;
   caloriesContext?: number;
+  rpe?: number;
   trimmed: boolean;
 };
 
@@ -108,7 +112,7 @@ export function sessionLoad(s: SessionInput & { trimmed?: boolean }, profile: He
   return {
     id: s.id, kind: s.kind, origin: s.origin, category: s.category, startMs: s.startMs, endMs: s.endMs, minutes,
     cardio, resistance, activity: aerobicBasis === "activity" ? activity : undefined, aerobicBasis,
-    confidence, caloriesContext: s.calories, trimmed: s.trimmed ?? false,
+    confidence, caloriesContext: s.calories, rpe: s.rpe, trimmed: s.trimmed ?? false,
   };
 }
 

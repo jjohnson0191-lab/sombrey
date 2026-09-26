@@ -84,7 +84,7 @@ test("no relationship claimed below 28 pairs, when weak, or when not significant
 
 // ── AI context ────────────────────────────────────────────────────────────
 
-test("the AI context is structured, carries its basis, and gives no strain number", () => {
+test("the AI context is structured and carries its basis (no Strain before a baseline)", () => {
   const profile = heartRateProfile({ restingReadings: [60], age: 30, observedPeaks: [] });
   const intelligence = computeIntelligence({
     sessions: [{ id: "a", kind: "activity", origin: "band_activity", category: "running", startMs: NOW - 3600_000, endMs: NOW - 1800_000, samples: [], seriesTimingVerified: true, sets: [] }],
@@ -97,13 +97,14 @@ test("the AI context is structured, carries its basis, and gives no strain numbe
     environment: environmentState(parseLocationforecast(forecast, NOW, "Asia/Colombo", "Colombo"), NOW, false),
     body: { weightKg: 80, source: "manual" }, records: [], insights: [],
   });
-  assert.equal(ctx.currentDay.strainValueShown, false);
+  assert.equal(ctx.currentDay.strainValueShown, false);    // cold start: no baseline, so no value
   assert.equal(ctx.currentDay.sessions[0].loadBasis, "activity type (no usable heart rate)");
   assert.equal(ctx.recovery.readinessToday, 71);
   for (const k of ["currentDay", "recentHistory", "recovery", "training", "environment", "body", "performance"]) assert.ok(k in ctx);
   const text = renderIntelligenceContext(ctx).join("\n");
   assert.match(text, /time zone Asia\/Colombo/);
-  assert.match(text, /no strain number shown/);
+  assert.match(text, /strain state building baseline/);
+  assert.match(text, /NOT yet validated/);
   assert.match(text, /Colombo, 28°C/);
   assert.match(text, /context only/);
   assert.match(text, /estimated from age, Tanaka/);

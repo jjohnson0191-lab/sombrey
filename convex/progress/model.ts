@@ -46,6 +46,8 @@ export type ProgressSession = {
   bandSessionId?: string;
   /** The band record's timing couldn't be real (strain/time.ts). */
   timestampSuspect?: boolean;
+  /** How hard the user said it felt (1–10) — their report, not a measurement of load. */
+  rpe?: number;
 };
 
 export type ProgressSet = {

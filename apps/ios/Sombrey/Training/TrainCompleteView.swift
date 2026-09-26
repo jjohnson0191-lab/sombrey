@@ -86,6 +86,10 @@ struct TrainCompleteView: View {
                         .studioReveal(index: 3)
                 }
 
+                // The user's own voice beside what the band measured.
+                RPESelector(kind: "workout", sessionId: session.completionSaved ? session.convexWorkoutId : nil)
+                    .studioReveal(index: 4)
+
                 Button {
                     // Only clear the workout once the server has it; an
                     // unsaved workout stays on this phone and keeps

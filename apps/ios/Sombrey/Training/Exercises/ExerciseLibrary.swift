@@ -309,6 +309,7 @@ struct GlassPillTabs<Value: Hashable>: View {
                 }
                 .padding(.vertical, 2)
             }
+            .primaryNavigationExclusion()
             .scrollClipDisabled()
         }
         .sensoryFeedback(StudioHaptic.focus, trigger: selection)

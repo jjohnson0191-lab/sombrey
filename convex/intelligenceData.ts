@@ -27,6 +27,7 @@ import type { HRSample } from "./strain/cardiovascularLoad";
 import { type Zone, localDayKey, localDayKeyDaysAgo, wallClockToInstant } from "./strain/time";
 import { BASELINE_REQUIREMENTS } from "./strain/baseline";
 import { STRAIN_FORMULA_VERSION } from "./strain/strainScore";
+import { sessionRpeLoad } from "./strain/effort";
 
 const PER_SESSION_READS = 1500;
 const TOTAL_READS = 6000;
@@ -113,6 +114,7 @@ export async function loadIntelligence(ctx: QueryCtx, userId: Id<"users">, data:
       sets: s.kind === "workout" ? data.sets.filter((x) => x.workoutId === s.id).map((x) => ({ exerciseId: x.exerciseId, reps: x.reps, weightKg: x.weightKg })) : [],
       timestampSuspect: s.timestampSuspect,
       durationSource: s.durationSource,
+      rpe: s.rpe,
     });
   }
 
@@ -185,7 +187,11 @@ export async function coachIntelligenceLines(ctx: QueryCtx, user: Doc<"users">, 
   const body = bodySummary(data.weights, "first", nowMs);
   const envRow = await ctx.db.query("environmentSnapshots")
     .withIndex("by_user_and_kind", (q) => q.eq("userId", user._id).eq("kind", "current")).first();
-  const environment = environmentState(envRow ? { ...envRow, source: "met_norway" } : null, nowMs, false, typeof zone === "string" ? zone : undefined);
+  const environment = environmentState(envRow ? {
+    observedAt: envRow.observedAt, fetchedAt: envRow.fetchedAt, timeZone: envRow.timeZone, locality: envRow.locality,
+    temperatureC: envRow.temperatureC, feelsLikeC: envRow.feelsLikeC, humidityPct: envRow.humidityPct, windMs: envRow.windMs,
+    uvIndex: envRow.uvIndex, precipitationMm: envRow.precipitationMm, condition: envRow.condition, source: "met_norway",
+  } : null, nowMs, false, typeof zone === "string" ? zone : undefined);
   const records = personalRecords(data.sessions, data.sets, nowMs, activityName).slice(0, 6)
     .map((r) => `${r.subject} — ${r.metric} ${r.display} (${localDayKey(r.date, zone)}, ${r.source})`);
   const insights = youVsYou(data.sessions, data.readiness, data.weights, nowMs, activityName).map((i) => `${i.text} [${i.basis}]`);
@@ -250,6 +256,46 @@ export async function upsertDailyLoadSnapshots(ctx: MutationCtx, userId: Id<"use
       await ctx.db.replace(prev._id, row);
     } else {
       await ctx.db.insert("dailyLoadSnapshots", row);
+    }
+    written++;
+  }
+  return written;
+}
+
+/** One row per counted session: measured load beside the user's RPE, for
+ * future calibration (convex/strain/effort.ts). Idempotent per session. */
+export async function upsertSessionLoadSnapshots(ctx: MutationCtx, userId: Id<"users">, intelligence: Intelligence, nowMs: number): Promise<number> {
+  const first = intelligence.days[0]?.date;
+  if (!first) return 0;
+  const existing = await ctx.db.query("sessionLoadSnapshots")
+    .withIndex("by_user_and_date", (q) => q.eq("userId", userId).gte("date", first)).take(500);
+  const byId = new Map(existing.map((r) => [r.sessionId, r]));
+  const r1 = (x: number | undefined) => (x === undefined ? undefined : Math.round(x * 10) / 10);
+  let written = 0;
+  for (const l of intelligence.sessionLoads) {
+    const row = {
+      userId, sessionId: l.id, sessionKind: l.kind, origin: l.origin, date: l.date, category: l.category,
+      minutes: Math.round(l.minutes), strainVersion: STRAIN_FORMULA_VERSION, aerobicBasis: l.aerobicBasis,
+      cardioLoad: l.aerobicBasis === "cardio" ? r1(l.cardio?.load) : undefined,
+      minutesByZone: l.aerobicBasis === "cardio" ? l.cardio?.minutesByZone.map((m) => Math.round(m * 10) / 10) : undefined,
+      hrCoverage: l.cardio ? Math.round(l.cardio.coverage * 100) / 100 : undefined,
+      activityMetMinutes: l.aerobicBasis === "activity" ? r1(l.activity?.load) : undefined,
+      resistanceSetEquivalents: r1(l.resistance?.load),
+      volumeLoadKg: l.resistance?.volumeLoadKg,
+      confidence: l.confidence,
+      rpe: l.rpe,
+      sessionRpeLoad: sessionRpeLoad(l.rpe, l.minutes),
+      computedAt: nowMs,
+    };
+    const prev = byId.get(l.id);
+    if (prev) {
+      const { _id, _creationTime, computedAt: _c, ...old } = prev;
+      const { computedAt: _n, ...next } = row;
+      const clean = (o: object) => JSON.stringify(Object.entries(o).filter(([, v]) => v !== undefined).sort());
+      if (clean(old) === clean(next)) continue;
+      await ctx.db.replace(prev._id, row);
+    } else {
+      await ctx.db.insert("sessionLoadSnapshots", row);
     }
     written++;
   }

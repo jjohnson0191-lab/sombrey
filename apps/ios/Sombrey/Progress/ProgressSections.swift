@@ -67,9 +67,25 @@ struct StrainHero: View {
         switch strain.score.state {
         case "scored":
             if let value = strain.score.value {
-                Text(String(format: "%.1f", value))
-                    .font(StudioFont.hero(56, weight: .bold))
-                    .foregroundStyle(StudioColor.paper)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("\(Int(value.rounded()))")
+                        .font(StudioFont.hero(56, weight: .bold))
+                        .foregroundStyle(StudioColor.paper)
+                        .monospacedDigit()
+                        .studioNumericTransition(value)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let band = strain.intelligence?.band {
+                            Text(band.uppercased())
+                                .font(StudioFont.body(13, weight: .semibold))
+                                .tracking(1.4)
+                                .foregroundStyle(StudioColor.paper)
+                        }
+                        Text([strain.intelligence?.relativeLabel, strain.intelligence?.validated == true ? nil : "Strain v1 · not yet validated"].compactMap { $0 }.joined(separator: " · "))
+                            .font(StudioFont.body(11))
+                            .foregroundStyle(StudioColor.paperFaint)
+                    }
+                }
+                .accessibilityElement(children: .combine)
             }
         default:
             VStack(alignment: .leading, spacing: 3) {
@@ -138,7 +154,7 @@ struct StrainHero: View {
                 Text("How strain will be scored")
                     .font(StudioFont.body(12, weight: .semibold))
                     .foregroundStyle(StudioColor.paper)
-                Text("Sombrey Strain v1 measures each session's load from time in your heart-rate zones (or, without usable heart rate, the activity itself) plus the sets you lift, against your own typical training day. Readiness, calories and weather are never part of it. Your recent load does inform Readiness. The number appears once the band's readings are physically validated.")
+                Text("Sombrey Strain v1 measures each session's load from time in your heart-rate zones (or, without usable heart rate, the activity itself) plus the sets you lift, against your own typical training day. Readiness, calories and weather are never part of it. Your recent load does inform Readiness. About 50 is your typical training day. The formula hasn't yet been validated against your band's physical readings.")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.paperFaint)
                     .fixedSize(horizontal: false, vertical: true)

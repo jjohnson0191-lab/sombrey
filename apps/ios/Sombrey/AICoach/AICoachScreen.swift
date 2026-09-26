@@ -27,7 +27,7 @@ struct AICoachScreen: View {
             VStack(spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Sombrey AI")
-                        .font(StudioFont.hero(28, weight: .semibold))
+                        .font(StudioFont.hero(32, weight: .semibold))
                         .foregroundStyle(StudioColor.ink)
                     Spacer()
                 }
@@ -92,6 +92,7 @@ struct AICoachScreen: View {
     private var inputBar: some View {
         HStack(spacing: 8) {
             TextField("Ask Sombrey…", text: $draft)
+                .primaryNavigationExclusion()
                 .textFieldStyle(.roundedBorder)
             Button {
                 send(draft)

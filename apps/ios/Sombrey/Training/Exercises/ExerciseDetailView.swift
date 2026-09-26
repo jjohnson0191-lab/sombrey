@@ -233,6 +233,7 @@ struct ExerciseDetailView: View {
                     }
                     .padding(.vertical, 4)
                 }
+            .primaryNavigationExclusion()
                 .scrollClipDisabled()
             }
         } else if pending {

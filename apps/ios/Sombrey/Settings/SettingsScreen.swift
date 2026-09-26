@@ -36,16 +36,11 @@ struct SettingsScreen: View {
                     .foregroundStyle(StudioColor.ink)
                     .padding(.top, 20)
 
+                settingsGroup("PROFILE") {
+                    ProfileSection()
+                }
+
                 settingsGroup("ACCOUNT") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(appState.currentUser?.name ?? "—")
-                            .font(StudioFont.body(15, weight: .medium))
-                            .foregroundStyle(StudioColor.ink)
-                        Text(appState.currentUser?.email ?? "—")
-                            .font(StudioFont.body(13))
-                            .foregroundStyle(StudioColor.inkSoft)
-                    }
-                    .padding(.bottom, 6)
                     row("Subscription", detail: "Not available yet") { placeholder = .subscription }
                     WearableBandSection()
                     goalSection

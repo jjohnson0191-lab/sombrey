@@ -298,6 +298,7 @@ struct InstrumentHistoryChart: View {
         .chartYScale(domain: domain)
         .chartXScale(domain: xDomain(pts))
         .chartXSelection(value: $selectedDate)
+        .primaryNavigationExclusion()
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { _ in
                 AxisValueLabel(format: xLabelFormat)

@@ -9,6 +9,8 @@
 // zone, never coordinates. The server rounds coordinates to 2 decimals
 // (~1 km) only to ask the weather provider, then discards them.
 
+import { localDayKey, localParts } from "./time.ts";
+
 export type EnvironmentSnapshot = {
   observedAt: number;        // provider observation time (epoch ms)
   fetchedAt: number;
@@ -21,8 +23,43 @@ export type EnvironmentSnapshot = {
   uvIndex?: number;
   precipitationMm?: number;  // next hour
   condition?: string;        // provider symbol, normalized to a Sombrey phrase
+  /** Neutral condition code (conditionCode()), never a provider symbol. */
+  conditionCode?: ConditionCode;
+  isNight?: boolean;
+  forecast?: ForecastDay[];
   source: "met_norway";
 };
+
+/** Sombrey's own weather vocabulary — the UI maps these to icons; no
+ * provider model reaches SwiftUI. */
+export type ConditionCode = "clear" | "mostly_clear" | "partly_cloudy" | "cloudy" | "fog" | "light_rain" | "rain" | "heavy_rain" | "sleet" | "snow" | "thunder";
+
+export type ForecastDay = {
+  date: string;              // local day (the snapshot's time zone)
+  highC: number;
+  lowC: number;
+  condition?: string;
+  conditionCode?: ConditionCode;
+  precipitationMm?: number;
+  precipitationProbability?: number; // % — only where the provider publishes it
+  /** Today: high/low cover only the hours still ahead ("rest of today"). */
+  partial?: boolean;
+};
+
+export function conditionCode(symbol: string | undefined): ConditionCode | undefined {
+  if (!symbol) return undefined;
+  const base = symbol.replace(/_(day|night|polartwilight)$/, "");
+  if (base === "clearsky") return "clear";
+  if (base === "fair") return "mostly_clear";
+  if (base === "partlycloudy") return "partly_cloudy";
+  if (base === "cloudy") return "cloudy";
+  if (base === "fog") return "fog";
+  if (base.includes("thunder")) return "thunder";
+  if (base.includes("sleet")) return "sleet";
+  if (base.includes("snow")) return "snow";
+  if (base.includes("rain")) return base.includes("heavy") ? "heavy_rain" : base.includes("light") ? "light_rain" : "rain";
+  return undefined;
+}
 
 /** Steadman / Australian BoM apparent temperature (shade), °C. */
 export function apparentTemperature(tempC: number, humidityPct: number, windMs: number): number {
@@ -107,7 +144,55 @@ export function parseLocationforecast(body: any, nowMs: number, timeZone: string
     uvIndex: num(d.ultraviolet_index_clear_sky),
     precipitationMm: num(entry?.data?.next_1_hours?.details?.precipitation_amount),
     condition: conditionPhrase(entry?.data?.next_1_hours?.summary?.symbol_code ?? entry?.data?.next_6_hours?.summary?.symbol_code),
+    conditionCode: conditionCode(entry?.data?.next_1_hours?.summary?.symbol_code ?? entry?.data?.next_6_hours?.summary?.symbol_code),
+    isNight: /_night$/.test(entry?.data?.next_1_hours?.summary?.symbol_code ?? entry?.data?.next_6_hours?.summary?.symbol_code ?? ""),
+    forecast: dailyForecast(series, timeZone, nowMs),
     source: "met_norway",
   };
 }
 
+
+/** Daily forecast in the user's time zone from a Locationforecast timeseries
+ * (hourly for ~2.5 days, then 6-hourly). High/low from air temperature;
+ * condition from the period nearest local noon; precipitation summed once
+ * per period (1 h where given, else 6 h); probability only if published.
+ * Days with fewer than two readings are dropped (not enough to call a
+ * high/low). Up to 7 days, today first. */
+export function dailyForecast(series: any[], timeZone: string, nowMs: number): ForecastDay[] {
+  type Acc = { temps: number[]; noonGap: number; symbol?: string; precip: number; hasPrecip: boolean; prob?: number };
+  const days = new Map<string, Acc>();
+  const today = localDayKey(nowMs, timeZone);
+  for (const e of series) {
+    const t = Date.parse(e?.time);
+    if (!Number.isFinite(t)) continue;
+    const day = localDayKey(t, timeZone);
+    if (day < today) continue;
+    const acc = days.get(day) ?? { temps: [], noonGap: Infinity, precip: 0, hasPrecip: false };
+    const temp = e?.data?.instant?.details?.air_temperature;
+    if (typeof temp === "number") acc.temps.push(temp);
+    const h1 = e?.data?.next_1_hours, h6 = e?.data?.next_6_hours;
+    const symbol = h6?.summary?.symbol_code ?? h1?.summary?.symbol_code;
+    const hour = localParts(t, timeZone).hour;
+    const gap = Math.abs(hour - 12);
+    if (symbol && gap < acc.noonGap) { acc.noonGap = gap; acc.symbol = symbol; }
+    const amount = h1 ? h1.details?.precipitation_amount : h6?.details?.precipitation_amount;
+    if (typeof amount === "number") { acc.precip += amount; acc.hasPrecip = true; }
+    const prob = h1?.details?.probability_of_precipitation ?? h6?.details?.probability_of_precipitation;
+    if (typeof prob === "number") acc.prob = Math.max(acc.prob ?? 0, prob);
+    days.set(day, acc);
+  }
+  return [...days.entries()]
+    .filter(([, a]) => a.temps.length >= 2)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(0, 7)
+    .map(([date, a]) => ({
+      date,
+      highC: Math.round(Math.max(...a.temps)),
+      lowC: Math.round(Math.min(...a.temps)),
+      condition: conditionPhrase(a.symbol),
+      conditionCode: conditionCode(a.symbol),
+      precipitationMm: a.hasPrecip ? Math.round(a.precip * 10) / 10 : undefined,
+      precipitationProbability: a.prob !== undefined ? Math.round(a.prob) : undefined,
+      partial: date === today ? true : undefined,
+    }));
+}

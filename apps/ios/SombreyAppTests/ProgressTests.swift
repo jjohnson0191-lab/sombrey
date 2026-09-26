@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import UIKit
 @testable import SombreyApp
 
 /// Progress on the phone: the server's shapes decode, values format in
@@ -93,5 +94,100 @@ struct ReadinessV1ModelTests {
         let json = #"{"yesterdayStatus":"no_data","knownDays7":4,"activeDays7":3,"highLoadDays7":1,"unknownDays7":3,"consecutiveHighLoadDays":0}"#
         let recent = try JSONDecoder().decode(StrainIntelligenceDTO.Recent.self, from: Data(json.utf8))
         #expect(recent.unknownDays7 == 3)
+    }
+}
+
+/// Cross-product upgrade: Strain on Home, weather, RPE, profile, navigation.
+struct ProductUpgradeTests {
+    private func strain(_ json: String) throws -> TodayStrainDTO {
+        try JSONDecoder().decode(TodayStrainDTO.self, from: Data(json.utf8))
+    }
+    private let baseline = #""baseline":{"status":"building","historyDays":5,"activeDays":3,"qualitySessions":1,"required":{"historyDays":14,"activeDays":6,"qualitySessions":4}}"#
+
+    @Test func strainShowsTheServerValueOnlyWhenItExists() throws {
+        let ready = try strain(#"{"date":"2026-09-26","state":"READY","confidence":"MODERATE_CONFIDENCE","version":"strain-1.0","validated":false,"value":64,"band":"High","relativeLabel":"Above your usual day","sessions":2,"activeMinutes":80,"# + baseline + "}")
+        #expect(StrainPresentation(ready, isLoading: false) == .value(64, band: "High", note: "Above your usual day"))
+        let building = try strain(#"{"date":"2026-09-26","state":"BUILDING_BASELINE","confidence":"LOW_CONFIDENCE","version":"strain-1.0","validated":false,"sessions":1,"activeMinutes":30,"# + baseline + "}")
+        #expect(StrainPresentation(building, isLoading: false) == .message(title: "Building your baseline", detail: "3 of 6 active days · 5 of 14 days of history"))
+        let low = try strain(#"{"date":"2026-09-26","state":"LOW_CONFIDENCE","confidence":"LOW_CONFIDENCE","version":"strain-1.0","validated":false,"value":41,"band":"Moderate","sessions":1,"activeMinutes":30,"# + baseline + "}")
+        #expect(StrainPresentation(low, isLoading: false) == .value(41, band: "Moderate", note: "Limited data today"))
+        #expect(StrainPresentation(nil, isLoading: true) == .loading)
+        #expect(StrainPresentation(nil, isLoading: false) == .unavailable)
+    }
+
+    @Test func notEnoughDataNeverShowsANumber() throws {
+        let none = try strain(#"{"date":"2026-09-26","state":"NOT_ENOUGH_DATA","confidence":"INSUFFICIENT_DATA","version":"strain-1.0","validated":false,"sessions":1,"activeMinutes":10,"# + baseline + "}")
+        if case .value = StrainPresentation(none, isLoading: false) { Issue.record("a number was shown for NOT_ENOUGH_DATA") }
+    }
+
+    @Test @MainActor func weatherWithForecastDecodesAndReadsHonestly() throws {
+        let json = #"{"state":"available","snapshot":{"observedAt":0,"fetchedAt":0,"timeZone":"Asia/Colombo","locality":"Colombo","temperatureC":28,"condition":"Partly cloudy","conditionCode":"partly_cloudy","isNight":false,"forecast":[{"date":"2026-09-26","highC":30,"lowC":27,"conditionCode":"rain","precipitationMm":1.2,"partial":true},{"date":"2026-09-27","highC":31,"lowC":25,"conditionCode":"thunder","precipitationProbability":70}]},"refreshAfterMs":1800000,"attribution":"Weather data: MET Norway (CC BY 4.0)"}"#
+        let env = try JSONDecoder().decode(EnvironmentDTO.self, from: Data(json.utf8))
+        #expect(env.snapshot?.forecast?.count == 2)
+        #expect(env.snapshot?.forecast?.first?.partial == true)
+        #expect(WeatherSymbol.name("partly_cloudy", night: false) == "cloud.sun")
+        #expect(WeatherSymbol.name("thunder", night: false) == "cloud.bolt.rain")
+        #expect(WeatherSymbol.name(nil, night: true) == "cloud")
+        let state = WeatherContextState(dto: env, access: .allowed, isLoading: false, error: nil)
+        #expect(state.canExpand)
+        #expect(state.line.hasPrefix("Colombo · "))
+        let denied = WeatherContextState(dto: env, access: .denied, isLoading: false, error: nil)
+        #expect(!denied.canExpand)
+        #expect(denied.line.hasSuffix("Weather unavailable (location off)"))
+        let failed = WeatherContextState(dto: nil, access: .allowed, isLoading: false, error: "offline")
+        #expect(failed.line.hasSuffix("Weather unavailable right now"))
+    }
+
+    @Test func rpeDecodesAndLabelsInWords() throws {
+        let pending = try JSONDecoder().decode([PendingRPEDTO].self, from: Data(#"[{"kind":"band_activity","sessionId":"s1","name":"Tennis","endedAt":0,"minutes":45}]"#.utf8))
+        #expect(pending.first?.kind == "band_activity")
+        let saved = try JSONDecoder().decode(RPESaveResult.self, from: Data(#"{"ratedOn":"workout","sessionId":"w1","rpe":7}"#.utf8))
+        #expect(saved.ratedOn == "workout")
+        #expect(RPESelector.label(1) == "Very easy")
+        #expect(RPESelector.label(7) == "Hard")
+        #expect(RPESelector.label(10) == "Max effort")
+        #expect(RPESelector.label(11) == nil)
+    }
+
+    @Test func profileUserDecodesWithAndWithoutPhoto() throws {
+        let with = try JSONDecoder().decode(SombreyUser.self, from: Data(#"{"_id":"u","name":"Ada","email":"a@x","coachingMode":null,"avatarUrl":"https://example.com/a.jpg"}"#.utf8))
+        #expect(with.avatarUrl == "https://example.com/a.jpg")
+        let without = try JSONDecoder().decode(SombreyUser.self, from: Data(#"{"_id":"u","name":"Ada"}"#.utf8))
+        #expect(without.avatarUrl == nil)
+    }
+
+    @Test @MainActor func profilePhotoIsResizedToAtMost512() throws {
+        let big = UIGraphicsImageRenderer(size: CGSize(width: 2000, height: 1200)).image { ctx in
+            UIColor.gray.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 2000, height: 1200))
+        }
+        let data = try #require(ProfilePhotoUpload.prepared(big))
+        let out = try #require(UIImage(data: data))
+        #expect(out.size.width <= 512 && out.size.height <= 512)
+        #expect(out.size.width == out.size.height)
+    }
+
+    @Test func pagingDecisionsRespectDirectionAndExclusions() {
+        #expect(PrimaryPager.decide(translation: CGSize(width: -40, height: 5), startsInExcludedRegion: false) == .paging)
+        #expect(PrimaryPager.decide(translation: CGSize(width: -40, height: 5), startsInExcludedRegion: true) == .ignored)
+        #expect(PrimaryPager.decide(translation: CGSize(width: 10, height: 40), startsInExcludedRegion: false) == .ignored)
+        #expect(PrimaryPager.decide(translation: CGSize(width: 30, height: 25), startsInExcludedRegion: false) == .ignored) // ambiguous
+        #expect(PrimaryPager.decide(translation: CGSize(width: 6, height: 2), startsInExcludedRegion: false) == .undecided)
+        #expect(PrimaryPager.neighbour(of: .home, dragWidth: -10) == .train)
+        #expect(PrimaryPager.neighbour(of: .home, dragWidth: 10) == nil)
+        #expect(PrimaryPager.neighbour(of: .settings, dragWidth: -10) == nil)
+        #expect(PrimaryPager.neighbour(of: .progress, dragWidth: 10) == .train)
+        #expect(PrimaryPager.commits(dragWidth: -150, predictedWidth: -160, width: 390, hasNeighbour: true))
+        #expect(!PrimaryPager.commits(dragWidth: -60, predictedWidth: -80, width: 390, hasNeighbour: true))
+        #expect(PrimaryPager.commits(dragWidth: -60, predictedWidth: -300, width: 390, hasNeighbour: true)) // flick
+        #expect(!PrimaryPager.commits(dragWidth: -200, predictedWidth: -200, width: 390, hasNeighbour: false))
+        #expect(PrimaryPager.displayed(dragWidth: 100, hasNeighbour: false) < 30) // resisted at the ends
+    }
+
+    @Test func everyPrimaryScreenCarriesTheBrandExceptFocusedMoments() {
+        #expect(StudioScene.home.brandStyle == .home)
+        #expect(StudioScene.aiCoach.brandStyle?.breathes == true)
+        #expect(StudioScene.settings.brandStyle!.face < StudioScene.home.brandStyle!.face)
+        #expect(StudioScene.trainActive.brandStyle == nil)
+        #expect(SombreyTab.allCases.count == 5)
     }
 }

@@ -81,7 +81,8 @@ test("strain baseline: cold start → BUILDING_BASELINE; established history →
   const r = computeIntelligence({ ...base, sessions: [...steady(28), run("t", daysAgo(0), 45)], wearableDays: allWorn(30) });
   assert.equal(r.baseline.status, "ready");
   assert.equal(r.strain.proposedValue, 50); // today = the typical training day
-  assert.equal(r.strain.value, undefined);   // display-gated until physical validation
+  assert.equal(r.strain.value, 50);          // shown, labelled not yet validated
+  assert.equal(r.strain.approved, false);
 });
 
 // ── Recent history ───────────────────────────────────────────────────────
@@ -224,5 +225,6 @@ test("AI context: today, yesterday, rolling load, baseline, readiness, confidenc
   assert.match(text, /never combined/);
   assert.equal((text.match(/Morning run/g) ?? []).length, 1);
   assert.doesNotMatch(text, /Running \(activity\)/);   // the duplicate band record is not listed
-  assert.equal(ctx.currentDay.strainValueShown, false);
+  assert.equal(ctx.currentDay.strainValueShown, 50);
+  assert.match(text, /strain 50\/100 \(v1, not yet validated\)/);
 });

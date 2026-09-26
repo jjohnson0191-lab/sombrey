@@ -74,6 +74,41 @@ struct StrainIntelligenceDTO: Decodable, Equatable {
     let duplicatesRemoved: Double
     let recent: Recent?
     let strainVersion: String?
+    /// Physically validated (false until the band passes validation).
+    let validated: Bool?
+    /// Today's Strain v1 value when displayable, with presentation labels.
+    let value: Double?
+    let band: String?
+    let relative: Double?
+    let relativeLabel: String?
+    let series: [SeriesDay]?
+    let windows: [Window]?
+    /// The personal reference day, in load units.
+    let reference: Double?
+    let monotony7: Double?
+
+    struct SeriesDay: Decodable, Equatable, Identifiable {
+        let date: String
+        /// measured | incomplete | rest | no_data | in_progress
+        let status: String
+        let load: Double
+        let relative: Double?
+        let strain: Double?
+        let state: String
+        var id: String { date }
+    }
+
+    struct Window: Decodable, Equatable, Identifiable {
+        let id: String            // d3 | d7 | d14 | d28
+        let days: Double
+        let knownDays: Double
+        let unknownDays: Double
+        let activeDays: Double
+        let highLoadDays: Double
+        let total: Double
+        let relativeToBaseline: Double?
+        let averageStrain: Double?
+    }
 
     /// One factual line about the last seven days (measured and rest days
     /// only — a day without band data is said to be unknown, not counted).

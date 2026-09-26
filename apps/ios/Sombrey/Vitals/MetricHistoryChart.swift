@@ -78,6 +78,7 @@ struct MetricHistoryChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 2))
                 }
                 .chartXSelection(value: $selectedDate)
+                .primaryNavigationExclusion()
                 .frame(height: 160)
 
                 if let selected = nearestPoint(to: selectedDate, in: points) {
