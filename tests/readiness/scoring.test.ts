@@ -1,190 +1,233 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  READINESS_V1,
   computeReadinessScore,
+  confidenceBand,
+  confidenceLevel,
+  deriveSleepSignal,
   median,
   medianAbsoluteDeviation,
+  overnightRestingHR,
   scoreBand,
-  confidenceBand,
-  deriveSleepSignal,
+  scoreRecentLoad,
+  sleepMidpointAfterNoon,
   type DailyAggregate,
-  type ComponentResult,
+  type RecentLoadInput,
 } from "../../convex/readiness/scoring.ts";
+import type { LoadDay } from "../../convex/strain/rollingLoad.ts";
+import { rollingLoad } from "../../convex/strain/rollingLoad.ts";
 
-function sleepComponent(overrides: Partial<ComponentResult> = {}): ComponentResult {
-  return { metric: "sleep", weight: 0.35, confidence: 0.8, description: "", included: true, ...overrides };
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+const date = (i: number) => {
+  const d = new Date(Date.UTC(2026, 8, 1 + i));
+  return d.toISOString().slice(0, 10);
+};
+/** n prior nights of steady data, then today (index n). */
+function history(n: number, f: (i: number) => Partial<DailyAggregate> = () => ({ sleepMinutes: 450, sleepMidpoint: 900, restingHeartRate: 55, spo2: 97, skinTemperature: 33.5 })): DailyAggregate[] {
+  return Array.from({ length: n }, (_, i) => ({ date: date(i), ...f(i) }));
 }
+const today = (n: number, over: Partial<DailyAggregate> = {}): DailyAggregate => ({ date: date(n), ...over });
+const loadDays = (loads: (number | null)[]): (LoadDay & { confidence?: string })[] =>
+  loads.map((l, i) => l === null
+    ? { date: date(i), load: 0, status: "no_data" as const }
+    : { date: date(i), load: l, status: l > 0 ? "measured" as const : "rest" as const, confidence: "MODERATE_CONFIDENCE" });
+const recent = (loads: (number | null)[], reference = 1): RecentLoadInput => {
+  const days = loadDays(loads);
+  return { reference, days, rolling: rollingLoad([...days, { date: "today", load: 0, status: "in_progress" }], reference) };
+};
+const full = { sleepMinutes: 450, sleepMidpoint: 900, restingHeartRate: 55, spo2: 97, skinTemperature: 33.5 };
 
-function day(date: string, overrides: Partial<DailyAggregate> = {}): DailyAggregate {
-  return { date, trainingMinutes: 0, ...overrides };
-}
+// ── Methodology ────────────────────────────────────────────────────────────
 
-test("median/MAD — pure statistics", () => {
-  assert.equal(median([1, 2, 3]), 2);
+test("Readiness v1 weights are versioned and total 100%", () => {
+  const w = READINESS_V1.weights;
+  assert.equal(Math.round((w.sleep + w.cardiovascular + w.recentLoad + w.physiological) * 1000), 1000);
+  assert.equal(READINESS_V1.version, "readiness-1.0");
+  assert.equal(computeReadinessScore(history(20), today(20, full)).version, "readiness-1.0");
+});
+
+test("median/MAD", () => {
   assert.equal(median([1, 2, 3, 4]), 2.5);
-  assert.equal(median([]), undefined);
   assert.equal(medianAbsoluteDeviation([1, 2, 3, 4, 5]), 1);
 });
 
-test("cold start: zero history produces null score, not a fabricated number", () => {
-  const result = computeReadinessScore([], day("2026-01-01"));
-  assert.equal(result.score, null);
-  assert.equal(result.confidence, 0);
-  assert.ok(result.missingInputs.length > 0);
-  for (const c of result.components) assert.equal(c.subScore, undefined);
+// ── Cold start & baseline ────────────────────────────────────────────────
+
+test("cold start: nothing → NOT_ENOUGH_DATA, no number", () => {
+  const r = computeReadinessScore([], today(0));
+  assert.equal(r.score, null);
+  assert.equal(r.state, "NOT_ENOUGH_DATA");
+  assert.equal(r.confidenceLevel, "INSUFFICIENT");
 });
 
-test("cold start: a single day of sleep data alone produces a real score", () => {
-  const today = day("2026-01-01", { sleepMinutes: 440 });
-  const result = computeReadinessScore([], today);
-  assert.notEqual(result.score, null);
-  assert.ok(result.score! >= 0 && result.score! <= 100);
-  // Only sleep is active — its weight must be renormalized to 100%, not left at its base 35%.
-  const sleepComponent = result.components.find((c) => c.metric === "sleep")!;
-  assert.equal(sleepComponent.weight, 1);
-  assert.ok(result.confidence < 0.5, "confidence should be low on day one");
+test("cold start: one night of sleep → a score, BUILDING_BASELINE, labelled population bridge", () => {
+  const r = computeReadinessScore([], today(0, { sleepMinutes: 440 }));
+  assert.notEqual(r.score, null);
+  assert.equal(r.state, "BUILDING_BASELINE");
+  const sleep = r.components.find((c) => c.metric === "sleep")!;
+  assert.equal(sleep.personal, false);
+  assert.match(sleep.description, /7-hour reference/);
 });
 
-test("missing metrics are excluded, never substituted with a fabricated value", () => {
-  const result = computeReadinessScore([], day("2026-01-01", { sleepMinutes: 400 }));
-  const hrComponent = result.components.find((c) => c.metric === "cardiovascular")!;
-  assert.equal(hrComponent.included, false);
-  assert.equal(hrComponent.subScore, undefined);
-  assert.ok(result.missingInputs.some((m) => m.toLowerCase().includes("heart rate")));
+test("baseline: resting HR joins only after 5 prior nights", () => {
+  assert.equal(computeReadinessScore(history(4), today(4, full)).components.find((c) => c.metric === "cardiovascular")!.included, false);
+  assert.equal(computeReadinessScore(history(5), today(5, full)).components.find((c) => c.metric === "cardiovascular")!.included, true);
 });
 
-test("baseline creation: resting HR component activates only after 3+ days of history", () => {
-  const twoNights = [day("2026-01-01", { restingHeartRate: 58 }), day("2026-01-02", { restingHeartRate: 59 })];
-  const notEnough = computeReadinessScore(twoNights, day("2026-01-03", { restingHeartRate: 58, sleepMinutes: 420 }));
-  assert.equal(notEnough.components.find((c) => c.metric === "cardiovascular")!.included, false);
-
-  const threeNights = [...twoNights, day("2026-01-03", { restingHeartRate: 60 })];
-  const enough = computeReadinessScore(threeNights, day("2026-01-04", { restingHeartRate: 58, sleepMinutes: 420 }));
-  assert.equal(enough.components.find((c) => c.metric === "cardiovascular")!.included, true);
+test("established baseline with full data → READY and high confidence", () => {
+  const r = computeReadinessScore(history(28), today(28, full), recent(Array(28).fill(1)));
+  assert.equal(r.state, "READY");
+  assert.equal(r.confidenceLevel, "HIGH");
+  assert.equal(r.score, 100);
 });
 
-test("baseline adaptation: elevated resting HR versus a stable baseline lowers the cardiovascular sub-score", () => {
-  const stableHistory = Array.from({ length: 14 }, (_, i) => day(`2026-01-${String(i + 1).padStart(2, "0")}`, { restingHeartRate: 58, sleepMinutes: 430 }));
-  const normalDay = computeReadinessScore(stableHistory, day("2026-01-15", { restingHeartRate: 58, sleepMinutes: 430 }));
-  const elevatedDay = computeReadinessScore(stableHistory, day("2026-01-15", { restingHeartRate: 72, sleepMinutes: 430 }));
+// ── Domain weighting ──────────────────────────────────────────────────────
 
-  const normalHR = normalDay.components.find((c) => c.metric === "cardiovascular")!.subScore!;
-  const elevatedHR = elevatedDay.components.find((c) => c.metric === "cardiovascular")!.subScore!;
-  assert.ok(elevatedHR < normalHR, "an elevated HR day must score lower than a normal day against the same baseline");
+test("sleep weighting: short sleep lowers the score by its 40% share", () => {
+  const base = computeReadinessScore(history(28), today(28, full), recent(Array(28).fill(1)));
+  const short = computeReadinessScore(history(28), today(28, { ...full, sleepMinutes: 270 }), recent(Array(28).fill(1)));
+  const sleep = short.components.find((c) => c.metric === "sleep")!;
+  assert.ok(sleep.subScore! < 60);
+  assert.equal(base.score! - short.score!, Math.round((100 - sleep.subScore!) * 0.4));
 });
 
-test("baseline adapts gradually: one abnormal night does not collapse the sleep baseline", () => {
-  const goodNights = Array.from({ length: 13 }, (_, i) => day(`2026-01-${String(i + 1).padStart(2, "0")}`, { sleepMinutes: 440 }));
-  const oneBadNight = [...goodNights, day("2026-01-14", { sleepMinutes: 200 })];
-  // The next day, sleeping a normal 440 minutes should still score well —
-  // the single bad night shouldn't have dragged the rolling median down much.
-  const result = computeReadinessScore(oneBadNight, day("2026-01-15", { sleepMinutes: 440 }));
-  const sleepScore = result.components.find((c) => c.metric === "sleep")!.subScore!;
-  assert.ok(sleepScore >= 90, `expected a normal night to still score well after one bad night, got ${sleepScore}`);
+test("sleep regularity: irregular timing lowers the sleep domain", () => {
+  const regular = computeReadinessScore(history(28), today(28, full));
+  const irregular = computeReadinessScore(history(28, (i) => ({ ...full, sleepMidpoint: i % 2 ? 780 : 1020 })), today(28, full));
+  const s = (x: typeof regular) => x.components.find((c) => c.metric === "sleep")!.subScore!;
+  assert.ok(s(irregular) < s(regular));
+  assert.match(irregular.components.find((c) => c.metric === "sleep")!.description, /irregular/);
 });
 
-test("incomplete sleep: sleeping well below personal baseline lowers the sleep sub-score", () => {
-  const history = Array.from({ length: 14 }, (_, i) => day(`2026-01-${String(i + 1).padStart(2, "0")}`, { sleepMinutes: 450 }));
-  const short = computeReadinessScore(history, day("2026-01-15", { sleepMinutes: 240 }));
-  const full = computeReadinessScore(history, day("2026-01-15", { sleepMinutes: 450 }));
-  const shortScore = short.components.find((c) => c.metric === "sleep")!.subScore!;
-  const fullScore = full.components.find((c) => c.metric === "sleep")!.subScore!;
-  assert.ok(shortScore < fullScore);
+test("cardiovascular weighting: elevated resting HR lowers the score; a lower one is not penalized", () => {
+  const up = computeReadinessScore(history(28), today(28, { ...full, restingHeartRate: 63 }), recent(Array(28).fill(1)));
+  const down = computeReadinessScore(history(28), today(28, { ...full, restingHeartRate: 49 }), recent(Array(28).fill(1)));
+  const cv = (x: typeof up) => x.components.find((c) => c.metric === "cardiovascular")!;
+  assert.ok(cv(up).subScore! < 50);
+  assert.equal(cv(down).subScore, 100);
+  assert.match(cv(up).description, /above your baseline/);
 });
 
-test("training load: a sharp acute spike over chronic load lowers the training-load sub-score", () => {
-  const chronicHistory = Array.from({ length: 28 }, (_, i) => day(`2026-01-${String(i + 1).padStart(2, "0")}`, { trainingMinutes: 30 }));
-  const spikeDay = day("2026-01-29", { trainingMinutes: 120 });
-  const normalDay = day("2026-01-29", { trainingMinutes: 30 });
-
-  const spike = computeReadinessScore(chronicHistory, spikeDay);
-  const normal = computeReadinessScore(chronicHistory, normalDay);
-  const spikeScore = spike.components.find((c) => c.metric === "trainingLoad")!.subScore!;
-  const normalScore = normal.components.find((c) => c.metric === "trainingLoad")!.subScore!;
-  assert.ok(spikeScore < normalScore);
+test("physiological weighting: an SpO2 drop or temperature deviation lowers it; normal = 100", () => {
+  const h = history(28, (i) => ({ ...full, spo2: 97 + (i % 2 ? 0.5 : -0.5), skinTemperature: 33.5 + (i % 2 ? 0.1 : -0.1) }));
+  const normal = computeReadinessScore(h, today(28, full)).components.find((c) => c.metric === "physiological")!;
+  const off = computeReadinessScore(h, today(28, { ...full, spo2: 93, skinTemperature: 34.8 })).components.find((c) => c.metric === "physiological")!;
+  assert.equal(normal.subScore, 100);
+  assert.ok(off.subScore! < 60);
 });
 
-test("abnormal readings: extreme resting HR deviation still bounds the sub-score to [0,100]", () => {
-  const history = Array.from({ length: 14 }, (_, i) => day(`2026-01-${String(i + 1).padStart(2, "0")}`, { restingHeartRate: 55 }));
-  const extreme = computeReadinessScore(history, day("2026-01-15", { restingHeartRate: 220, sleepMinutes: 420 }));
-  const hr = extreme.components.find((c) => c.metric === "cardiovascular")!.subScore!;
-  assert.ok(hr >= 0 && hr <= 100);
+// ── Missing data & renormalization ────────────────────────────────────────
+
+test("missing sleep: excluded and renormalized — never scored as poor", () => {
+  const r = computeReadinessScore(history(28), today(28, { restingHeartRate: 55, spo2: 97, skinTemperature: 33.5 }), recent(Array(28).fill(1)));
+  const sleep = r.components.find((c) => c.metric === "sleep")!;
+  assert.equal(sleep.included, false);
+  assert.equal(sleep.subScore, undefined);
+  assert.equal(r.score, 100);                                   // the other domains are all fine
+  const total = r.components.reduce((s, c) => s + c.weight, 0);
+  assert.ok(Math.abs(total - 1) < 1e-9);                        // renormalized
+  assert.ok(r.confidence < computeReadinessScore(history(28), today(28, full), recent(Array(28).fill(1))).confidence); // but less confident
 });
 
-test("score is always within [0, 100] across a range of synthetic inputs", () => {
-  const scenarios: DailyAggregate[] = [
-    day("d", { sleepMinutes: 0, restingHeartRate: 40, trainingMinutes: 0 }),
-    day("d", { sleepMinutes: 900, restingHeartRate: 200, trainingMinutes: 500 }),
-    day("d", { sleepMinutes: 420, restingHeartRate: 60, spo2: 98, skinTemperature: 36.5, trainingMinutes: 45 }),
-  ];
-  const history = Array.from({ length: 20 }, (_, i) =>
-    day(`h${i}`, { sleepMinutes: 420, restingHeartRate: 60, spo2: 98, skinTemperature: 36.5, trainingMinutes: 30 }),
-  );
-  for (const scenario of scenarios) {
-    const result = computeReadinessScore(history, scenario);
-    if (result.score !== null) {
-      assert.ok(result.score >= 0 && result.score <= 100, `score out of bounds: ${result.score}`);
-    }
-    assert.ok(result.confidence >= 0 && result.confidence <= 1);
-  }
+test("missing HR: cardiovascular excluded, others renormalized", () => {
+  const r = computeReadinessScore(history(28), today(28, { ...full, restingHeartRate: undefined }));
+  assert.equal(r.components.find((c) => c.metric === "cardiovascular")!.included, false);
+  assert.notEqual(r.score, null);
 });
 
-test("confidence increases as personal history accumulates (same daily values, more days)", () => {
-  const makeHistory = (days: number) =>
-    Array.from({ length: days }, (_, i) => day(`h${i}`, { sleepMinutes: 430, restingHeartRate: 58, trainingMinutes: 30 }));
-  const today = day("today", { sleepMinutes: 430, restingHeartRate: 58, trainingMinutes: 30 });
-
-  const shortHistory = computeReadinessScore(makeHistory(3), today);
-  const longHistory = computeReadinessScore(makeHistory(25), today);
-  assert.ok(longHistory.confidence > shortHistory.confidence);
+test("missing physiology: excluded, not zero", () => {
+  const r = computeReadinessScore(history(28), today(28, { sleepMinutes: 450, restingHeartRate: 55 }));
+  assert.equal(r.components.find((c) => c.metric === "physiological")!.included, false);
+  assert.equal(r.score, 100);
 });
 
-test("deterministic: identical inputs always produce identical output", () => {
-  const history = Array.from({ length: 10 }, (_, i) => day(`h${i}`, { sleepMinutes: 410, restingHeartRate: 61, trainingMinutes: 20 }));
-  const today = day("today", { sleepMinutes: 405, restingHeartRate: 63, trainingMinutes: 40 });
-  const a = computeReadinessScore(history, today);
-  const b = computeReadinessScore(history, today);
+test("load and physiology alone cannot make a readiness score", () => {
+  const r = computeReadinessScore(history(28), today(28, { spo2: 97, skinTemperature: 33.5 }), recent(Array(28).fill(1)));
+  assert.equal(r.score, null);
+  assert.equal(r.state, "NOT_ENOUGH_DATA");
+});
+
+// ── Recent load (yesterday's Strain enters here) ─────────────────────────
+
+test("recent load: typical or light load and rest are never penalized", () => {
+  assert.equal(scoreRecentLoad(recent([1, 1, 1, 1, 1, 1, 1])).subScore, 100);
+  assert.equal(scoreRecentLoad(recent([1, 1, 1, 1, 0, 0, 0])).subScore, 100);
+});
+
+test("recent load: yesterday's heavy day lowers the domain — within its 20% share, never a subtraction", () => {
+  const heavy = scoreRecentLoad(recent([1, 1, 1, 1, 1, 1, 3]));
+  assert.ok(heavy.subScore! < 100 && heavy.subScore! >= READINESS_V1.recentLoad.floor);
+  assert.equal(heavy.detail!.yesterdayRelative, 3);
+  const withLoad = computeReadinessScore(history(28), today(28, full), recent([...Array(27).fill(1), 3]));
+  const without = computeReadinessScore(history(28), today(28, full), recent(Array(28).fill(1)));
+  assert.equal(without.score! - withLoad.score!, Math.round((100 - withLoad.components.find((c) => c.metric === "recentLoad")!.subScore!) * 0.2));
+});
+
+test("recent load: yesterday weighs more than three days ago", () => {
+  const y = scoreRecentLoad(recent([1, 1, 1, 1, 1, 1, 3])).subScore!;
+  const d3 = scoreRecentLoad(recent([1, 1, 1, 1, 3, 1, 1])).subScore!;
+  assert.ok(y < d3);
+});
+
+test("recent load: repeated high-load days lower it further", () => {
+  const single = scoreRecentLoad(recent([1, 1, 1, 1, 1, 1, 1.6])).subScore!;
+  const repeated = scoreRecentLoad(recent([1, 1, 1, 1.6, 1.6, 1.6, 1.6])).subScore!;
+  assert.ok(repeated < single);
+  assert.match(scoreRecentLoad(recent([1, 1, 1, 1.6, 1.6, 1.6, 1.6])).description, /4 high-load days in a row/);
+});
+
+test("recent load: no baseline → excluded (BUILDING), not guessed", () => {
+  const r = scoreRecentLoad({ reference: undefined, days: loadDays([1, 1, 1]) });
+  assert.equal(r.included, false);
+  assert.match(r.description, /baseline still building/);
+});
+
+test("recent load: unknown days are excluded, never counted as zero", () => {
+  const allUnknown = scoreRecentLoad(recent([1, 1, 1, 1, null, null, null]));
+  assert.equal(allUnknown.included, false);
+  const partly = scoreRecentLoad(recent([1, 1, 1, 1, 3, null, null])); // only day-3 known: 3× → penalized, lower confidence
+  assert.ok(partly.subScore! < 100);
+  assert.ok(partly.confidence < scoreRecentLoad(recent([1, 1, 1, 1, 3, 1, 1])).confidence);
+});
+
+// ── Inputs, confidence, bands ────────────────────────────────────────────
+
+test("overnight resting HR: band reading first; else sustained low of the sleep window; never a daytime minimum", () => {
+  assert.deepEqual(overnightRestingHR([52, 54], [70, 48]), { value: 53, source: "band_resting" });
+  // 8 readings → lowest 3 = [41, 56, 57]; their median ignores the 41-bpm artifact.
+  assert.deepEqual(overnightRestingHR([], [60, 58, 57, 56, 62, 64, 59, 41]), { value: 56, source: "sleep_window" });
+  assert.deepEqual(overnightRestingHR([], [60, 58]), { source: "none" });
+});
+
+test("sleep midpoint is measured from local noon (no midnight wrap)", () => {
+  // 23:00 → 07:00 in Colombo: midpoint 03:00 local = 900 min after noon.
+  const start = Date.UTC(2026, 8, 25, 17, 30), end = Date.UTC(2026, 8, 26, 1, 30);
+  assert.equal(sleepMidpointAfterNoon(start, end, "Asia/Colombo"), 900);
+});
+
+test("confidence levels and bands", () => {
+  assert.equal(confidenceLevel(0.8), "HIGH");
+  assert.equal(confidenceLevel(0.5), "MODERATE");
+  assert.equal(confidenceLevel(0.3), "LOW");
+  assert.equal(confidenceLevel(0.1), "INSUFFICIENT");
+  assert.equal(confidenceBand(0.5), "Moderate");
+  assert.equal(scoreBand(90), "Highly Ready");
+  assert.equal(scoreBand(30), "Low Readiness");
+});
+
+test("deterministic and bounded", () => {
+  const h = history(28, (i) => ({ ...full, sleepMinutes: 300 + (i * 37) % 200, restingHeartRate: 50 + (i * 7) % 12 }));
+  const a = computeReadinessScore(h, today(28, { ...full, restingHeartRate: 90, sleepMinutes: 60 }), recent([5, 5, 5, 5, 5, 5, 5]));
+  const b = computeReadinessScore(h, today(28, { ...full, restingHeartRate: 90, sleepMinutes: 60 }), recent([5, 5, 5, 5, 5, 5, 5]));
   assert.deepEqual(a, b);
+  assert.ok(a.score! >= 0 && a.score! <= 100);
 });
 
-test("no fabricated metrics: a component never reports a sub-score without being marked included", () => {
-  const result = computeReadinessScore([], day("d", { sleepMinutes: 400 }));
-  for (const c of result.components) {
-    if (c.subScore !== undefined) assert.equal(c.included, true);
-    if (!c.included) assert.equal(c.subScore, undefined);
-  }
-});
-
-test("score/confidence bands cover the full range with non-medical wording", () => {
-  assert.equal(scoreBand(95), "Highly Ready");
-  assert.equal(scoreBand(75), "Ready");
-  assert.equal(scoreBand(60), "Moderate");
-  assert.equal(scoreBand(45), "Caution");
-  assert.equal(scoreBand(10), "Low Readiness");
-  assert.equal(confidenceBand(0.9), "High");
-  assert.equal(confidenceBand(0.5), "Improving");
-  assert.equal(confidenceBand(0.1), "Building baseline");
-  for (const label of [scoreBand(50), confidenceBand(0.5)]) {
-    assert.ok(!/medical|diagnos|clinical/i.test(label));
-  }
-});
-
-test("deriveSleepSignal: no component (never computed) reports unavailable, not a guess", () => {
+test("deriveSleepSignal keeps its confidence floor", () => {
   assert.equal(deriveSleepSignal(undefined), "unavailable");
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: undefined })), "unavailable");
-});
-
-test("deriveSleepSignal: low confidence overrides subScore regardless of how good/bad it is", () => {
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 95, confidence: 0.1 })), "insufficient");
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 10, confidence: 0.34 })), "insufficient");
-  // Right at the algorithm's own 0.35 floor, confidence is now sufficient.
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 90, confidence: 0.35 })), "good");
-});
-
-test("deriveSleepSignal: thresholds match the readiness algorithm's own score bands, not new ones", () => {
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 85 })), "good");
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 84.9 })), "neutral");
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 45 })), "poor");
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 45.1 })), "neutral");
-  assert.equal(deriveSleepSignal(sleepComponent({ subScore: 60 })), "neutral");
+  assert.equal(deriveSleepSignal({ subScore: 95, confidence: 0.2 }), "insufficient");
+  assert.equal(deriveSleepSignal({ subScore: 95, confidence: 0.8 }), "good");
+  assert.equal(deriveSleepSignal({ subScore: 30, confidence: 0.8 }), "poor");
 });

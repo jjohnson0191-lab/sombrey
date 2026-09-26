@@ -2,7 +2,9 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { isValidTimeZone, localDayKey } from "./strain/time";
-import { ALGORITHM_VERSION, computeReadinessScore, deriveSleepSignal, scoreBand, confidenceBand, type DailyAggregate } from "./readiness/scoring";
+import { computeReadinessScore, deriveSleepSignal, median, overnightRestingHR, scoreBand, confidenceBand, sleepMidpointAfterNoon, type DailyAggregate, type RecentLoadInput } from "./readiness/scoring";
+import { loadProgressData } from "./progressData";
+import { loadIntelligence, upsertDailyLoadSnapshots } from "./intelligenceData";
 
 // Sombrey Readiness Score — see `readiness/scoring.ts` for the algorithm
 // itself and its documented scientific basis/limitations. This file only
@@ -34,142 +36,127 @@ export const computeAndStore = mutation({
     const user = await requireAuth(ctx);
     const zone = args.timeZone && isValidTimeZone(args.timeZone) ? args.timeZone : "UTC";
     if (zone !== "UTC" && user.timeZone !== zone) await ctx.db.patch(user._id, { timeZone: zone, timeZoneUpdatedAt: Date.now() });
-    const utcDay = (timestampMs: number): string => localDayKey(timestampMs, zone);
+    const dayOf = (timestampMs: number): string => localDayKey(timestampMs, zone);
     const now = Date.now();
-    const windowStart = now - 30 * 24 * 60 * 60 * 1000;
+    const windowStart = now - 35 * 24 * 60 * 60 * 1000;
 
-    const [measurements, sleepSessions, sportSessions] = await Promise.all([
-      ctx.db
-        .query("wearableMeasurements")
-        .withIndex("by_user", (q) => q.eq("userId", user._id))
-        .filter((q) => q.gte(q.field("recordedAt"), windowStart))
-        .collect(),
-      ctx.db
-        .query("wearableSleepSessions")
+    // Per-metric index ranges (never a scan of the user's whole history).
+    const metric = (metricType: "heart_rate" | "resting_heart_rate" | "spo2" | "skin_temperature", limit: number) =>
+      ctx.db.query("wearableMeasurements")
+        .withIndex("by_user_metric_and_recordedAt", (q) => q.eq("userId", user._id).eq("metricType", metricType).gte("recordedAt", windowStart))
+        .take(limit);
+    const [restingRows, spo2Rows, tempRows, sleepSessions] = await Promise.all([
+      metric("resting_heart_rate", 1000),
+      metric("spo2", 3000),
+      metric("skin_temperature", 3000),
+      ctx.db.query("wearableSleepSessions")
         .withIndex("by_user_and_startedAt", (q) => q.eq("userId", user._id).gte("startedAt", windowStart))
-        .collect(),
-      ctx.db
-        .query("sportPlusSessions")
-        .withIndex("by_user_and_startedAt", (q) => q.eq("userId", user._id).gte("startedAt", windowStart))
-        .collect(),
+        .take(300),
     ]);
 
     const days = new Map<string, DailyAggregate>();
-    const dayFor = (dateStr: string): DailyAggregate => {
-      let d = days.get(dateStr);
-      if (!d) {
-        d = { date: dateStr, trainingMinutes: 0 };
-        days.set(dateStr, d);
-      }
+    const dayFor = (date: string): DailyAggregate => {
+      let d = days.get(date);
+      if (!d) { d = { date }; days.set(date, d); }
       return d;
     };
 
-    // Sleep — assigned to the wake-up day (a session's endedAt), summed
-    // if multiple sessions/naps land on the same day. The session's own
-    // [startedAt, endedAt] window is kept to scope the resting-HR proxy
-    // below to actual sleep time when we have it.
-    const sleepWindowByDay = new Map<string, { start: number; end: number }>();
-    for (const session of sleepSessions) {
-      const dateStr = utcDay(session.endedAt);
-      const agg = dayFor(dateStr);
-      agg.sleepMinutes = (agg.sleepMinutes ?? 0) + session.totalSleepMinutes;
-      const existingWindow = sleepWindowByDay.get(dateStr);
-      sleepWindowByDay.set(dateStr, {
-        start: Math.min(existingWindow?.start ?? session.startedAt, session.startedAt),
-        end: Math.max(existingWindow?.end ?? session.endedAt, session.endedAt),
-      });
+    // Sleep — assigned to the wake-up day; naps summed; timing from the
+    // longest session of the day.
+    const mainSleep = new Map<string, { start: number; end: number }>();
+    const windowsByDay = new Map<string, { start: number; end: number }[]>();
+    for (const s of sleepSessions) {
+      const date = dayOf(s.endedAt);
+      const agg = dayFor(date);
+      agg.sleepMinutes = (agg.sleepMinutes ?? 0) + s.totalSleepMinutes;
+      windowsByDay.set(date, [...(windowsByDay.get(date) ?? []), { start: s.startedAt, end: s.endedAt }]);
+      const main = mainSleep.get(date);
+      if (!main || s.endedAt - s.startedAt > main.end - main.start) mainSleep.set(date, { start: s.startedAt, end: s.endedAt });
     }
+    for (const [date, w] of mainSleep) dayFor(date).sleepMidpoint = sleepMidpointAfterNoon(w.start, w.end, zone);
 
-    // Heart rate / SpO2 / temperature, bucketed by day with timestamps
-    // kept so resting-HR can be scoped to the sleep window when known.
-    const hrReadingsByDay = new Map<string, { value: number; recordedAt: number }[]>();
-    const spo2ByDay = new Map<string, number[]>();
-    const tempByDay = new Map<string, number[]>();
-    // `value > 0` below: none of these three can legitimately read 0 on
-    // a living person wearing the band — a persisted 0 is a zero-filled
-    // "no reading" gap (the same class of sentinel `QCBandSDKService`
-    // now rejects at the source going forward), not a real measurement,
-    // and must never shape a baseline or the score itself.
-    for (const m of measurements) {
-      const dateStr = utcDay(m.recordedAt);
-      if (m.metricType === "heart_rate" && m.value > 0) {
-        const list = hrReadingsByDay.get(dateStr) ?? [];
-        list.push({ value: m.value, recordedAt: m.recordedAt });
-        hrReadingsByDay.set(dateStr, list);
-      } else if (m.metricType === "spo2" && m.value > 0) {
-        const list = spo2ByDay.get(dateStr) ?? [];
-        list.push(m.value);
-        spo2ByDay.set(dateStr, list);
-      } else if (m.metricType === "skin_temperature" && m.value > 0) {
-        const list = tempByDay.get(dateStr) ?? [];
-        list.push(m.value);
-        tempByDay.set(dateStr, list);
+    // Overnight resting HR: the band's own resting readings for the day, else
+    // the sustained low of the heart-rate readings inside that night's sleep.
+    const bandRestingByDay = new Map<string, number[]>();
+    for (const r of restingRows) if (r.value > 0) bandRestingByDay.set(dayOf(r.recordedAt), [...(bandRestingByDay.get(dayOf(r.recordedAt)) ?? []), r.value]);
+    const hrDays = new Set([...bandRestingByDay.keys(), ...windowsByDay.keys()]);
+    for (const date of hrDays) {
+      const windows = windowsByDay.get(date) ?? [];
+      const inWindow: number[] = [];
+      if (!bandRestingByDay.has(date)) {
+        for (const w of windows) {
+          const rows = await ctx.db.query("wearableMeasurements")
+            .withIndex("by_user_metric_and_recordedAt", (q) => q.eq("userId", user._id).eq("metricType", "heart_rate").gte("recordedAt", w.start).lte("recordedAt", w.end))
+            .take(1500);
+          for (const r of rows) if (r.value > 0) inWindow.push(r.value);
+        }
       }
+      const rhr = overnightRestingHR(bandRestingByDay.get(date) ?? [], inWindow);
+      if (rhr.value !== undefined) dayFor(date).restingHeartRate = rhr.value;
     }
 
-    for (const [dateStr, readings] of hrReadingsByDay) {
-      const window = sleepWindowByDay.get(dateStr);
-      const scoped = window ? readings.filter((r) => r.recordedAt >= window.start && r.recordedAt <= window.end) : readings;
-      const pool = scoped.length > 0 ? scoped : readings;
-      if (pool.length === 0) continue;
-      dayFor(dateStr).restingHeartRate = Math.min(...pool.map((r) => r.value));
-    }
-    const medianOf = (values: number[]): number | undefined => {
-      if (values.length === 0) return undefined;
-      const sorted = [...values].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    // SpO2 / skin temperature — daily medians. A persisted 0 is a
+    // zero-filled "no reading" gap, never a measurement.
+    const medianOf = (values: number[]) => median(values);
+    const byDay = (rows: { value: number; recordedAt: number }[]) => {
+      const m = new Map<string, number[]>();
+      for (const r of rows) if (r.value > 0) m.set(dayOf(r.recordedAt), [...(m.get(dayOf(r.recordedAt)) ?? []), r.value]);
+      return m;
     };
-    for (const [dateStr, values] of spo2ByDay) {
-      const m = medianOf(values);
-      if (m !== undefined) dayFor(dateStr).spo2 = m;
-    }
-    for (const [dateStr, values] of tempByDay) {
-      const m = medianOf(values);
-      if (m !== undefined) dayFor(dateStr).skinTemperature = m;
-    }
+    for (const [date, values] of byDay(spo2Rows)) { const m = medianOf(values); if (m !== undefined) dayFor(date).spo2 = m; }
+    for (const [date, values] of byDay(tempRows)) { const m = medianOf(values); if (m !== undefined) dayFor(date).skinTemperature = m; }
 
-    // Training load — total Sport+ session minutes per day (see
-    // scoring.ts's header for why this is duration-only in V1).
-    for (const session of sportSessions) {
-      const dateStr = utcDay(session.startedAt);
-      const agg = dayFor(dateStr);
-      const minutes = (session.durationSeconds ?? 0) / 60;
-      agg.trainingMinutes += minutes;
-    }
+    // Recent load: the one intelligence pipeline (convex/strain/*) — the same
+    // Daily Load Strain is made from, in the same local days.
+    const data = await loadProgressData(ctx, user._id, now);
+    const intelligence = await loadIntelligence(ctx, user._id, data, zone, now);
+    const pastDays = intelligence.loadDays.filter((d) => d.date < args.date);
+    const recentLoad: RecentLoadInput = { reference: intelligence.baseline.reference, days: pastDays, rolling: intelligence.rolling };
 
     const today = dayFor(args.date);
-    const history = [...days.values()]
-      .filter((d) => d.date !== args.date)
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const history = [...days.values()].filter((d) => d.date !== args.date).sort((a, b) => a.date.localeCompare(b.date));
+    const result = computeReadinessScore(history, today, recentLoad);
 
-    const result = computeReadinessScore(history, today);
-
-    const id = await ctx.db.insert("readinessScores", {
+    // One row per (user, date): recomputing replaces it (idempotent).
+    const row = {
       userId: user._id,
       date: args.date,
-      algorithmVersion: ALGORITHM_VERSION,
+      algorithmVersion: result.version,
       score: result.score ?? undefined,
       confidence: result.confidence,
+      confidenceLevel: result.confidenceLevel,
+      state: result.state,
+      timeZone: zone,
       components: result.components.map((c) => ({
         metric: c.metric,
         subScore: c.subScore,
         weight: c.weight,
+        nominalWeight: c.nominalWeight,
         confidence: c.confidence,
         description: c.description,
+        personal: c.personal,
+        detail: c.detail ? JSON.stringify(c.detail) : undefined,
       })),
       missingInputs: result.missingInputs,
-      calculatedAt: Date.now(),
-    });
+      calculatedAt: now,
+    };
+    const existing = await ctx.db.query("readinessScores")
+      .withIndex("by_user_and_date", (q) => q.eq("userId", user._id).eq("date", args.date)).collect();
+    let id;
+    if (existing.length) {
+      id = existing[0]._id;
+      await ctx.db.replace(id, row);
+      for (const extra of existing.slice(1)) await ctx.db.delete(extra._id);
+    } else {
+      id = await ctx.db.insert("readinessScores", row);
+    }
 
-    // Derived from the sleep component's OWN existing baseline/confidence
-    // logic via `deriveSleepSignal` — never a separate hardcoded
-    // threshold, and never fed back into the score itself. Purely for
-    // the client to decide whether a good/poor-sleep notification is
-    // warranted (see NotificationManager.swift).
+    // The daily load record for longitudinal validation: every past day in
+    // the window, recomputed (so a late import corrects its day), versioned.
+    await upsertDailyLoadSnapshots(ctx, user._id, intelligence, now);
+
     const sleepComponent = result.components.find((c) => c.metric === "sleep");
     const sleepSignal = deriveSleepSignal(sleepComponent);
-
     return { id, score: result.score, confidence: result.confidence, sleepSignal };
   },
 });

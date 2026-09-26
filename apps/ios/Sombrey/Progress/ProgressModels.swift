@@ -59,8 +59,31 @@ struct StrainIntelligenceDTO: Decodable, Equatable {
     let state: String              // NOT_ENOUGH_DATA | BUILDING_BASELINE | LOW_CONFIDENCE | READY
     let confidence: String
     let baseline: Baseline
+    struct Recent: Decodable, Equatable {
+        let yesterdayStatus: String?
+        let yesterdayRelative: Double?
+        let knownDays7: Double
+        let activeDays7: Double
+        let highLoadDays7: Double
+        let unknownDays7: Double
+        let relative7: Double?
+        let consecutiveHighLoadDays: Double
+        let trend: String?
+    }
     let sessions: [Session]
     let duplicatesRemoved: Double
+    let recent: Recent?
+    let strainVersion: String?
+
+    /// One factual line about the last seven days (measured and rest days
+    /// only — a day without band data is said to be unknown, not counted).
+    var recentLine: String? {
+        guard let r = recent, r.knownDays7 > 0 else { return nil }
+        var parts = ["Last 7 days: \(Int(r.activeDays7)) active of \(Int(r.knownDays7)) recorded"]
+        if r.highLoadDays7 > 0 { parts.append("\(Int(r.highLoadDays7)) high-load") }
+        if r.unknownDays7 > 0 { parts.append("\(Int(r.unknownDays7)) without band data") }
+        return parts.joined(separator: " · ")
+    }
 
     static func confidenceLabel(_ c: String) -> String {
         switch c {

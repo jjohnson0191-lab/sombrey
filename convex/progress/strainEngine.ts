@@ -20,7 +20,7 @@ import { SIGNALS } from "../strain/signals.ts";
 export const STRAIN_SIGNALS = {
   available: SIGNALS.filter((s) => s.reliability === "reliable" || s.reliability === "intermittent").map((s) => `${s.id}: ${s.notes}`),
   missing: SIGNALS.filter((s) => s.reliability === "unavailable" || s.reliability === "unverified").map((s) => `${s.id}: ${s.notes}`),
-  currentFormula: "Proposed, not approved: Daily Load (normalized cardiovascular, activity and resistance load) against your own typical training day. No strain number is shown until the formula is reviewed and the band validated.",
+  currentFormula: "Sombrey Strain v1 (strain-1.0): Daily Load — cardiovascular 45 / resistance 30 / activity 25 as exchange rates — against your own typical training day, 100 × (1 − 2^(−load/reference)). Computed and versioned; shown once the band passes physical validation.",
   proposedInputs: [
     "Time in heart-rate-reserve zones (resting and maximum heart rate), weighted by zone — TRIMP family",
     "Activity energy cost (MET minutes) only for sessions without usable heart rate",
@@ -53,6 +53,19 @@ export type StrainIntelligence = {
   };
   sessions: { id: string; basis: "cardio" | "activity" | "none"; resistance: boolean; confidence: string; trimmed: boolean }[];
   duplicatesRemoved: number;
+  /** Recent load, ending yesterday (unknown days excluded, never zero). */
+  recent: {
+    yesterdayStatus?: string;
+    yesterdayRelative?: number;
+    knownDays7: number;
+    activeDays7: number;
+    highLoadDays7: number;
+    unknownDays7: number;
+    relative7?: number;
+    consecutiveHighLoadDays: number;
+    trend?: string;
+  };
+  strainVersion: string;
 };
 
 /** A day's measured load — facts, not a score. */
@@ -114,6 +127,18 @@ function describeIntelligence(i: IntelligenceDays): StrainIntelligence {
     },
     sessions: i.todaySessions.map((l) => ({ id: l.id, basis: l.aerobicBasis, resistance: (l.resistance?.completedSets ?? 0) > 0, confidence: l.confidence, trimmed: l.trimmed })),
     duplicatesRemoved: i.droppedAsDuplicate.length,
+    recent: {
+      yesterdayStatus: i.rolling.yesterday?.status,
+      yesterdayRelative: i.rolling.yesterday?.relative,
+      knownDays7: i.rolling.windows.d7.knownDays,
+      activeDays7: i.rolling.windows.d7.activeDays,
+      highLoadDays7: i.rolling.windows.d7.highLoadDays,
+      unknownDays7: i.rolling.windows.d7.unknownDays,
+      relative7: i.rolling.windows.d7.relativeToBaseline,
+      consecutiveHighLoadDays: i.rolling.consecutiveHighLoadDays,
+      trend: i.rolling.trend,
+    },
+    strainVersion: i.strain.version,
   };
 }
 

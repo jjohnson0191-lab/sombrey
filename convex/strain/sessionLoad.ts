@@ -15,6 +15,7 @@ import { cardiovascularLoad, type CardioLoad, type HRSample } from "./cardiovasc
 import { type Confidence, RANK, blend, downgrade } from "./confidence.ts";
 import { resistanceLoad, type ResistanceLoad, type ResistanceSet } from "./resistanceLoad.ts";
 import type { HeartRateProfile } from "./zones.ts";
+import { STRAIN_V1 } from "./strainConfig.ts";
 
 export type SessionInput = {
   id: string;
@@ -117,6 +118,6 @@ export function sessionLoad(s: SessionInput & { trimmed?: boolean }, profile: He
 //   cardio 180   ≈ 60 min in zone 3 (weight 3)
 //   activity 300 ≈ 60 min at 6 MET ((6 − 1) × 60)
 //   resistance 20 set-equivalents ≈ a full lifting session
-export const CARDIO_REF = 180;
-export const ACTIVITY_REF = 300;
-export const RESIST_REF = 20;
+export const CARDIO_REF = STRAIN_V1.referenceDoses.cardiovascular;
+export const ACTIVITY_REF = STRAIN_V1.referenceDoses.activity;
+export const RESIST_REF = STRAIN_V1.referenceDoses.resistance;

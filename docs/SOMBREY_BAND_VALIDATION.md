@@ -25,4 +25,29 @@ Everything in `convex/strain/*` rests on SDK capability until these checks pass 
 2. **D + E pass** → mark series timing verified: set `seriesTimingVerified = true` for band series in `convex/intelligenceData.ts` (it caps confidence at MODERATE today).
 3. **H** gives the scheduled-HR spacing → update `hr_scheduled` in `convex/strain/signals.ts`.
 4. **F** informs whether zone-level load is trustworthy during intense/grip-heavy work.
-5. With A–F passed, review the proposed Strain formula (docs/SOMBREY_INTELLIGENCE_METHODOLOGY.md §9) against real days before setting `STRAIN_FORMULA_APPROVED`.
+5. With A–F passed, review Strain v1 (docs/SOMBREY_INTELLIGENCE_METHODOLOGY.md §5) against real days before setting `STRAIN_FORMULA_APPROVED`.
+
+## Scoring validation protocol (Readiness v1 · Strain v1)
+
+These checks come after A–J. They verify that the **inputs** to the scores are real. They are not meant to tune the scores: never change a weight to make one of these days produce a desired number.
+
+| # | Session | Procedure | Check |
+|---|---|---|---|
+| 1 | Rest | A full day with no sessions, band worn | Day status "rest" (not "no data"); Daily Load 0 |
+| 2 | Walking | 30 min brisk walk, band-started | One session; HR in zones 1–2; cardio load > 0; steps not added to load |
+| 3 | Moderate cardio | 30 min steady effort (talk test: short sentences) | Mostly zone 3; data quality MODERATE or better |
+| 4 | Harder cardio | 20 min with 5 × 2 min hard | Zones 4–5 during the efforts; load > session 3 per minute |
+| 5 | Resistance | App workout, 12+ sets with weights | Resistance component > 0; any HR shown only if measured |
+| 6 | Sport+ activity | Any band-started activity | Imported once; activity family correct |
+| 7 | App-started workout | Start in Sombrey with the band connected | One session (merged with its band record) |
+| 8 | Multiple sessions | Sessions 2 + 5 on one day | Daily Load = sum; each listed once |
+| 9 | Sleep | A normal night | Sleep minutes and timing present; overnight RHR from band resting reading or sleep window |
+| 10 | Next-day readiness | The morning after 8 | Recent-load domain reflects yesterday; state and confidence shown |
+| 11 | Late sync | Keep the phone away for a session; sync next day | Yesterday's load and readiness recent-load update; nothing duplicated |
+| 12 | HR sample density | Session 3 | Coverage and median interval recorded (Recording details / data quality) |
+| 13 | Session duration | Session 3 vs stopwatch | ±1 min |
+| 14 | Calories | Session 3 | Plausible; never a load input |
+| 15 | Activity classification | A generic band mode | Asked to classify; answer used |
+| 16 | Timestamp semantics | = check A | Basis confirmed for the band |
+
+After 1–16 pass, review the Strain v1 values stored in `dailyLoadSnapshots` against the days you recorded. Then decide on setting `STRAIN_FORMULA_APPROVED`.

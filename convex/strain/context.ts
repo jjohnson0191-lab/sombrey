@@ -12,6 +12,16 @@ import type { Relationship } from "./relationships.ts";
 import type { EnvironmentState } from "./environment.ts";
 import type { IntelligenceDays } from "./pipeline.ts";
 import type { HeartRateProfile } from "./zones.ts";
+import type { RollingLoad } from "./rollingLoad.ts";
+
+export type ReadinessContext = {
+  date: string;
+  score?: number;
+  state?: string;
+  confidenceLevel?: string;
+  version: string;
+  domains: { metric: string; subScore?: number; weight: number; confidence: number; description: string }[];
+};
 
 export type IntelligenceContext = {
   timeZone: string;
@@ -22,7 +32,13 @@ export type IntelligenceContext = {
     loadConfidence: string;
     strainState: string;
     strainValueShown: false | number;
+    loadUnits: number;
+    components: { cardio: number; resistance: number; activity: number };
+    relativeToBaseline?: number;
   };
+  yesterday?: { date: string; status: string; load: number; relativeToBaseline?: number; sessions: number; confidence: string; strainState?: string };
+  recent: RollingLoad;
+  readiness?: ReadinessContext;
   recentHistory: { date: string; activeMinutes: number; sessions: number }[];
   recovery: { readinessToday?: number; readinessRecent: { date: string; score: number }[]; relationships: Relationship[] };
   training: { trainingDaysThisWeek: number; activeDaysThisWeek: number; minutesThisWeek: number; usualTrainingDays?: number; planned?: { completed: number; scheduled: number } };
@@ -46,8 +62,12 @@ export function buildIntelligenceContext(p: {
   body: { weightKg?: number; source?: string; changeKg?: number };
   records: string[];
   insights: string[];
+  readinessToday?: ReadinessContext;
 }): IntelligenceContext {
   const i = p.intelligence;
+  const ref = i.baseline.reference;
+  const y = i.days.length >= 2 ? i.days[i.days.length - 2] : undefined;
+  const yStatus = i.loadDays.length >= 2 ? i.loadDays[i.loadDays.length - 2].status : "no_data";
   const recent = i.days.slice(-8, -1);
   const readinessRecent = p.readiness.filter((r) => r.score !== undefined).slice(0, 7).map((r) => ({ date: r.date, score: r.score! }));
   return {
@@ -65,7 +85,17 @@ export function buildIntelligenceContext(p: {
       loadConfidence: i.today.confidence,
       strainState: i.strain.state,
       strainValueShown: i.strain.approved && i.strain.value !== undefined ? i.strain.value : false,
+      loadUnits: i.today.load,
+      components: { cardio: i.today.components.cardio, resistance: i.today.components.resistance, activity: i.today.components.activity },
+      relativeToBaseline: ref ? Math.round((i.today.load / ref) * 100) / 100 : undefined,
     },
+    yesterday: y ? {
+      date: y.date, status: yStatus, load: y.load, sessions: y.sessions, confidence: y.confidence,
+      relativeToBaseline: ref && (yStatus === "measured" || yStatus === "rest") ? Math.round((y.load / ref) * 100) / 100 : undefined,
+      strainState: i.yesterdayStrain?.state,
+    } : undefined,
+    recent: i.rolling,
+    readiness: p.readinessToday,
     recentHistory: recent.map((d) => ({ date: d.date, activeMinutes: d.activeMinutes, sessions: d.sessions })),
     recovery: { readinessToday: p.readiness.find((r) => r.date === i.today.date)?.score, readinessRecent, relationships: p.relationships },
     training: {
@@ -85,7 +115,8 @@ export function buildIntelligenceContext(p: {
       "Sombrey Strain is not validated yet: no strain number exists for the user. Do not estimate one, and do not base recommendations on strain or load scores.",
       "Weather is context only — it never changes load or strain.",
       "Relationships are patterns in this user's own history; say 'tended to', never 'causes'.",
-      "Readiness v1 is separate from strain and is never combined with it.",
+      "Readiness and Strain are separate scores and are never combined: Strain = today's physical load; Readiness = sleep, cardiovascular recovery, recent load context and physiological signals. Interpret them together; do not merge them.",
+      "Load figures are relative to this user's own typical training day; a day with no band data is unknown, not a rest day.",
     ],
   };
 }
@@ -95,8 +126,25 @@ export function renderIntelligenceContext(c: IntelligenceContext): string[] {
   const d = c.currentDay;
   lines.push(`- Today: ${d.sessions.length} session${d.sessions.length === 1 ? "" : "s"}, ${d.activeMinutes} active min; data confidence ${d.loadConfidence.replace(/_/g, " ").toLowerCase()}; strain state ${d.strainState.replace(/_/g, " ").toLowerCase()} (no strain number shown).`);
   for (const s of d.sessions) lines.push(`  · ${s.name} (${s.kind}) ${s.minutes} min — load from ${s.loadBasis}; ${s.confidence.replace(/_/g, " ").toLowerCase()}`);
+  lines.push(`  · Load today: ${d.loadUnits} units (cardio ${d.components.cardio}, resistance ${d.components.resistance}, activity ${d.components.activity})${d.relativeToBaseline !== undefined ? ` = ${d.relativeToBaseline}× your typical training day` : " — no personal baseline yet"}`);
+  if (c.yesterday) {
+    const y = c.yesterday;
+    lines.push(`- Yesterday (${y.date}): ${y.status === "no_data" ? "no band data — unknown, not zero" : y.status === "rest" ? "rest day (band worn, no sessions)" : `${y.sessions} session${y.sessions === 1 ? "" : "s"}, load ${y.load}${y.relativeToBaseline !== undefined ? ` = ${y.relativeToBaseline}× typical` : ""}`}; confidence ${y.confidence.replace(/_/g, " ").toLowerCase()}`);
+  }
+  const r = c.recent;
+  const win = (label: string, w: RollingLoad["windows"]["d7"]) => `${label}: ${w.knownDays}/${w.days} days known, total ${w.total}${w.relativeToBaseline !== undefined ? `, avg ${w.relativeToBaseline}× typical` : ""}, ${w.activeDays} active, ${w.highLoadDays} high-load`;
+  lines.push(`- Recent load (ending yesterday; unknown days excluded, never counted as zero):`);
+  for (const [label, w] of [["3 days", r.windows.d3], ["7 days", r.windows.d7], ["14 days", r.windows.d14], ["28 days", r.windows.d28]] as const) lines.push(`  · ${win(label, w)}`);
+  lines.push(`  · Personal reference day: ${r.reference !== undefined ? `${r.reference} load units` : "not established"}; consecutive high-load days: ${r.consecutiveHighLoadDays}${r.trend ? `; trend ${r.trend}` : ""}${r.monotony7 !== undefined ? `; 7-day monotony ${r.monotony7} (Foster)` : ""}`);
+  if (c.readiness) {
+    const rd = c.readiness;
+    lines.push(`- Sombrey Readiness (${rd.version}, ${rd.date}): ${rd.score !== undefined ? rd.score : "no score"}; state ${rd.state?.replace(/_/g, " ").toLowerCase() ?? "—"}; confidence ${rd.confidenceLevel?.toLowerCase() ?? "—"}`);
+    for (const dm of rd.domains) lines.push(`  · ${dm.metric}: ${dm.subScore !== undefined ? `${Math.round(dm.subScore)}/100 at ${Math.round(dm.weight * 100)}% weight` : "not included"} — ${dm.description}`);
+  } else {
+    lines.push("- Sombrey Readiness: not calculated yet today");
+  }
   if (c.recentHistory.length) lines.push(`- Previous 7 days active minutes: ${c.recentHistory.map((h) => `${h.date.slice(5)} ${h.activeMinutes}`).join(", ")}`);
-  if (c.recovery.readinessRecent.length) lines.push(`- Readiness (v1), recent: ${c.recovery.readinessRecent.map((r) => `${r.date.slice(5)} ${r.score}`).join(", ")}`);
+  if (c.recovery.readinessRecent.length) lines.push(`- Readiness, recent days: ${c.recovery.readinessRecent.map((x) => `${x.date.slice(5)} ${x.score}`).join(", ")}`);
   for (const r of c.recovery.relationships) lines.push(`- Pattern (${r.n} days, Spearman ρ=${r.rho}): ${r.statement}`);
   const t = c.training;
   lines.push(`- This week: ${t.trainingDaysThisWeek} training days, ${t.activeDaysThisWeek} active days, ${t.minutesThisWeek} min${t.planned ? `, ${t.planned.completed} of ${t.planned.scheduled} planned workouts` : ""}${t.usualTrainingDays !== undefined ? `; usual ${t.usualTrainingDays} training days/week` : ""}`);

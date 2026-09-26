@@ -178,14 +178,15 @@ test("separate sessions on one day both count", () => {
 test("Daily Load normalizes and caps each component", () => {
   const huge = sessionLoad({ ...mk("x", "band_activity", T0, 24 * 60 - 1) }, profile, new Map());
   const d = dailyLoad("2026-09-26", [huge]);
-  assert.equal(d.components.activity, COMPONENT_CAP);
+  assert.equal(d.normalized.activity, COMPONENT_CAP);                        // capped in reference doses
+  assert.equal(d.components.activity, Math.round(COMPONENT_CAP * (25 / 45) * 1000) / 1000); // × Strain v1 exchange rate
   assert.equal(dailyLoad("2026-09-26", []).load, 0);
   assert.equal(dailyLoad("2026-09-26", []).confidence, "HIGH_CONFIDENCE"); // nothing recorded is a certain zero
 });
 
 // ── Baseline & Strain ─────────────────────────────────────────────────────
 
-const day = (date: string, load: number) => ({ date, sessions: load > 0 ? 1 : 0, activeMinutes: 0, components: { cardio: load, activity: 0, resistance: 0 }, raw: { cardioLoad: 0, activityMetMinutes: 0, resistanceSetEquivalents: 0 }, load, confidence: "MODERATE_CONFIDENCE" as const });
+const day = (date: string, load: number) => ({ date, sessions: load > 0 ? 1 : 0, activeMinutes: 0, normalized: { cardio: load, activity: 0, resistance: 0 }, components: { cardio: load, activity: 0, resistance: 0 }, raw: { cardioLoad: 0, activityMetMinutes: 0, resistanceSetEquivalents: 0 }, load, confidence: "MODERATE_CONFIDENCE" as const });
 
 test("baseline requirements are explicit", () => {
   const few = strainBaseline([day("a", 1), day("b", 1)], ["MODERATE_CONFIDENCE"], 2);

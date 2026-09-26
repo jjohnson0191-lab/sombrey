@@ -18,6 +18,7 @@ import { strainBaseline, BASELINE_REQUIREMENTS, type Baseline } from "./baseline
 import { strainFor, type Strain } from "./strainScore.ts";
 import { epley } from "./resistanceLoad.ts";
 import type { HeartRateProfile } from "./zones.ts";
+import { dayStatus, rollingLoad, type LoadDay, type RollingLoad } from "./rollingLoad.ts";
 
 export type HistoricSet = { exerciseId: string; reps: number; weightKg?: number; completedAt: number };
 
@@ -42,6 +43,10 @@ export type IntelligenceInput = {
   days?: number;
   /** The user's first recorded session ever (days before it are unknown, not rest). */
   firstSessionMs?: number;
+  /** Local days on which the band was worn/synced (any reading or sleep) —
+   * lets a day without sessions count as a measured rest day rather than
+   * unknown. Absent → days without sessions are unknown. */
+  wearableDays?: Set<string>;
 };
 
 export type IntelligenceDays = {
@@ -51,11 +56,20 @@ export type IntelligenceDays = {
   days: DailyLoadResult[];
   baseline: Baseline;
   strain: Strain;
+  /** Yesterday's Strain against the baseline as it stood before yesterday. */
+  yesterdayStrain?: Strain;
+  /** Strain for every day, each against the baseline as it stood before
+   * that day (so a day's value doesn't drift as the baseline moves). */
+  strainByDay: Strain[];
+  /** Every day in the span with its status (oldest → today). */
+  loadDays: LoadDay[];
+  rolling: RollingLoad;
   droppedAsDuplicate: string[];
 };
 
 export function computeIntelligence(input: IntelligenceInput): IntelligenceDays {
-  const span = input.days ?? BASELINE_REQUIREMENTS.windowDays + 1;
+  // 28 days of history + yesterday's own baseline window + today.
+  const span = input.days ?? BASELINE_REQUIREMENTS.windowDays + 2;
   const { kept, dropped } = resolveOverlaps(input.sessions);
   const loads = kept.map((s) => sessionLoad(s, input.profile, referencesBefore(input.setHistory, s.startMs)));
   const byDay = new Map<string, SessionLoad[]>();
@@ -71,10 +85,29 @@ export function computeIntelligence(input: IntelligenceInput): IntelligenceDays 
 
   const first = input.firstSessionMs ?? (input.sessions.length ? Math.min(...input.sessions.map((s) => s.startMs)) : undefined);
   const firstKey = first !== undefined ? localDayKey(first, input.zone) : undefined;
-  const previous = days.slice(0, -1).filter((d) => firstKey !== undefined && d.date >= firstKey);
-  const historyDays = previous.length;
-  const quality = previous.flatMap((d) => (byDay.get(d.date) ?? []).map((l) => l.confidence));
-  const baseline = strainBaseline(previous, quality, historyDays);
+  // The baseline as it stood at day index i (from the days before it).
+  const baselineAt = (i: number): Baseline => {
+    const previous = days.slice(Math.max(0, i - BASELINE_REQUIREMENTS.windowDays), i).filter((d) => firstKey !== undefined && d.date >= firstKey);
+    const quality = previous.flatMap((d) => (byDay.get(d.date) ?? []).map((l) => l.confidence));
+    return strainBaseline(previous, quality, previous.length);
+  };
+  const baseline = baselineAt(days.length - 1);
+
+  const yesterday = days.length >= 2 ? days[days.length - 2] : undefined;
+
+  const loadDays: LoadDay[] = days.map((d, i) => ({
+    date: d.date,
+    load: d.load,
+    confidence: d.confidence,
+    status: firstKey !== undefined && d.date < firstKey && d.sessions === 0 && !input.wearableDays?.has(d.date)
+      ? "no_data"
+      : dayStatus(d, input.wearableDays?.has(d.date) ?? false, i === days.length - 1),
+  }));
+
+  // A day with no data is unknown — never "Strain 0".
+  const strainByDay = days.map((d, i): Strain => loadDays[i].status === "no_data"
+    ? { state: "NOT_ENOUGH_DATA", confidence: "INSUFFICIENT_DATA", approved: false, version: strainFor(d, baseline).version }
+    : strainFor(d, i === days.length - 1 ? baseline : baselineAt(i)));
 
   return {
     today,
@@ -82,6 +115,10 @@ export function computeIntelligence(input: IntelligenceInput): IntelligenceDays 
     days,
     baseline,
     strain: strainFor(today, baseline),
+    yesterdayStrain: yesterday ? strainByDay[days.length - 2] : undefined,
+    strainByDay,
+    loadDays,
+    rolling: rollingLoad(loadDays, baseline.reference),
     droppedAsDuplicate: dropped,
   };
 }

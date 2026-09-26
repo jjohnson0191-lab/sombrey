@@ -1341,6 +1341,30 @@ export default defineSchema({
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_bandStart", ["userId", "bandStartTimeSec"]),
 
+  // One row per user per local day: the day's load as the intelligence
+  // pipeline computed it, stamped with the Strain methodology version.
+  // Rewritten whenever readiness recomputes (so a late import corrects its
+  // day), never appended. The longitudinal record future validation uses
+  // (docs/SOMBREY_INTELLIGENCE_METHODOLOGY.md §Validation).
+  dailyLoadSnapshots: defineTable({
+    userId: v.id("users"),
+    date: v.string(),
+    timeZone: v.string(),
+    strainVersion: v.string(),
+    status: v.string(),                     // measured | incomplete | rest | no_data
+    sessions: v.number(),
+    activeMinutes: v.number(),
+    load: v.number(),                       // Daily Load units
+    cardio: v.number(),
+    resistance: v.number(),
+    activity: v.number(),
+    confidence: v.string(),
+    strainState: v.optional(v.string()),
+    strainValue: v.optional(v.number()),    // computed; display-gated separately
+    baselineReference: v.optional(v.number()),
+    computedAt: v.number(),
+  }).index("by_user_and_date", ["userId", "date"]),
+
   // Weather context (convex/environment.ts). NEVER coordinates: the app's
   // position is rounded to ~1 km only to ask the provider, then discarded.
   // One "current" row per user (upserted), plus one row per finished
@@ -1522,12 +1546,19 @@ export default defineSchema({
     algorithmVersion: v.string(),           // e.g. "v1"
     score: v.optional(v.number()),          // 0-100, unset when there isn't enough data yet
     confidence: v.number(),                 // 0-1, data sufficiency, not scientific confidence
+    // readiness-1.0 and later (absent on legacy "v1" rows):
+    confidenceLevel: v.optional(v.string()),  // HIGH | MODERATE | LOW | INSUFFICIENT
+    state: v.optional(v.string()),            // NOT_ENOUGH_DATA | BUILDING_BASELINE | LOW_CONFIDENCE | READY
+    timeZone: v.optional(v.string()),         // the zone `date` is a day in
     components: v.array(v.object({
       metric: v.string(),
       subScore: v.optional(v.number()),
       weight: v.number(),
+      nominalWeight: v.optional(v.number()),
       confidence: v.number(),
       description: v.string(),
+      personal: v.optional(v.boolean()),
+      detail: v.optional(v.string()),        // JSON of the domain's inputs
     })),
     missingInputs: v.array(v.string()),
     calculatedAt: v.number(),               // epoch ms

@@ -8,7 +8,7 @@
 // scored from its band summary (lower confidence) — never from invented
 // samples. Budget hits are reported, not hidden.
 
-import type { QueryCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { activityName, loadProgressData, type ProgressData } from "./progressData";
 import { resolveZone } from "./userTimeZone";
@@ -26,6 +26,7 @@ import type { SessionInput } from "./strain/sessionLoad";
 import type { HRSample } from "./strain/cardiovascularLoad";
 import { type Zone, localDayKey, localDayKeyDaysAgo, wallClockToInstant } from "./strain/time";
 import { BASELINE_REQUIREMENTS } from "./strain/baseline";
+import { STRAIN_FORMULA_VERSION } from "./strain/strainScore";
 
 const PER_SESSION_READS = 1500;
 const TOTAL_READS = 6000;
@@ -43,7 +44,7 @@ function startOfDayKey(key: string, zone: Zone): number {
 }
 
 export async function loadIntelligence(ctx: QueryCtx, userId: Id<"users">, data: ProgressData, zone: Zone, nowMs: number): Promise<Intelligence> {
-  const span = BASELINE_REQUIREMENTS.windowDays + 1;
+  const span = BASELINE_REQUIREMENTS.windowDays + 2;
   const windowStart = startOfDayKey(localDayKeyDaysAgo(nowMs, span - 1, zone), zone);
 
   // Resting heart rate: the band's own resting readings, last 28 days.
@@ -115,6 +116,7 @@ export async function loadIntelligence(ctx: QueryCtx, userId: Id<"users">, data:
     });
   }
 
+  const wearableDays = await loadWearableDays(ctx, userId, zone, windowStart);
   const result = computeIntelligence({
     sessions: inputs,
     profile,
@@ -123,8 +125,28 @@ export async function loadIntelligence(ctx: QueryCtx, userId: Id<"users">, data:
     nowMs,
     days: span,
     firstSessionMs: data.sessions.length ? Math.min(...data.sessions.map((s) => s.startedAt)) : undefined,
+    wearableDays,
   });
   return { ...result, profile, zone, readBudgetHit };
+}
+
+/** Local days on which the band was demonstrably worn or synced: a daily
+ * step summary, a resting-HR reading, or a sleep session ending that day.
+ * (Heart-rate rows are not scanned — too many; these cheaper signals are
+ * enough to tell a rest day from a day with no data.) */
+export async function loadWearableDays(ctx: QueryCtx, userId: Id<"users">, zone: Zone, sinceMs: number): Promise<Set<string>> {
+  const days = new Set<string>();
+  for (const metricType of ["steps", "resting_heart_rate"] as const) {
+    const rows = await ctx.db.query("wearableMeasurements")
+      .withIndex("by_user_metric_and_recordedAt", (q) => q.eq("userId", userId).eq("metricType", metricType).gte("recordedAt", sinceMs))
+      .take(3000);
+    for (const r of rows) if (r.value > 0) days.add(localDayKey(r.recordedAt, zone));
+  }
+  const sleeps = await ctx.db.query("wearableSleepSessions")
+    .withIndex("by_user_and_startedAt", (q) => q.eq("userId", userId).gte("startedAt", sinceMs - DAY_MS))
+    .take(200);
+  for (const s of sleeps) days.add(localDayKey(s.endedAt, zone));
+  return days;
 }
 
 /** Next-morning outcomes by local day, for load ↔ recovery patterns:
@@ -167,6 +189,16 @@ export async function coachIntelligenceLines(ctx: QueryCtx, user: Doc<"users">, 
   const records = personalRecords(data.sessions, data.sets, nowMs, activityName).slice(0, 6)
     .map((r) => `${r.subject} — ${r.metric} ${r.display} (${localDayKey(r.date, zone)}, ${r.source})`);
   const insights = youVsYou(data.sessions, data.readiness, data.weights, nowMs, activityName).map((i) => `${i.text} [${i.basis}]`);
+  const latestReadiness = await ctx.db.query("readinessScores")
+    .withIndex("by_user_and_date", (q) => q.eq("userId", user._id)).order("desc").first();
+  const readinessToday = latestReadiness && latestReadiness.date === intelligence.today.date ? {
+    date: latestReadiness.date,
+    score: latestReadiness.score,
+    state: latestReadiness.state,
+    confidenceLevel: latestReadiness.confidenceLevel,
+    version: latestReadiness.algorithmVersion,
+    domains: latestReadiness.components.map((c) => ({ metric: c.metric, subScore: c.subScore, weight: c.weight, confidence: c.confidence, description: c.description })),
+  } : undefined;
   const context = buildIntelligenceContext({
     timeZone: typeof zone === "string" ? zone : `UTC${zone >= 0 ? "+" : ""}${zone / 60}`,
     intelligence: intelligence,
@@ -180,8 +212,46 @@ export async function coachIntelligenceLines(ctx: QueryCtx, user: Doc<"users">, 
     body: { weightKg: body.latest?.weightKg, source: body.latest?.source, changeKg: body.changeKg },
     records,
     insights,
+    readinessToday,
   });
   const lines = renderIntelligenceContext(context);
   for (const m of milestones(data.sessions, zone).slice(0, 3)) lines.push(`- Milestone: ${m.title} (${localDayKey(m.achievedAt, zone)})`);
   return lines;
+}
+
+/** Rewrites the per-day load record for every past day in the window
+ * (idempotent: one row per user and day; unchanged rows are not written). */
+export async function upsertDailyLoadSnapshots(ctx: MutationCtx, userId: Id<"users">, intelligence: Intelligence, nowMs: number): Promise<number> {
+  const zone = typeof intelligence.zone === "string" ? intelligence.zone : `UTC${intelligence.zone >= 0 ? "+" : ""}${intelligence.zone / 60}`;
+  const first = intelligence.days[0]?.date;
+  if (!first) return 0;
+  const existing = await ctx.db.query("dailyLoadSnapshots")
+    .withIndex("by_user_and_date", (q) => q.eq("userId", userId).gte("date", first)).take(100);
+  const byDate = new Map(existing.map((r) => [r.date, r]));
+  let written = 0;
+  for (let i = 0; i < intelligence.days.length - 1; i++) { // today is still in progress
+    const d = intelligence.days[i];
+    const status = intelligence.loadDays[i]?.status ?? "no_data";
+    const strain = intelligence.strainByDay[i];
+    const row = {
+      userId, date: d.date, timeZone: zone, strainVersion: STRAIN_FORMULA_VERSION, status,
+      sessions: d.sessions, activeMinutes: d.activeMinutes, load: d.load,
+      cardio: d.components.cardio, resistance: d.components.resistance, activity: d.components.activity,
+      confidence: d.confidence,
+      strainState: strain?.state, strainValue: strain?.proposedValue,
+      baselineReference: strain?.reference,
+      computedAt: nowMs,
+    };
+    const prev = byDate.get(d.date);
+    if (prev) {
+      const { _id, _creationTime, computedAt: _c, ...old } = prev;
+      const { computedAt: _n, ...next } = row;
+      if (JSON.stringify(Object.entries(old).sort()) === JSON.stringify(Object.entries(next).filter(([, v]) => v !== undefined).sort())) continue;
+      await ctx.db.replace(prev._id, row);
+    } else {
+      await ctx.db.insert("dailyLoadSnapshots", row);
+    }
+    written++;
+  }
+  return written;
 }

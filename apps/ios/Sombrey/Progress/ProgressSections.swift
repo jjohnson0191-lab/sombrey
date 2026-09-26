@@ -121,6 +121,12 @@ struct StrainHero: View {
                 .font(StudioFont.body(12))
                 .foregroundStyle(StudioColor.paperSoft)
                 .fixedSize(horizontal: false, vertical: true)
+            if let line = strain.intelligence?.recentLine {
+                Text(line)
+                    .font(StudioFont.body(12))
+                    .foregroundStyle(StudioColor.paperSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let intel = strain.intelligence {
                 HStack(spacing: 18) {
                     stat("Data quality", StrainIntelligenceDTO.confidenceLabel(intel.confidence))
@@ -132,7 +138,7 @@ struct StrainHero: View {
                 Text("How strain will be scored")
                     .font(StudioFont.body(12, weight: .semibold))
                     .foregroundStyle(StudioColor.paper)
-                Text("Sombrey measures each session's load from time in your heart-rate zones (or, without usable heart rate, the activity itself) plus the sets you lift — against your own typical day. Readiness, calories and weather are never part of it. The number appears once the band's readings are validated and the formula is reviewed.")
+                Text("Sombrey Strain v1 measures each session's load from time in your heart-rate zones (or, without usable heart rate, the activity itself) plus the sets you lift, against your own typical training day. Readiness, calories and weather are never part of it. Your recent load does inform Readiness. The number appears once the band's readings are physically validated.")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.paperFaint)
                     .fixedSize(horizontal: false, vertical: true)

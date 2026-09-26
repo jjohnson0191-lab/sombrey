@@ -163,7 +163,7 @@ struct ReadinessGauge: View {
                         .tracking(1.6)
                         .foregroundStyle(StudioColor.paper)
                 }
-                Text("\(result.confidenceBand) confidence")
+                Text(["\(result.confidenceBand) confidence", Self.stateNote(result.state)].compactMap { $0 }.joined(separator: " · "))
                     .font(StudioFont.body(12))
                     .foregroundStyle(StudioColor.paperSoft)
                 Text(basisText)
@@ -431,6 +431,15 @@ struct ReadinessGauge: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Readiness history, \(scores.values.compactMap { $0 }.count) scored days in the last 14")
+    }
+
+    /// Readiness v1 state, in words (nil when there's nothing to add).
+    nonisolated static func stateNote(_ state: String?) -> String? {
+        switch state {
+        case "BUILDING_BASELINE": return "building your baseline"
+        case "LOW_CONFIDENCE": return "limited data"
+        default: return nil
+        }
     }
 
     /// "yyyy-MM-dd" for the last `count` days, oldest first — the same

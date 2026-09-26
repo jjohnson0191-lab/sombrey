@@ -31,6 +31,9 @@ struct ReadinessResult {
     let contributingFactors: [ContributingFactor]
     let missingInputs: [String]
     let calculatedAt: Date
+    /// Readiness v1: NOT_ENOUGH_DATA | BUILDING_BASELINE | LOW_CONFIDENCE | READY
+    /// (nil on legacy rows).
+    var state: String? = nil
     /// Every component the server evaluated — included or not — exactly
     /// as `convex/readiness/scoring.ts` produced it. The score is the sum
     /// of included components' `subScore × weight`, so this is a true
@@ -41,7 +44,8 @@ struct ReadinessResult {
 /// One readiness signal as the server scored it.
 struct ReadinessComponent: Identifiable, Hashable {
     var id: String { metric }
-    /// "sleep" | "cardiovascular" | "trainingLoad" | "physiological".
+    /// Readiness v1: "sleep" | "cardiovascular" | "recentLoad" | "physiological"
+    /// (legacy rows: "trainingLoad" in place of "recentLoad").
     let metric: String
     /// 0–100, nil when the signal had too little data to be scored.
     let subScore: Double?
@@ -60,12 +64,13 @@ struct ReadinessComponent: Identifiable, Hashable {
     var shortfall: Double { isIncluded ? (100 - (subScore ?? 0)) * weight : 0 }
 
     /// Fixed display order — the server's own base-weight order.
-    static let order = ["sleep", "cardiovascular", "trainingLoad", "physiological"]
+    static let order = ["sleep", "cardiovascular", "recentLoad", "trainingLoad", "physiological"]
 
     var displayName: String {
         switch metric {
         case "sleep": return "Sleep"
         case "cardiovascular": return "Cardiovascular"
+        case "recentLoad": return "Recent load"
         case "trainingLoad": return "Training load"
         case "physiological": return "Physiological"
         default: return metric.capitalized
@@ -101,6 +106,8 @@ struct ReadinessResultDTO: Decodable {
     private let components: [ReadinessComponentDTO]
     let missingInputs: [String]
     let calculatedAt: Double
+    let state: String?
+    let confidenceLevel: String?
 
     func toReadinessResult() -> ReadinessResult {
         // Only components that actually produced a reading become
@@ -121,6 +128,7 @@ struct ReadinessResultDTO: Decodable {
             contributingFactors: factors,
             missingInputs: missingInputs,
             calculatedAt: Date(timeIntervalSince1970: calculatedAt / 1000),
+            state: state,
             components: components
                 .map { ReadinessComponent(metric: $0.metric, subScore: $0.subScore, weight: $0.weight, confidence: $0.confidence, description: $0.description) }
                 .sorted { (ReadinessComponent.order.firstIndex(of: $0.metric) ?? 99) < (ReadinessComponent.order.firstIndex(of: $1.metric) ?? 99) }

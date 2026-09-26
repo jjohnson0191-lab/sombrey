@@ -70,3 +70,28 @@ struct IntelligenceModelTests {
         #expect(EnvironmentLine.text(unavailable, access: .allowed) == nil)
     }
 }
+
+/// Readiness v1 on the phone: new domain names, states and legacy rows.
+struct ReadinessV1ModelTests {
+    @Test func readinessV1RowDecodesWithStateAndRecentLoad() throws {
+        let json = #"{"userId":"u","date":"2026-09-26","algorithmVersion":"readiness-1.0","score":78,"confidence":0.62,"scoreBand":"Ready","confidenceBand":"Moderate","components":[{"metric":"sleep","subScore":90,"weight":0.5,"confidence":0.8,"description":"Sleep met your usual need"},{"metric":"recentLoad","subScore":80,"weight":0.25,"confidence":0.7,"description":"Recent load is above your typical days","detail":"{}"}],"missingInputs":[],"calculatedAt":0,"state":"READY","confidenceLevel":"MODERATE"}"#
+        let result = try JSONDecoder().decode(ReadinessResultDTO.self, from: Data(json.utf8)).toReadinessResult()
+        #expect(result.state == "READY")
+        #expect(result.components.map(\.displayName) == ["Sleep", "Recent load"])
+        #expect(ReadinessGauge.stateNote("BUILDING_BASELINE") == "building your baseline")
+        #expect(ReadinessGauge.stateNote("READY") == nil)
+    }
+
+    @Test func legacyRowStillDecodes() throws {
+        let json = #"{"userId":"u","date":"2026-09-01","algorithmVersion":"v1","score":70,"confidence":0.5,"scoreBand":"Ready","confidenceBand":"Improving","components":[{"metric":"trainingLoad","subScore":90,"weight":0.25,"confidence":0.5,"description":"x"}],"missingInputs":[],"calculatedAt":0}"#
+        let result = try JSONDecoder().decode(ReadinessResultDTO.self, from: Data(json.utf8)).toReadinessResult()
+        #expect(result.state == nil)
+        #expect(result.components.first?.displayName == "Training load")
+    }
+
+    @Test func recentLoadLineSaysUnknownDaysAreUnknown() throws {
+        let json = #"{"yesterdayStatus":"no_data","knownDays7":4,"activeDays7":3,"highLoadDays7":1,"unknownDays7":3,"consecutiveHighLoadDays":0}"#
+        let recent = try JSONDecoder().decode(StrainIntelligenceDTO.Recent.self, from: Data(json.utf8))
+        #expect(recent.unknownDays7 == 3)
+    }
+}
