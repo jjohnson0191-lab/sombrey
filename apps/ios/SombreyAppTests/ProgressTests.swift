@@ -251,3 +251,38 @@ struct LogoAndHourlyWeatherTests {
     }
 }
 
+
+/// Sombrey tab and Sombrey Coach surface.
+struct SombreyCoachSurfaceTests {
+    @Test func theFivePrimaryTabsAreExactlyThese() {
+        #expect(SombreyTab.allCases.map(\.label) == ["Home", "Train", "Progress", "Sombrey", "Settings"])
+        #expect(!SombreyTab.allCases.map(\.label).contains("AI"))
+    }
+
+    @Test @MainActor func startersAskTheRealCoachRatherThanNavigating() {
+        #expect(SombreyConversationStarters.starters.map(\.label) == ["Today's training", "Recovery", "Nutrition", "My progress"])
+        #expect(SombreyConversationStarters.starters.allSatisfy { $0.question.hasSuffix("?") })
+    }
+
+    @Test @MainActor func composerSendsOnlyRealTextAndResetClearsTheConversation() {
+        let conversation = SombreyCoachConversation()
+        #expect(!conversation.canSend)
+        conversation.draft = "   \n "
+        #expect(!conversation.canSend)
+        conversation.draft = "What should I do today?"
+        #expect(conversation.canSend)
+        conversation.reset()
+        #expect(conversation.draft.isEmpty && conversation.messages.isEmpty && conversation.failure == nil && !conversation.isResponding)
+    }
+
+    @Test func scrollingTheConversationNeverBecomesATabSwipe() {
+        // A vertical scroll through history: never paging.
+        #expect(PrimaryPager.decide(translation: CGSize(width: 6, height: 80), startsInExcludedRegion: false) == .ignored)
+        // A diagonal drag: ambiguous, so nothing.
+        #expect(PrimaryPager.decide(translation: CGSize(width: 40, height: 35), startsInExcludedRegion: false) == .ignored)
+        // Text editing in the composer is excluded outright.
+        #expect(PrimaryPager.decide(translation: CGSize(width: -60, height: 2), startsInExcludedRegion: true) == .ignored)
+        // Only a clearly horizontal drag elsewhere pages.
+        #expect(PrimaryPager.decide(translation: CGSize(width: -60, height: 4), startsInExcludedRegion: false) == .paging)
+    }
+}

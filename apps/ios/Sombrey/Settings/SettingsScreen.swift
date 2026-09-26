@@ -350,7 +350,7 @@ enum CoachingMode: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .fullControl: return "Sombrey AI can create and adjust your training and nutrition directly."
+        case .fullControl: return "Sombrey Coach can create and adjust your training and nutrition directly."
         case .recommendations: return "You stay in control of your program — Sombrey offers suggestions, never changes it."
         case .trackingOnly: return "Sombrey records and analyzes your data without proactive coaching."
         }

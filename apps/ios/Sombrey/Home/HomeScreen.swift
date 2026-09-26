@@ -659,7 +659,7 @@ struct HomeScreen: View {
         HStack(spacing: 12) {
             Button("Start workout") { appState.selectedTab = .train }
                 .buttonStyle(.illuminatedCTA)
-            Button("Ask Sombrey") { appState.selectedTab = .aiCoach }
+            Button("Ask Sombrey") { appState.openCoach() }
                 .buttonStyle(.outlineCTA)
         }
     }

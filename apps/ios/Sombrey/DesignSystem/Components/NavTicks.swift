@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// The five primary destinations, in the approved order. Supersedes the
-/// earlier five-tab set (Home/Train/Nutrition/Progress/Profile) — Nutrition
-/// is reached from Home, not its own tab; AI is a full peer tab. Matches
+/// The five primary destinations, in the approved order: Home, Train,
+/// Progress, Sombrey, Settings. Supersedes the earlier five-tab set
+/// (Home/Train/Nutrition/Progress/Profile) — Nutrition is reached from Home
+/// and lives inside Sombrey; Sombrey (Sombrey Coach) is a full peer tab. Matches
 /// `apps/mobile/src/ui/NavTicks.tsx`'s `TICKS` list exactly.
 enum SombreyTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case train = "Train"
     case progress = "Progress"
-    case aiCoach = "AI"
+    case sombrey = "Sombrey"
     case settings = "Settings"
 
     var id: String { rawValue }

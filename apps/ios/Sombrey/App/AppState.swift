@@ -47,11 +47,22 @@ final class AppState {
         var id: String { rawValue }
     }
 
-    /// Opens AI › Nutrition from anywhere.
+    /// Opens Sombrey › Nutrition from anywhere.
     func openNutrition() {
         aiSection = .nutrition
-        selectedTab = .aiCoach
+        selectedTab = .sombrey
     }
+
+    /// Opens Sombrey › Coach from anywhere.
+    func openCoach() {
+        aiSection = .coach
+        selectedTab = .sombrey
+    }
+
+    /// The Sombrey Coach conversation — kept here (not in the screen, which
+    /// is rebuilt on every tab change) so it survives moving between tabs.
+    /// Cleared on sign-out.
+    let coach = SombreyCoachConversation()
     private(set) var authPhase: AuthPhase = .loading
     private(set) var currentUser: SombreyUser?
     private(set) var userLoadError: String?
@@ -114,6 +125,7 @@ final class AppState {
         await ConvexClientProvider.client.logout()
         currentUser = nil
         userLoadError = nil
+        coach.reset()
         authPhase = .signedOut
     }
 

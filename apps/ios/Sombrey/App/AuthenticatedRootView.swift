@@ -59,7 +59,7 @@ struct AuthenticatedRootView: View {
             if showsNav {
                 NavTicks(selection: $appState.selectedTab)
                     // Only the bar ignores the keyboard (screens still
-                    // lift their own inputs, e.g. AI Coach's composer).
+                    // lift their own inputs, e.g. Sombrey Coach's composer).
                     .ignoresSafeArea(.keyboard, edges: .bottom)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 24)))
             }
@@ -103,7 +103,7 @@ struct AuthenticatedRootView: View {
         case .home: HomeScreen()
         case .train: TrainScreen()
         case .progress: ProgressScreen()
-        case .aiCoach: AICoachScreen()
+        case .sombrey: SombreyScreen()
         case .settings: SettingsScreen()
         }
     }
