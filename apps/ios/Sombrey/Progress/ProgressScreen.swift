@@ -1,72 +1,91 @@
 import SwiftUI
-import Charts
 import ConvexMobile
 
-/// Real data only: `measurements:list` and `progressPhotos:list` are the
-/// same existing, unmodified Convex queries `apps/mobile`'s
-/// ProgressScreen already uses.
+/// Progress — how the user is changing, over time. Calm by default: each
+/// section rests as one concise reading and opens in place (the Vitals
+/// interaction model), each with its own character — strain accumulates,
+/// body trends, performance graphs, consistency patterns, records reveal,
+/// load pairs with recovery.
 ///
-/// Phase 3 readiness expansion: adds the Recovery surface the training-
-/// architecture spec asks for — sleep, recent vitals, training load/
-/// history, and a readiness trend — reusing this screen's own existing
-/// section pattern and chart treatment (the weight `Chart`/`LineMark`
-/// above) rather than introducing new visual language. Blood pressure/
-/// SpO2/temperature are shown as plain informational readings, never
-/// framed as medical or diagnostic.
+/// Everything is derived from the user's recorded history on the server
+/// (`progress:overview` / `progress:performance`, convex/progress/*); a
+/// section with too little data says so rather than inventing a value.
+/// Daily Strain has no validated formula yet — the hero says so and shows
+/// only measured load.
 struct ProgressScreen: View {
     @Environment(AppState.self) private var appState
-    @State private var measurements = ConvexQuery<[MeasurementEntry]>()
+    @State private var overview = ConvexQuery<ProgressOverviewDTO>()
     @State private var photos = ConvexQuery<[ProgressPhotoEntry]>()
-    @State private var recentVitals = ConvexQuery<[WearableMeasurementDTO]>()
-    @State private var recentSleep = ConvexQuery<[SleepSessionSummaryDTO]>()
-    @State private var recentSportSessions = ConvexQuery<[SportSessionSummaryDTO]>()
-    @State private var recentWorkouts = ConvexQuery<[SombreyWorkoutSummaryDTO]>()
-    @State private var readinessHistory = ConvexQuery<[ReadinessResultDTO]>()
+    @AppStorage("sombreyProgress.bodyBaseline") private var bodyBaseline = "first"
     @State private var showingVitals = false
+
+    private var tzOffsetMinutes: Double { Double(TimeZone.current.secondsFromGMT() / 60) }
 
     var body: some View {
         @Bindable var appState = appState
         ScreenContainer(scene: .progress, selection: $appState.selectedTab) {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Progress")
-                    .font(StudioFont.hero(32, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .padding(.top, 20)
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    TrainEyebrow(text: "Your progress")
+                    Text("Progress")
+                        .font(StudioFont.hero(32, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                }
+                .padding(.top, 20)
+                .studioReveal(index: 0)
 
-                vitalsEntry
-                weightSection
-                photosSection
-                readinessTrendSection
-                sleepSection
-                vitalsSection
-                trainingHistorySection
+                content
             }
             .padding(.bottom, 24)
         }
-        .task {
-            measurements.subscribe(to: "measurements:list")
-            photos.subscribe(to: "progressPhotos:list")
-            recentVitals.subscribe(to: "wearable:getRecentMeasurements")
-            recentSleep.subscribe(to: "wearable:getRecentSleepSessions")
-            recentSportSessions.subscribe(to: "sportPlusSessions:getRecentSessions")
-            recentWorkouts.subscribe(to: "sombreyWorkouts:listHistory")
-            readinessHistory.subscribe(to: "readiness:getHistory")
+        .task { photos.subscribe(to: "progressPhotos:list") }
+        .task(id: bodyBaseline) {
+            overview.subscribe(to: "progress:overview", with: ["tzOffsetMinutes": tzOffsetMinutes, "bodyBaseline": bodyBaseline])
         }
+        .fullScreenCover(isPresented: $showingVitals) { VitalsScreen() }
     }
 
     @ViewBuilder
-    /// Vitals is Progress's deep biometric history — every band metric's
-    /// instrument with LIVE/TODAY/7D/30D history, sleep and activity.
+    private var content: some View {
+        if let o = overview.value {
+            StrainHero(overview: o).studioReveal(index: 1)
+            BodySection(summary: o.body, baseline: $bodyBaseline, photoCount: photos.value?.count ?? 0).studioReveal(index: 2)
+            PerformanceSection().studioReveal(index: 3)
+            YouVsYouSection(insights: o.insights).studioReveal(index: 4)
+            ConsistencySection(consistency: o.consistency).studioReveal(index: 5)
+            RecordsSection(records: o.records).studioReveal(index: 6)
+            LoadRecoverySection(loadRecovery: o.loadRecovery, longer: o.loadRecovery28).studioReveal(index: 6)
+            MilestonesSection(milestones: o.milestones).studioReveal(index: 6)
+            vitalsEntry
+        } else if overview.isLoading {
+            HStack(spacing: 10) {
+                ProgressView().tint(StudioColor.ink).controlSize(.small)
+                Text("Reading your history…")
+                    .font(StudioFont.body(13))
+                    .foregroundStyle(StudioColor.inkSoft)
+            }
+            .padding(.top, 40)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("We couldn't load your progress.")
+                    .font(StudioFont.body(16, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
+                Text("Check your connection and try again.")
+                    .font(StudioFont.body(13))
+                    .foregroundStyle(StudioColor.inkSoft)
+            }
+            .padding(.top, 24)
+        }
+    }
+
+    /// Vitals — the band's full biometric history — stays one tap away.
     private var vitalsEntry: some View {
         Button {
             showingVitals = true
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("VITALS")
-                        .font(StudioFont.body(11, weight: .semibold))
-                        .tracking(1.3)
-                        .foregroundStyle(StudioColor.inkSoft)
+                    TrainEyebrow(text: "Vitals")
                     Text("Heart rate, SpO2, temperature, blood pressure, activity and sleep — full history")
                         .font(StudioFont.body(14, weight: .medium))
                         .foregroundStyle(StudioColor.ink)
@@ -77,199 +96,13 @@ struct ProgressScreen: View {
                     .font(.system(size: 11))
                     .foregroundStyle(StudioColor.inkFaint)
             }
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .studioCard()
-        .fullScreenCover(isPresented: $showingVitals) { VitalsScreen() }
-    }
-
-    private var weightSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("WEIGHT")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
-
-            if measurements.isLoading {
-                ProgressView().tint(StudioColor.ink)
-            } else if let error = measurements.errorMessage {
-                Text("Couldn't load measurements: \(error)")
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.danger)
-            } else {
-                let entries = (measurements.value ?? []).filter { $0.weight != nil }
-                if let latest = entries.last, let weight = latest.weight {
-                    HeroNumberText(text: String(format: "%.1f", weight), size: .md, tone: .ink)
-                    Text("kg · most recent entry")
-                        .font(StudioFont.body(12))
-                        .foregroundStyle(StudioColor.inkSoft)
-                }
-                if entries.count > 1 {
-                    Chart(entries) { entry in
-                        LineMark(
-                            x: .value("Date", Date(timeIntervalSince1970: entry.date / 1000)),
-                            y: .value("Weight", entry.weight ?? 0)
-                        )
-                        .foregroundStyle(StudioColor.accentInk)
-                        .interpolationMethod(.monotone)
-                    }
-                    .chartYAxis { AxisMarks(position: .trailing) }
-                    .chartXAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
-                    .frame(height: 140)
-                    .padding(.top, 4)
-                } else if entries.isEmpty {
-                    Text("No weight entries logged yet.")
-                        .font(StudioFont.body(13))
-                        .foregroundStyle(StudioColor.inkFaint)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var photosSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("PROGRESS PHOTOS")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
-            let count = photos.value?.count ?? 0
-            Text(count > 0 ? "\(count) photo(s) logged" : "No progress photos yet.")
-                .font(StudioFont.body(13))
-                .foregroundStyle(count > 0 ? StudioColor.ink : StudioColor.inkFaint)
-        }
-    }
-
-    @ViewBuilder
-    private var readinessTrendSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("READINESS TREND")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
-            let scored = (readinessHistory.value ?? []).filter { $0.score != nil }.reversed()
-            if scored.count > 1 {
-                Chart(Array(scored.enumerated()), id: \.offset) { _, entry in
-                    LineMark(
-                        x: .value("Date", entry.date),
-                        y: .value("Readiness", Double(entry.score!))
-                    )
-                    .foregroundStyle(StudioColor.accentInk)
-                    .interpolationMethod(.monotone)
-                }
-                .chartYScale(domain: 0...100)
-                .chartYAxis { AxisMarks(position: .trailing) }
-                .chartXAxis(.hidden)
-                .frame(height: 100)
-            } else {
-                Text("Not enough readiness history yet — check back after a few more days of wearable data.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var sleepSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("SLEEP")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
-            if let latest = recentSleep.value?.first {
-                let hours = latest.totalSleepMinutes / 60
-                let minutes = latest.totalSleepMinutes % 60
-                Text("\(hours)h \(minutes)m most recent night")
-                    .font(StudioFont.body(15, weight: .medium))
-                    .foregroundStyle(StudioColor.ink)
-                if let stages = latest.stages, !stages.isEmpty {
-                    let byStage = Dictionary(grouping: stages, by: \.stage).mapValues { $0.reduce(0) { $0 + $1.durationMinutes } }
-                    Text(["light", "deep", "rem"].compactMap { stage in
-                        byStage[stage].map { "\(stage.capitalized) \($0)m" }
-                    }.joined(separator: " · "))
-                        .font(StudioFont.body(12))
-                        .foregroundStyle(StudioColor.inkSoft)
-                }
-            } else {
-                Text("No sleep data synced yet.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var vitalsSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("RECENT VITALS")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
-            let readings = recentVitals.value ?? []
-            if readings.isEmpty {
-                Text("No wearable vitals synced yet.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let hr = latestValue(readings, metric: "heart_rate") {
-                        Text("Heart rate: \(Int(hr)) bpm")
-                    }
-                    if let spo2 = latestValue(readings, metric: "spo2") {
-                        Text("SpO2: \(Int(spo2))%")
-                    }
-                    if let temp = latestValue(readings, metric: "skin_temperature") {
-                        Text(String(format: "Skin temperature: %.1f°C", temp))
-                    }
-                    if let sys = latestValue(readings, metric: "blood_pressure_systolic"),
-                       let dia = latestValue(readings, metric: "blood_pressure_diastolic") {
-                        Text("Blood pressure: \(Int(sys))/\(Int(dia))")
-                    }
-                }
-                .font(StudioFont.body(13))
-                .foregroundStyle(StudioColor.ink)
-                Text("From your Sombrey Band — training readiness signals, not a medical measurement.")
-                    .font(StudioFont.body(11))
-                    .foregroundStyle(StudioColor.inkFaint)
-                    .padding(.top, 2)
-            }
-        }
-    }
-
-    private func latestValue(_ readings: [WearableMeasurementDTO], metric: String) -> Double? {
-        readings.filter { $0.metricType == metric }.max(by: { $0.recordedAt < $1.recordedAt })?.value
-    }
-
-    @ViewBuilder
-    private var trainingHistorySection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("TRAINING LOAD")
-                .font(StudioFont.body(11, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(StudioColor.inkSoft)
-            let workouts = recentWorkouts.value ?? []
-            let sportSessions = recentSportSessions.value ?? []
-            if workouts.isEmpty && sportSessions.isEmpty {
-                Text("No training sessions logged yet.")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.inkFaint)
-            } else {
-                let weekAgo = Date().timeIntervalSince1970 * 1000 - 7 * 24 * 60 * 60 * 1000
-                let sessionsThisWeek = sportSessions.filter { $0.startedAt >= weekAgo }.count
-                let workoutsThisWeek = workouts.filter { $0.startedAt >= weekAgo }.count
-                Text("\(workoutsThisWeek) training session(s) and \(sessionsThisWeek) wearable-tracked activity session(s) this week")
-                    .font(StudioFont.body(13))
-                    .foregroundStyle(StudioColor.ink)
-                Text("\(workouts.count) session(s) in your full history")
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.inkSoft)
-            }
-        }
     }
 }
-
-// MARK: - Convex wire DTOs (only the fields this screen needs)
 
 struct WearableMeasurementDTO: Decodable {
     let metricType: String

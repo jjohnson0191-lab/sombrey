@@ -118,6 +118,28 @@ Train separates **Training** (structured exercise: `TrainingSessionManager`, `so
   - `pendingDetections` / `labelDetection`: "we noticed activity", from band heart rate. It asks the user rather than classifying, and stores the answer in `activityLabels`.
 - There is no load, Strain or AI interpretation yet. Every record carries activity key, category, duration (with its source), heart-rate response, energy, distance, steps, provenance and timestamps, ready for them.
 
+## Progress (Progress tab)
+
+`convex/progress.ts` (`overview`, `performance`) derives everything on read from the stores that already exist (`convex/progressData.ts`): `sombreyWorkouts` + sets, `sportPlusSessions` (sessions attached to a workout counted once), `activityLabels`, `readinessScores` and `measurements`. Pure modules in `convex/progress/`:
+
+- `strainEngine.ts`: the isolated `StrainEngine` interface. `CURRENT_STRAIN_ENGINE` has **no validated formula and never returns a number**; `dailyLoad` reports measured sessions and minutes instead.
+- `body.ts`: weight in `measurements` (now carrying `source`: manual / scanner / band / calculated / estimated), a baseline (first entry, 30 or 90 days ago) and the change against it.
+- `performance.ts`: workouts (all, or per exercise: top weight, Epley e1RM for 1–10 reps labelled estimated, volume, reps) and activities, using each activity's own family metrics. Only metrics with recorded values are offered, and only ranges the data reaches.
+- `consistency.ts`: training and active days, time, planned vs completed. The usual week appears after 3 weeks of history.
+- `records.ts`: bests per exercise and per activity family metric, with the previous record and the source; a single occurrence is not a record.
+- `milestones.ts`: thresholds dated to the session that crossed them.
+- `loadRecovery.ts`: load paired with next-morning readiness. A relationship is stated only with ≥21 paired days and |r| ≥ 0.4.
+- `youVsYou.ts`: period comparisons that need enough data on both sides and a meaningful change.
+- `coachContext.ts`: the AI Coach receives these as structured lines with their basis.
+
+### Daily Strain — audit (no formula yet)
+
+- **Available:** session durations (band-reconciled workouts, activities), session type and activity family, band-record average/peak/lowest heart rate, band calories, band heart-rate readings through the day, resting heart rate, readiness v1, sets × reps × weight.
+- **Missing:** continuous all-day heart rate at a verified sample rate; per-session heart-rate series verified on the band; HRV (ring-only per the SDK); a measured max heart rate (only 220−age, and only with a date of birth); session RPE.
+- **Current formula:** none. No strain score is calculated anywhere.
+- **Proposed future inputs:** time in heart-rate zones relative to the user's own resting and maximum heart rate (TRIMP family); duration × activity family for sessions without usable heart rate; resistance volume as its own component; the user's own rolling baseline for context.
+- **Known limitations:** band clock and duration unit unverified; optical wrist heart rate is noisy in intense or grip-heavy movement; max heart rate is estimated; readiness v1's load is duration-only.
+
 ## Future metrics: where they will appear
 
 | Metric | Home | Progress | AI | Train |

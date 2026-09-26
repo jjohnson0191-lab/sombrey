@@ -4,6 +4,15 @@ import { ConvexError } from "convex/values";
 import { labelledRecord, sessionRecord } from "../activities";
 import { describeActivitiesForCoach } from "../activityCoach";
 import { describeExerciseForCoach } from "../exerciseNormalization";
+import { activityName, loadProgressData } from "../progressData";
+import { strainDay } from "../progress/strainEngine";
+import { consistency } from "../progress/consistency";
+import { personalRecords } from "../progress/records";
+import { milestones } from "../progress/milestones";
+import { youVsYou } from "../progress/youVsYou";
+import { bodySummary } from "../progress/body";
+import { loadRecovery } from "../progress/loadRecovery";
+import { describeProgressForCoach } from "../progress/coachContext";
 
 /**
  * Fitness context for the Sombrey Coach — isolated from
@@ -144,6 +153,22 @@ export const getSombreyContext = internalQuery({
       ...recentLabels.map(labelledRecord),
     ].filter((r): r is NonNullable<typeof r> => r !== null);
     lines.push(...describeActivitiesForCoach(recentActivities, Date.now()));
+
+    // ── Progress: structured facts (convex/progress/coachContext.ts) ─────
+    // Day boundaries in UTC here (the coach call carries no phone time zone).
+    {
+      const now = Date.now();
+      const data = await loadProgressData(ctx, user._id, now);
+      lines.push(...describeProgressForCoach({
+        strain: strainDay(data.sessions, now, 0),
+        consistency: consistency(data.sessions, now, 0, data.plannedPerWeek),
+        records: personalRecords(data.sessions, data.sets, now, activityName),
+        milestones: milestones(data.sessions, 0),
+        insights: youVsYou(data.sessions, data.readiness, data.weights, now, activityName),
+        body: bodySummary(data.weights, "first", now),
+        loadRecovery: loadRecovery(data.sessions, data.readiness, now, 0, 7),
+      }));
+    }
 
     // ── Nutrition ───────────────────────────────────────────────────────────
     // Nutrition-as-context expansion. Targets resolve the same way

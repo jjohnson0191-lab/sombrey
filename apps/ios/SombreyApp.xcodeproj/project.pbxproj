@@ -113,6 +113,10 @@
 		000000000000000000000127 /* ExerciseLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000126 /* ExerciseLibrary.swift */; };
 		000000000000000000000129 /* ExerciseDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000128 /* ExerciseDetailView.swift */; };
 		00000000000000000000012B /* ExerciseLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012A /* ExerciseLibraryTests.swift */; };
+		00000000000000000000012D /* ProgressModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012C /* ProgressModels.swift */; };
+		00000000000000000000012F /* ProgressComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012E /* ProgressComponents.swift */; };
+		000000000000000000000131 /* ProgressSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000130 /* ProgressSections.swift */; };
+		000000000000000000000133 /* ProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000132 /* ProgressTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -241,6 +245,10 @@
 		000000000000000000000126 /* ExerciseLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseLibrary.swift"; sourceTree = "<group>"; };
 		000000000000000000000128 /* ExerciseDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseDetailView.swift"; sourceTree = "<group>"; };
 		00000000000000000000012A /* ExerciseLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseLibraryTests.swift"; sourceTree = "<group>"; };
+		00000000000000000000012C /* ProgressModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressModels.swift"; sourceTree = "<group>"; };
+		00000000000000000000012E /* ProgressComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressComponents.swift"; sourceTree = "<group>"; };
+		000000000000000000000130 /* ProgressSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressSections.swift"; sourceTree = "<group>"; };
+		000000000000000000000132 /* ProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressTests.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -537,7 +545,10 @@
 		000000000000000000000090 /* Progress */ = {
 			isa = PBXGroup;
 			children = (
-			000000000000000000000022 /* ProgressScreen.swift */
+			000000000000000000000022 /* ProgressScreen.swift */,
+			00000000000000000000012C /* ProgressModels.swift */,
+			00000000000000000000012E /* ProgressComponents.swift */,
+			000000000000000000000130 /* ProgressSections.swift */,
 			);
 			name = "Progress";
 			path = "Progress";
@@ -612,7 +623,8 @@
 			0000000000000000000000EA /* NotificationTests.swift */,
 			0000000000000000000000F5 /* VitalsTests.swift */,
 			00000000000000000000011D /* ActivityTests.swift */,
-			00000000000000000000012A /* ExerciseLibraryTests.swift */
+			00000000000000000000012A /* ExerciseLibraryTests.swift */,
+			000000000000000000000132 /* ProgressTests.swift */
 			);
 			name = "SombreyAppTests";
 			path = "SombreyAppTests";
@@ -854,6 +866,9 @@
 				000000000000000000000060 /* SettingsScreen.swift */,
 				000000000000000000000061 /* TrainScreen.swift */,
 				000000000000000000000062 /* ProgressScreen.swift */,
+				00000000000000000000012D /* ProgressModels.swift */,
+				00000000000000000000012F /* ProgressComponents.swift */,
+				000000000000000000000131 /* ProgressSections.swift */,
 				000000000000000000000063 /* AICoachScreen.swift */,
 				000000000000000000000064 /* ConvexQuery.swift */,
 				000000000000000000000065 /* NutritionModels.swift */,
@@ -917,6 +932,7 @@
 				0000000000000000000000F4 /* VitalsTests.swift */,
 				00000000000000000000011E /* ActivityTests.swift */,
 				00000000000000000000012B /* ExerciseLibraryTests.swift */,
+				000000000000000000000133 /* ProgressTests.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -999,7 +1015,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1030,7 +1046,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1055,7 +1071,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1081,7 +1097,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1103,7 +1119,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1128,7 +1144,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

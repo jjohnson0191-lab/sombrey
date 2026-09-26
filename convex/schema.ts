@@ -420,6 +420,10 @@ export default defineSchema({
     thighs: v.optional(v.number()),
     calves: v.optional(v.number()),
     notes: v.optional(v.string()),
+    // Progress › Body: where the values came from (absent on older rows =
+    // entered by hand). The body scanner will write here with "scanner".
+    source: v.optional(v.union(v.literal("manual"), v.literal("scanner"), v.literal("band"), v.literal("calculated"), v.literal("estimated"))),
+    leanMassKg: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_user_and_date", ["userId", "date"]),
 
