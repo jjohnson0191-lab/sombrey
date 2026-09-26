@@ -1,28 +1,5 @@
 import SwiftUI
 
-// MARK: - Hero
-
-/// The Sombrey tab's hero: the Sombrey logo (same treatment as every tab),
-/// then "Sombrey Coach" and one restrained line.
-struct SombreyCoachHero: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SombreyLogo(size: .header, tone: .onLight)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Sombrey Coach")
-                    .font(StudioFont.hero(32, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Your training, recovery and nutrition — together.")
-                    .font(StudioFont.body(14))
-                    .foregroundStyle(StudioColor.inkSoft)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 // MARK: - The glass conversation chamber
 
 /// The conversation lives INSIDE this glass surface: the screen and the
@@ -169,8 +146,10 @@ struct SombreyConversationSurface: View {
 /// The glass of the chamber — the Studio glass language (a real material,
 /// a light from above, a lit rim, a soft separating shadow), in one shape.
 struct SombreyGlassChamber: View {
+    var cornerRadius: CGFloat = 30
+
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         ZStack {
             shape.fill(.ultraThinMaterial).environment(\.colorScheme, .light)
             shape.fill(LinearGradient(colors: [Color.white.opacity(0.34), Color.white.opacity(0.16)], startPoint: .top, endPoint: .bottom))
@@ -394,5 +373,80 @@ struct SombreyComposer: View {
         .padding(.leading, 20)
         .padding(.trailing, 10)
         .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Feature entries (Body Scan, AI Macro Calculator)
+
+/// A doorway into one of Sombrey's instruments — not a button, not a card:
+/// the chamber's glass, a display-face title, one line of purpose, a quiet
+/// status (what Sombrey already knows), and a lit round control.
+struct SombreyFeatureEntry: View {
+    let eyebrow: String
+    let title: String
+    let detail: String
+    var status: String? = nil
+    let glyph: String
+    let action: () -> Void
+    @State private var opens = 0
+
+    var body: some View {
+        Button {
+            opens += 1
+            action()
+        } label: {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(eyebrow)
+                        .font(StudioFont.body(10, weight: .semibold))
+                        .tracking(1.8)
+                        .foregroundStyle(StudioColor.inkSoft)
+                    Text(title)
+                        .font(StudioFont.hero(19, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                    Text(detail)
+                        .font(StudioFont.body(12))
+                        .foregroundStyle(StudioColor.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let status {
+                        Text(status)
+                            .font(StudioFont.body(11, weight: .medium))
+                            .foregroundStyle(StudioColor.inkFaint)
+                            .padding(.top, 2)
+                    }
+                }
+                Spacer(minLength: 8)
+                ZStack {
+                    Circle().fill(.thinMaterial).environment(\.colorScheme, .light)
+                    RadialGradient(colors: [Color.white.opacity(0.6), .clear], center: UnitPoint(x: 0.5, y: 0.1), startRadius: 0, endRadius: 30)
+                        .clipShape(Circle())
+                    Image(systemName: glyph)
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(StudioColor.ink)
+                }
+                .frame(width: 46, height: 46)
+                .overlay { Circle().strokeBorder(Color.white.opacity(0.8), lineWidth: 0.75) }
+                .shadow(color: StudioColor.env0.opacity(0.16), radius: 8, y: 4)
+                .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(minHeight: 72)
+            .background { SombreyGlassChamber(cornerRadius: 24) }
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(SombreyPressStyle())
+        .sensoryFeedback(StudioHaptic.expand, trigger: opens)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens \(title)")
+    }
+}
+
+/// Press physics for glass doorways: a slight settle, `StudioMotion.press`.
+struct SombreyPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(configuration.isPressed ? StudioMotion.press : StudioMotion.release, value: configuration.isPressed)
     }
 }

@@ -286,3 +286,48 @@ struct SombreyCoachSurfaceTests {
         #expect(PrimaryPager.decide(translation: CGSize(width: -60, height: 4), startsInExcludedRegion: false) == .paging)
     }
 }
+
+/// Sombrey modes, AI Macro Calculator and Body Scan (pure parts).
+struct SombreyToolsTests {
+    @Test func macroFailuresAreSaidPlainly() {
+        #expect(MacroCalculatorFlow.message(for: "not_configured").contains("isn't switched on"))
+        #expect(MacroCalculatorFlow.message(for: "no_food").contains("couldn't find food"))
+        #expect(MacroCalculatorFlow.message(for: nil).contains("couldn't analyse"))
+    }
+
+    @Test func mealTypeFollowsTheTimeOfDay() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
+        func at(_ h: Int) -> Date { cal.date(from: DateComponents(year: 2026, month: 9, day: 26, hour: h))! }
+        #expect(MacroCalculatorFlow.defaultMealType(at(8)) == "breakfast")
+        #expect(MacroCalculatorFlow.defaultMealType(at(13)) == "lunch")
+        #expect(MacroCalculatorFlow.defaultMealType(at(19)) == "dinner")
+        #expect(MacroCalculatorFlow.defaultMealType(at(23)) == "snack")
+    }
+
+    @Test func photoMealDecodesWithoutAnyImage() throws {
+        let json = #"{"id":"m1","status":"done","items":[{"foodName":"white rice","grams":200,"calories":260,"protein":5.4,"carbs":57,"fat":0.6,"matched":true}],"calories":260,"protein":5.4,"carbs":57,"fat":0.6,"suggestedName":"white rice","confirmed":false}"#
+        let dto = try JSONDecoder().decode(PhotoMealDTO.self, from: Data(json.utf8))
+        #expect(dto.status == "done" && dto.items.count == 1 && dto.reason == nil)
+    }
+
+    @Test func bodyScansGroupByScanAndIgnorePlainProgressPhotos() {
+        let photos = [
+            ProgressPhotoDTO(id: "1", date: 2_000, view: "side", scanId: "b", url: nil),
+            ProgressPhotoDTO(id: "2", date: 2_000, view: "front", scanId: "b", url: nil),
+            ProgressPhotoDTO(id: "3", date: 1_000, view: "front", scanId: "a", url: nil),
+            ProgressPhotoDTO(id: "4", date: 3_000, view: "front", scanId: nil, url: nil),   // an ordinary progress photo
+        ]
+        let scans = BodyScan.group(photos)
+        #expect(scans.map(\.id) == ["b", "a"])
+        #expect(scans[0].photos.map(\.view) == ["front", "side"])
+        #expect(scans[0].photo("back") == nil)
+    }
+
+    @Test @MainActor func sombreyModesUseTheSameKeysAsTrain() {
+        // Both are the one shared control; only the options differ.
+        let coach = StudioModePills(options: [StudioModeOption(value: AppState.AISection.coach, label: "COACH", accessibilityLabel: "Sombrey Coach")], selection: .constant(.coach))
+        let train = TrainModePills(selection: .constant(.training))
+        _ = (coach, train)
+        #expect(AppState.AISection.allCases.count == 2)
+    }
+}

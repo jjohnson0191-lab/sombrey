@@ -1,5 +1,7 @@
 import { ConvexError } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { hasRole } from "./lib/roles.js";
 
@@ -209,57 +211,7 @@ export const logFood = mutation({
     // Macros: food.protein/carbs/fats/calories are per-serving values; multiply by
     // the number of servings consumed. (The per-100g fields are used only by the
     // coach meal-plan system which applies its own ×(grams/100) formula.)
-    const protein = food.protein * args.servings;
-    const carbs = food.carbs * args.servings;
-    const fats = food.fats * args.servings;
-    const calories = food.calories * args.servings;
-
-    // #8 — generate a stable entry ID so removal does not rely on array position.
-    const entryId = crypto.randomUUID();
-
-    // Check if log exists for this date
-    const existingLog = await ctx.db
-      .query("nutritionLogs")
-      .withIndex("by_user_and_date", (q) => 
-        q.eq("userId", targetUserId).eq("date", args.date)
-      )
-      .first();
-
-    if (existingLog) {
-      // Update existing log
-      await ctx.db.patch(existingLog._id, {
-        foods: [
-          ...existingLog.foods,
-          {
-            foodId: args.foodId,
-            servings: args.servings,
-            mealType: args.mealType,
-            entryId,
-          },
-        ],
-        totalProtein: existingLog.totalProtein + protein,
-        totalCarbs: existingLog.totalCarbs + carbs,
-        totalFats: existingLog.totalFats + fats,
-        totalCalories: existingLog.totalCalories + calories,
-      });
-      return existingLog._id;
-    } else {
-      // Create new log
-      return await ctx.db.insert("nutritionLogs", {
-        userId: targetUserId,
-        date: args.date,
-        foods: [{
-          foodId: args.foodId,
-          servings: args.servings,
-          mealType: args.mealType,
-          entryId,
-        }],
-        totalProtein: protein,
-        totalCarbs: carbs,
-        totalFats: fats,
-        totalCalories: calories,
-      });
-    }
+    return appendNutritionEntry(ctx, targetUserId, args.date, food, args.servings, args.mealType);
   },
 });
 
@@ -363,3 +315,45 @@ export const removeFood = mutation({
 });
 
 
+
+/** Appends one food to the user's day log (creating the day if needed) and
+ * updates the day's totals — the single path every logged food takes
+ * (search, and the AI Macro Calculator's confirmed meal). */
+export async function appendNutritionEntry(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  date: number,
+  food: Doc<"foods">,
+  servings: number,
+  mealType: string,
+): Promise<Id<"nutritionLogs">> {
+  const protein = food.protein * servings;
+  const carbs = food.carbs * servings;
+  const fats = food.fats * servings;
+  const calories = food.calories * servings;
+  // A stable entry ID so removal does not rely on array position.
+  const entryId = crypto.randomUUID();
+  const existingLog = await ctx.db
+    .query("nutritionLogs")
+    .withIndex("by_user_and_date", (q) => q.eq("userId", userId).eq("date", date))
+    .first();
+  if (existingLog) {
+    await ctx.db.patch(existingLog._id, {
+      foods: [...existingLog.foods, { foodId: food._id, servings, mealType, entryId }],
+      totalProtein: existingLog.totalProtein + protein,
+      totalCarbs: existingLog.totalCarbs + carbs,
+      totalFats: existingLog.totalFats + fats,
+      totalCalories: existingLog.totalCalories + calories,
+    });
+    return existingLog._id;
+  }
+  return await ctx.db.insert("nutritionLogs", {
+    userId,
+    date,
+    foods: [{ foodId: food._id, servings, mealType, entryId }],
+    totalProtein: protein,
+    totalCarbs: carbs,
+    totalFats: fats,
+    totalCalories: calories,
+  });
+}

@@ -36,6 +36,7 @@ export const create = mutation({
     view: v.union(v.literal("front"), v.literal("back"), v.literal("side")),
     weight: v.optional(v.number()),
     notes: v.optional(v.string()),
+    scanId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();

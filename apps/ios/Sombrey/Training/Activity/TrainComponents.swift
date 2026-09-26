@@ -11,26 +11,50 @@ enum TrainMode: String, CaseIterable, Identifiable {
     var label: String { self == .training ? "TRAINING" : "ACTIVITY" }
 }
 
-/// TRAINING | ACTIVITY — the navigation tab bar's glass key language
-/// (`NavTicks`) at the top of Train: the same material, ivory tint and light
-/// edge, and a lit key that glides between the two modes. Not a segmented
-/// control: each half is a full 44pt+ key with its own label.
+/// TRAINING | ACTIVITY on Train — now the shared `StudioModePills`, so every
+/// mode switch in Sombrey (Train, Sombrey's COACH | NUTRITION) is one control.
 struct TrainModePills: View {
     @Binding var selection: TrainMode
+
+    var body: some View {
+        StudioModePills(
+            options: TrainMode.allCases.map { StudioModeOption(value: $0, label: $0.label, accessibilityLabel: $0 == .training ? "Training" : "Activity") },
+            selection: $selection
+        )
+    }
+}
+
+/// One key of a `StudioModePills`.
+struct StudioModeOption<Value: Hashable>: Identifiable {
+    let value: Value
+    let label: String
+    let accessibilityLabel: String
+    var id: Value { value }
+}
+
+/// A top-of-screen mode switch in the navigation tab bar's glass key
+/// language (`NavTicks`): the same material, ivory tint and light edge, and
+/// a lit key that glides between the modes. Not a segmented control: each
+/// key is a full 44pt+ target with its own label. One implementation for
+/// every mode switch (Train's TRAINING | ACTIVITY, Sombrey's COACH |
+/// NUTRITION) so they can never drift apart.
+struct StudioModePills<Value: Hashable>: View {
+    let options: [StudioModeOption<Value>]
+    @Binding var selection: Value
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var keySpace
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(TrainMode.allCases) { mode in
-                let isActive = mode == selection
+            ForEach(options) { option in
+                let isActive = option.value == selection
                 Button {
-                    guard mode != selection else { return }
+                    guard option.value != selection else { return }
                     withAnimation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion)) {
-                        selection = mode
+                        selection = option.value
                     }
                 } label: {
-                    Text(mode.label)
+                    Text(option.label)
                         .font(StudioFont.body(12, weight: .semibold))
                         .tracking(1.6)
                         .foregroundStyle(isActive ? StudioColor.ink : StudioColor.ink.opacity(0.5))
@@ -50,7 +74,7 @@ struct TrainModePills: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(mode == .training ? "Training" : "Activity")
+                .accessibilityLabel(option.accessibilityLabel)
                 .accessibilityAddTraits(isActive ? [.isSelected, .isButton] : .isButton)
             }
         }

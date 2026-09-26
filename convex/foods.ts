@@ -22,6 +22,9 @@ async function requireCoach(ctx: QueryCtx | MutationCtx) {
   return user;
 }
 
+/** Category of foods created from a confirmed photo meal (convex/mealPhotos.ts). */
+export const PHOTO_MEAL_CATEGORY = "photo_meal";
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 export const list = query({
@@ -46,6 +49,13 @@ export const list = query({
     if (!args.includeArchived) {
       foods = foods.filter(f => !f.isArchived);
     }
+
+    // A meal logged from a photo (AI Macro Calculator) is the user's own
+    // record — never listed to anyone else.
+    const viewer = identity
+      ? await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", identity.tokenIdentifier)).unique()
+      : null;
+    foods = foods.filter(f => f.category !== PHOTO_MEAL_CATEGORY || (viewer !== null && f.createdBy === viewer._id));
 
     // Filter by search term
     if (args.searchTerm && args.searchTerm.length > 0) {

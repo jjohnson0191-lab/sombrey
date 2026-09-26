@@ -142,6 +142,41 @@ struct ProfileChip: View {
     }
 }
 
+/// Image handling shared by every photo Sombrey sends to storage (profile,
+/// meal photo, body scan): resized in memory and re-encoded as JPEG, which
+/// drops EXIF/GPS metadata; never written to disk, never logged.
+enum SombreyImage {
+    /// Longest side ≤ `maxPixel`, aspect kept, JPEG.
+    nonisolated static func prepared(_ image: UIImage, maxPixel: CGFloat, quality: CGFloat = 0.8) -> Data? {
+        let w = image.size.width * image.scale, h = image.size.height * image.scale
+        guard w > 0, h > 0 else { return nil }
+        let scale = min(1, maxPixel / max(w, h))
+        let size = CGSize(width: (w * scale).rounded(), height: (h * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return rendered.jpegData(compressionQuality: quality)
+    }
+
+    private struct UploadResponse: Decodable { let storageId: String }
+
+    /// Uploads JPEG data through an upload URL minted by `uploadUrlMutation`;
+    /// returns the storage id.
+    @MainActor
+    static func upload(_ data: Data, uploadUrlMutation: String) async throws -> String {
+        let uploadUrl: String = try await ConvexClientProvider.client.mutation(uploadUrlMutation)
+        guard let url = URL(string: uploadUrl) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        let (body, response) = try await URLSession.shared.upload(for: request, from: data)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(UploadResponse.self, from: body).storageId
+    }
+}
+
 /// Resizes, re-encodes and uploads a profile photo to the account's avatar
 /// storage (the previous photo is deleted server-side by `saveAvatar`).
 enum ProfilePhotoUpload {
@@ -180,15 +215,17 @@ enum ProfilePhotoUpload {
     }
 }
 
-/// The system camera, for taking a new profile photo.
+/// The system camera (profile photo, meal photo, body scan).
 struct CameraPicker: UIViewControllerRepresentable {
+    var device: UIImagePickerController.CameraDevice = .front
+    var allowsEditing = true
     let onFinish: (UIImage?) -> Void
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .camera
-        picker.cameraDevice = .front
-        picker.allowsEditing = true
+        picker.cameraDevice = UIImagePickerController.isCameraDeviceAvailable(device) ? device : .rear
+        picker.allowsEditing = allowsEditing
         picker.delegate = context.coordinator
         return picker
     }

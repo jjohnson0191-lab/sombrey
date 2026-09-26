@@ -58,6 +58,7 @@
 		000000000000000000000066 /* ExerciseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000026 /* ExerciseModels.swift */; };
 		000000000000000000000067 /* ProgressDataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000027 /* ProgressDataModels.swift */; };
 		000000000000000000000068 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000028 /* ChatModels.swift */; };
+		00000000000000000000014F /* BodyScanFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000014E /* BodyScanFlow.swift */; };
 		00000000000000000000014B /* SombreyCoachSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000014A /* SombreyCoachSurface.swift */; };
 		000000000000000000000069 /* TrainingSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000029 /* TrainingSessionManager.swift */; };
 		00000000000000000000010F /* TrainHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000010E /* TrainHub.swift */; };
@@ -67,6 +68,7 @@
 		000000000000000000000145 /* RPESelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000144 /* RPESelector.swift */; };
 		00000000000000000000006D /* NutritionDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002D /* NutritionDate.swift */; };
 		00000000000000000000006E /* NutritionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002E /* NutritionScreen.swift */; };
+		00000000000000000000014D /* MacroCalculatorFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000014C /* MacroCalculatorFlow.swift */; };
 		00000000000000000000006F /* AddMealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002F /* AddMealView.swift */; };
 		000000000000000000000070 /* BricolageGrotesque-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* BricolageGrotesque-SemiBold.ttf */; };
 		000000000000000000000071 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000034 /* BricolageGrotesque-Bold.ttf */; };
@@ -199,6 +201,7 @@
 		000000000000000000000026 /* ExerciseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExerciseModels.swift"; sourceTree = "<group>"; };
 		000000000000000000000027 /* ProgressDataModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressDataModels.swift"; sourceTree = "<group>"; };
 		000000000000000000000028 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatModels.swift"; sourceTree = "<group>"; };
+		00000000000000000000014E /* BodyScanFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanFlow.swift"; sourceTree = "<group>"; };
 		00000000000000000000014A /* SombreyCoachSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyCoachSurface.swift"; sourceTree = "<group>"; };
 		000000000000000000000029 /* TrainingSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainingSessionManager.swift"; sourceTree = "<group>"; };
 		00000000000000000000010E /* TrainHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainHub.swift"; sourceTree = "<group>"; };
@@ -208,6 +211,7 @@
 		000000000000000000000144 /* RPESelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPESelector.swift"; sourceTree = "<group>"; };
 		00000000000000000000002D /* NutritionDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionDate.swift"; sourceTree = "<group>"; };
 		00000000000000000000002E /* NutritionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionScreen.swift"; sourceTree = "<group>"; };
+		00000000000000000000014C /* MacroCalculatorFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MacroCalculatorFlow.swift"; sourceTree = "<group>"; };
 		00000000000000000000002F /* AddMealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddMealView.swift"; sourceTree = "<group>"; };
 		000000000000000000000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
 		000000000000000000000031 /* SombreyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SombreyApp.entitlements"; sourceTree = "<group>"; };
@@ -591,6 +595,7 @@
 			children = (
 			000000000000000000000023 /* AICoachScreen.swift */,
 			000000000000000000000028 /* ChatModels.swift */,
+			00000000000000000000014E /* BodyScanFlow.swift */,
 			00000000000000000000014A /* SombreyCoachSurface.swift */
 			);
 			name = "AICoach";
@@ -602,6 +607,7 @@
 			children = (
 			00000000000000000000002D /* NutritionDate.swift */,
 			00000000000000000000002E /* NutritionScreen.swift */,
+			00000000000000000000014C /* MacroCalculatorFlow.swift */,
 			00000000000000000000002F /* AddMealView.swift */
 			);
 			name = "Nutrition";
@@ -916,6 +922,7 @@
 				000000000000000000000066 /* ExerciseModels.swift */,
 				000000000000000000000067 /* ProgressDataModels.swift */,
 				000000000000000000000068 /* ChatModels.swift */,
+				00000000000000000000014F /* BodyScanFlow.swift */,
 				00000000000000000000014B /* SombreyCoachSurface.swift */,
 				000000000000000000000069 /* TrainingSessionManager.swift */,
 				00000000000000000000010F /* TrainHub.swift */,
@@ -936,6 +943,7 @@
 				000000000000000000000145 /* RPESelector.swift */,
 				00000000000000000000006D /* NutritionDate.swift */,
 				00000000000000000000006E /* NutritionScreen.swift */,
+				00000000000000000000014D /* MacroCalculatorFlow.swift */,
 				00000000000000000000006F /* AddMealView.swift */,
 				0000000000000000000000C4 /* WearablePersistencePayloads.swift */,
 				0000000000000000000000D1 /* SombreySportType.swift */,
@@ -1059,7 +1067,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1090,7 +1098,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1115,7 +1123,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1141,7 +1149,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1163,7 +1171,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1188,7 +1196,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

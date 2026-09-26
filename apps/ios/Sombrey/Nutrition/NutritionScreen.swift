@@ -1,9 +1,8 @@
 import SwiftUI
 import ConvexMobile
 
-/// Nutrition, inside AI — Sombrey's intelligence hub owns "what should I
-/// eat", but nutrition is never buried in a chat: this panel is one tap
-/// from the AI tab's header (`AICoachScreen`'s section control).
+/// Nutrition — Sombrey's second mode (COACH | NUTRITION). Nutrition is never
+/// buried in a chat: it's its own instrument, one key over from the Coach.
 ///
 /// Everything is real: today's intake (`nutritionLogs:getTodayProgress`,
 /// `nutritionLogs:getByDate`), meals the user logs through Sombrey's own
@@ -19,22 +18,31 @@ struct NutritionPanel: View {
     @State private var preferences = ConvexQuery<NotificationPreferencesDTO>()
     @State private var showingAddMeal = false
     @State private var showingMealSchedule = false
+    @State private var showingMacroCalculator = false
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 22) {
                 todaySection
+                SombreyFeatureEntry(
+                    eyebrow: "AI MACRO CALCULATOR",
+                    title: "Photograph a meal",
+                    detail: "Sombrey estimates what's on the plate — you check it before it's logged.",
+                    glyph: "camera",
+                    action: { showingMacroCalculator = true }
+                )
+                .accessibilityIdentifier("nutrition.macroCalculatorEntry")
                 Button {
                     showingAddMeal = true
                 } label: {
-                    Text("Log a meal").frame(maxWidth: .infinity)
+                    Text("Search foods").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.illuminatedCTA)
+                .buttonStyle(.outlineCTA)
                 entriesSection
                 targetsSection
                 scheduleSection
             }
-            .padding(.top, 18)
+            .padding(.top, 6)
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
@@ -44,6 +52,7 @@ struct NutritionPanel: View {
             preferences.subscribe(to: "notificationPreferences:get")
         }
         .sheet(isPresented: $showingAddMeal) { AddMealView() }
+        .fullScreenCover(isPresented: $showingMacroCalculator) { MacroCalculatorFlow() }
         .sheet(isPresented: $showingMealSchedule) { MealScheduleView() }
     }
 
@@ -52,7 +61,7 @@ struct NutritionPanel: View {
     @ViewBuilder
     private var todaySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("TODAY")
+            sectionLabel("TODAY'S INTAKE")
             if progress.isLoading {
                 ProgressView().tint(StudioColor.ink)
             } else if let error = progress.errorMessage {
@@ -62,7 +71,7 @@ struct NutritionPanel: View {
             } else if let today = progress.value ?? nil {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(Int(today.caloriesConsumed.rounded()))")
-                        .font(StudioFont.hero(40, weight: .bold))
+                        .font(StudioFont.hero(44, weight: .bold))
                         .foregroundStyle(StudioColor.ink)
                         .monospacedDigit()
                     Text(today.hasRealTargets ? "of \(Int(today.caloriesTarget)) kcal" : "kcal eaten")
@@ -89,7 +98,7 @@ struct NutritionPanel: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(entry.foodName)
-                                .font(StudioFont.body(14, weight: .medium))
+                                .font(StudioFont.body(14, weight: .semibold))
                                 .foregroundStyle(StudioColor.ink)
                             Text("\(entry.mealType.capitalized) · \(Int(entry.servings)) serving(s)")
                                 .font(StudioFont.body(11))
@@ -97,8 +106,8 @@ struct NutritionPanel: View {
                         }
                         Spacer()
                         Text("\(Int(entry.calories)) kcal")
-                            .font(StudioFont.body(12))
-                            .foregroundStyle(StudioColor.inkSoft)
+                            .font(StudioFont.hero(15, weight: .semibold))
+                            .foregroundStyle(StudioColor.ink)
                             .monospacedDigit()
                     }
                     .frame(minHeight: 44)
@@ -111,7 +120,7 @@ struct NutritionPanel: View {
         }
     }
 
-    // MARK: Targets (AI Macro Calculator's home)
+    // MARK: Targets
 
     @ViewBuilder
     private var targetsSection: some View {
@@ -126,21 +135,7 @@ struct NutritionPanel: View {
                     .font(StudioFont.body(13, weight: .medium))
                     .foregroundStyle(StudioColor.ink)
             }
-            HStack(spacing: 8) {
-                Text("AI MACRO CALCULATOR")
-                    .font(StudioFont.body(9, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(StudioColor.inkSoft)
-                Text("NOT AVAILABLE YET")
-                    .font(StudioFont.body(8, weight: .semibold))
-                    .tracking(1.1)
-                    .foregroundStyle(StudioColor.inkFaint)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(StudioColor.ink.opacity(0.06), in: Capsule())
-            }
-            .padding(.top, 4)
-            Text("Will set your targets from your profile, goal and training. Until then, no targets are invented for you.")
+            Text("Targets come from your Sombrey plan — until you have one, none are invented for you.")
                 .font(StudioFont.body(11))
                 .foregroundStyle(StudioColor.inkFaint)
         }
@@ -215,8 +210,8 @@ private struct MacroLine: View {
                     .foregroundStyle(StudioColor.ink)
                 Spacer()
                 Text(target.map { "\(Int(value)) / \(Int($0)) g" } ?? "\(Int(value)) g")
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.inkSoft)
+                    .font(StudioFont.hero(15, weight: .semibold))
+                    .foregroundStyle(StudioColor.ink)
                     .monospacedDigit()
             }
             if target != nil {

@@ -411,6 +411,8 @@ export default defineSchema({
     view: v.union(v.literal("front"), v.literal("back"), v.literal("side")),
     weight: v.optional(v.number()),
     notes: v.optional(v.string()),
+    // Groups the views captured together in one Body Scan.
+    scanId: v.optional(v.string()),
   }).index("by_user", ["userId"])
     .index("by_user_and_date", ["userId", "date"]),
 
@@ -589,7 +591,9 @@ export default defineSchema({
   // AI-powered meal photo logs
   mealPhotoLogs: defineTable({
     userId: v.id("users"),
-    storageId: v.id("_storage"),
+    // The photo while it's being analysed. The native AI Macro Calculator
+    // deletes it once analysed (unset afterwards) — photos aren't kept.
+    storageId: v.optional(v.id("_storage")),
     loggedDate: v.string(),          // ISO date "YYYY-MM-DD"
     loggedAt: v.number(),            // ms since epoch
     mealType: v.optional(v.string()), // breakfast, lunch, dinner, snack
@@ -606,6 +610,21 @@ export default defineSchema({
     manualProtein: v.optional(v.number()),
     manualCarbs: v.optional(v.number()),
     manualFats: v.optional(v.number()),
+    // Native AI Macro Calculator (convex/mealPhotos.ts): the per-item
+    // estimate, an error reason, and — once the user confirmed — what was
+    // logged (their edited values) and where.
+    aiItems: v.optional(v.array(v.object({
+      foodName: v.string(),
+      grams: v.number(),
+      calories: v.number(),
+      protein: v.number(),
+      carbs: v.number(),
+      fat: v.number(),
+      matched: v.boolean(),
+    }))),
+    aiError: v.optional(v.string()),
+    confirmedAt: v.optional(v.number()),
+    loggedFoodId: v.optional(v.id("foods")),
   }).index("by_user", ["userId"])
     .index("by_user_and_date", ["userId", "loggedDate"]),
 

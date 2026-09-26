@@ -71,4 +71,19 @@ final class ProfileImageCache {
     }
 
     func insert(_ image: UIImage, for url: String) { memory.setObject(image, forKey: url as NSString) }
+
+    /// Sensitive images (body scans): an ephemeral session — nothing written
+    /// to the disk cache — held only in memory while the app runs.
+    private let privateMemory = NSCache<NSString, UIImage>()
+    private let ephemeral = URLSession(configuration: .ephemeral)
+
+    func privateImage(for url: String) async -> UIImage? {
+        guard let u = URL(string: url) else { return nil }
+        if let hit = privateMemory.object(forKey: url as NSString) { return hit }
+        guard let result = try? await ephemeral.data(from: u) else { return nil }
+        let (data, response) = result
+        guard ((response as? HTTPURLResponse)?.statusCode ?? 200) < 400, let image = UIImage(data: data) else { return nil }
+        privateMemory.setObject(image, forKey: url as NSString)
+        return image
+    }
 }
