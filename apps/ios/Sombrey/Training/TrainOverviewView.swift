@@ -24,11 +24,14 @@ struct TrainOverviewView: View {
         @Bindable var appState = appState
         ScreenContainer(scene: .trainOverview, selection: $appState.selectedTab) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Train")
-                    .font(StudioFont.hero(32, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .padding(.top, 20)
-                    .studioReveal(index: 0)
+                VStack(alignment: .leading, spacing: 10) {
+                    SombreyLogo(size: .header, tone: .onLight)
+                    Text("Train")
+                        .font(StudioFont.hero(32, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                }
+                .padding(.top, 16)
+                .studioReveal(index: 0)
 
                 TrainModePills(selection: mode)
                     .studioReveal(index: 1)

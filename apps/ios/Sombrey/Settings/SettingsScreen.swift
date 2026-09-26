@@ -31,10 +31,13 @@ struct SettingsScreen: View {
         @Bindable var appState = appState
         ScreenContainer(scene: .settings, selection: $appState.selectedTab) {
             VStack(alignment: .leading, spacing: 30) {
-                Text("Settings")
-                    .font(StudioFont.hero(32, weight: .semibold))
-                    .foregroundStyle(StudioColor.ink)
-                    .padding(.top, 20)
+                VStack(alignment: .leading, spacing: 10) {
+                    SombreyLogo(size: .header, tone: .onLight)
+                    Text("Settings")
+                        .font(StudioFont.hero(32, weight: .semibold))
+                        .foregroundStyle(StudioColor.ink)
+                }
+                .padding(.top, 16)
 
                 settingsGroup("PROFILE") {
                     ProfileSection()

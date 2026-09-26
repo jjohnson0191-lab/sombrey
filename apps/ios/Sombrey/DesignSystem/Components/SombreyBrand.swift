@@ -107,22 +107,131 @@ struct SombreyMark: View {
     }
 }
 
-/// The Sombrey wordmark beside the mark — the same display-face wordmark
-/// as Sign In and Band Pairing (Bricolage Grotesque), so the brand reads
-/// identically wherever it appears.
-struct SombreyWordmark: View {
-    var score: Int?
-    var color: Color = StudioColor.paper
+/// The Sombrey logo — the mark (a miniature of the Sombrey Score dial) and
+/// the wordmark in the brand face, Bricolage Grotesque Bold (`StudioFont.hero`),
+/// the same face as Sign In and Band Pairing. There is no separate logo asset;
+/// this IS the logo, rendered from the bundled font.
+///
+/// It sits in each primary screen's own header (scrolling away with it where
+/// the header does), lit like a physical object:
+///   base      the logo in paper (on dark) or ink (on light), lit from above;
+///   edge      a hairline highlight on the upper edges (depth, not extrusion);
+///   light     a narrow conic band of white, MASKED to the letterforms and the
+///             dial, turning a full 360° around the logo's centre every 14 s;
+///   bloom     the same light, softly blurred at low opacity.
+/// The angle is computed from absolute time, not animation state, so the loop
+/// is seamless (360° ≡ 0°, no restart point), identical on every tab, and
+/// never restarts when screens change. It only renders frames while the logo
+/// is on screen and the app is active; Reduce Motion holds the light still at
+/// the top-left (same layers, no layout change).
+struct SombreyLogo: View {
+    enum Size { case home, header }
+    enum Tone { case onDark, onLight }
+
+    /// The Sombrey Score for the mark's indicator (Home only); nil = hollow.
+    var score: Int? = nil
+    var size: Size = .header
+    var tone: Tone = .onLight
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var onScreen = false
+
+    /// One full revolution of the light, in seconds.
+    static let period: TimeInterval = 14
+    /// The light's resting angle under Reduce Motion (upper-left).
+    static let restingAngle: Double = 225
+
+    /// The light's angle at an instant — continuous in time, periodic in 360°.
+    static func angle(at date: Date) -> Double {
+        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
+        return t / period * 360
+    }
+
+    private var animating: Bool { onScreen && scenePhase == .active && !reduceMotion }
 
     var body: some View {
-        HStack(spacing: 9) {
-            SombreyMark(score: score, color: color, size: 17)
-            Text("Sombrey")
-                .font(StudioFont.hero(20, weight: .bold))
-                .foregroundStyle(color)
+        glyph(color: baseColor)
+            .overlay { edge }
+            .overlay { light }
+            .background { bloom }
+            .onAppear { onScreen = true }
+            .onDisappear { onScreen = false }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Sombrey")
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("sombrey.logo")
+    }
+
+    // MARK: Layers
+
+    private var metrics: (text: CGFloat, mark: CGFloat, spacing: CGFloat) {
+        switch size {
+        case .home: return (21, 18, 9)
+        case .header: return (15, 13, 7)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Sombrey")
-        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var baseColor: Color { tone == .onDark ? StudioColor.paper.opacity(0.86) : StudioColor.ink.opacity(0.88) }
+    private var lightPeak: Double { tone == .onDark ? 0.95 : 0.7 }
+
+    private func glyph(color: Color) -> some View {
+        HStack(spacing: metrics.spacing) {
+            SombreyMark(score: score, color: color, size: metrics.mark)
+            Text("Sombrey")
+                .font(StudioFont.hero(metrics.text, weight: .bold))
+                .foregroundStyle(color)
+                .fixedSize()
+        }
+    }
+
+    /// The logo itself as an alpha mask.
+    private var mask: some View { glyph(color: .black) }
+
+    /// Static top-edge highlight — the logo catching the room's light.
+    private var edge: some View {
+        LinearGradient(colors: [Color.white.opacity(tone == .onDark ? 0.45 : 0.28), .clear], startPoint: .top, endPoint: .center)
+            .mask(mask.offset(y: -0.6))
+            .mask(mask)
+            .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var light: some View {
+        if animating {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animating)) { context in
+                band(angle: Self.angle(at: context.date)).mask(mask)
+            }
+            .allowsHitTesting(false)
+        } else {
+            band(angle: reduceMotion ? Self.restingAngle : Self.angle(at: Date())).mask(mask).allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var bloom: some View {
+        if animating {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animating)) { context in
+                band(angle: Self.angle(at: context.date)).mask(mask).blur(radius: 5).opacity(0.35)
+            }
+            .allowsHitTesting(false)
+        } else {
+            band(angle: reduceMotion ? Self.restingAngle : Self.angle(at: Date())).mask(mask).blur(radius: 5).opacity(0.35).allowsHitTesting(false)
+        }
+    }
+
+    /// A narrow wedge of light turning around the logo's centre.
+    private func band(angle: Double) -> some View {
+        AngularGradient(
+            gradient: Gradient(stops: [
+                .init(color: .white.opacity(0), location: 0),
+                .init(color: .white.opacity(0), location: 0.42),
+                .init(color: .white.opacity(lightPeak), location: 0.5),
+                .init(color: .white.opacity(0), location: 0.58),
+                .init(color: .white.opacity(0), location: 1),
+            ]),
+            center: .center,
+            angle: .degrees(angle)
+        )
     }
 }

@@ -26,12 +26,14 @@ struct ProgressScreen: View {
         ScreenContainer(scene: .progress, selection: $appState.selectedTab) {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
+                    SombreyLogo(size: .header, tone: .onLight)
+                        .padding(.bottom, 6)
                     TrainEyebrow(text: "Your progress")
                     Text("Progress")
                         .font(StudioFont.hero(32, weight: .semibold))
                         .foregroundStyle(StudioColor.ink)
                 }
-                .padding(.top, 20)
+                .padding(.top, 16)
                 .studioReveal(index: 0)
 
                 content

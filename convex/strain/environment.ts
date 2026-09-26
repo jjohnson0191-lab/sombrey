@@ -27,7 +27,20 @@ export type EnvironmentSnapshot = {
   conditionCode?: ConditionCode;
   isNight?: boolean;
   forecast?: ForecastDay[];
+  /** Today's remaining hours (hourly()), in the snapshot's time zone. */
+  hourly?: ForecastHour[];
   source: "met_norway";
+};
+
+export type ForecastHour = {
+  time: number;              // epoch ms — the start of the hour (displayed in the device's zone)
+  temperatureC: number;
+  conditionCode?: ConditionCode;
+  isNight?: boolean;
+  precipitationMm?: number;
+  precipitationProbability?: number; // % — only where the provider publishes it
+  windMs?: number;
+  humidityPct?: number;
 };
 
 /** Sombrey's own weather vocabulary — the UI maps these to icons; no
@@ -147,6 +160,7 @@ export function parseLocationforecast(body: any, nowMs: number, timeZone: string
     conditionCode: conditionCode(entry?.data?.next_1_hours?.summary?.symbol_code ?? entry?.data?.next_6_hours?.summary?.symbol_code),
     isNight: /_night$/.test(entry?.data?.next_1_hours?.summary?.symbol_code ?? entry?.data?.next_6_hours?.summary?.symbol_code ?? ""),
     forecast: dailyForecast(series, timeZone, nowMs),
+    hourly: todayHourly(series, timeZone, nowMs),
     source: "met_norway",
   };
 }
@@ -195,4 +209,35 @@ export function dailyForecast(series: any[], timeZone: string, nowMs: number): F
       precipitationProbability: a.prob !== undefined ? Math.round(a.prob) : undefined,
       partial: date === today ? true : undefined,
     }));
+}
+
+/** Today's hourly forecast: the provider's own 1-hour periods whose start
+ * falls on the user's local today, from the hour containing `now` to local
+ * midnight. Only hourly periods (those with a next_1_hours summary) are
+ * used — the 6-hourly tail is never split into invented hours — so a gap in
+ * the provider's data stays a gap. Chronological; no hour fabricated. */
+export function todayHourly(series: any[], timeZone: string, nowMs: number): ForecastHour[] {
+  const today = localDayKey(nowMs, timeZone);
+  const currentHourStart = nowMs - 60 * 60 * 1000; // a period that started < 1 h ago contains now
+  const out: ForecastHour[] = [];
+  for (const e of series) {
+    const t = Date.parse(e?.time);
+    if (!Number.isFinite(t) || t <= currentHourStart || localDayKey(t, timeZone) !== today) continue;
+    const h1 = e?.data?.next_1_hours;
+    const d = e?.data?.instant?.details ?? {};
+    if (!h1 || typeof d.air_temperature !== "number") continue;
+    const symbol = h1.summary?.symbol_code;
+    const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : undefined);
+    out.push({
+      time: t,
+      temperatureC: Math.round(d.air_temperature * 10) / 10,
+      conditionCode: conditionCode(symbol),
+      isNight: /_night$/.test(symbol ?? ""),
+      precipitationMm: num(h1.details?.precipitation_amount),
+      precipitationProbability: num(h1.details?.probability_of_precipitation),
+      windMs: num(d.wind_speed),
+      humidityPct: num(d.relative_humidity),
+    });
+  }
+  return out.sort((a, b) => a.time - b.time);
 }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Home's environmental context: one compact line — "Colombo · 28°C ·
-/// Partly cloudy" — and a small condition glyph that opens the forecast in
-/// place, growing out of the line itself. Context only: it never blocks
+/// Partly cloudy" — and a small condition glyph that opens TODAY's hourly
+/// forecast in place, growing out of the line itself. Context only: it never blocks
 /// Home and never changes load or Strain. Every state is said plainly:
 /// asking, denied (time-zone city), unavailable, failed, stale.
 struct WeatherContextView: View {
@@ -35,13 +35,13 @@ struct WeatherContextView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(expanded ? "Hide forecast" : "Show forecast")
+                    .accessibilityLabel(expanded ? "Hide today's forecast" : "Show today's hourly forecast")
                     .accessibilityIdentifier("home.weather.forecastButton")
                 }
             }
             .frame(minHeight: 28, alignment: .leading)
             if expanded, let snapshot = dto?.snapshot {
-                WeatherForecastView(snapshot: snapshot, stale: dto?.state == "stale", attribution: dto?.attribution)
+                WeatherTodayView(snapshot: snapshot, stale: dto?.state == "stale", attribution: dto?.attribution)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
         }
@@ -64,7 +64,7 @@ struct WeatherContextState: Equatable {
             self.init(line: "\(city) · Weather unavailable (location off)", canExpand: false); return
         }
         if let dto, let line = EnvironmentLine.text(dto, access: access) {
-            self.init(line: line, canExpand: dto.snapshot?.forecast?.isEmpty == false || dto.snapshot != nil); return
+            self.init(line: line, canExpand: dto.snapshot != nil); return
         }
         if access == .notDetermined || (isLoading && dto == nil) {
             self.init(line: "\(city) · Weather…", canExpand: false); return
@@ -78,45 +78,69 @@ struct WeatherContextState: Equatable {
     }
 }
 
-/// The forecast, opened from the context line: now (feels like, humidity,
-/// wind, UV, rain) and the coming days — high/low, condition, precipitation
-/// (chance where the provider publishes it, otherwise amount). Real data
-/// only; today's high/low is marked when it covers just the hours ahead.
-struct WeatherForecastView: View {
+/// Today, hour by hour — opened from the weather glyph. The hours still
+/// ahead today (in the device's time zone), NOW marked with the Studio glass
+/// key; tap an hour for its detail. Real forecast hours only: a gap in the
+/// provider's data stays a gap. The multi-day forecast is not shown here.
+struct WeatherTodayView: View {
     let snapshot: EnvironmentDTO.Snapshot
     let stale: Bool
     let attribution: String?
+    @State private var selected: Double?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let detail = EnvironmentLine.detail(EnvironmentDTO(state: "available", snapshot: snapshot, reason: nil, refreshAfterMs: 0, attribution: "")) {
-                Text(detail)
-                    .font(StudioFont.body(11))
-                    .foregroundStyle(StudioColor.paperSoft)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            let days = snapshot.forecast ?? []
-            if days.isEmpty {
-                Text("No forecast available right now.")
-                    .font(StudioFont.body(12))
-                    .foregroundStyle(StudioColor.paperFaint)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
-                        WeatherForecastRow(day: day, isFirst: index == 0)
-                        if index < days.count - 1 {
-                            Rectangle().fill(StudioColor.paper.opacity(0.08)).frame(height: 1)
-                        }
+        TimelineView(.everyMinute) { context in
+            let hours = TodayHours.visible(snapshot.hourly ?? [], now: context.date, timeZone: .current)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("TODAY")
+                        .font(StudioFont.body(11, weight: .semibold))
+                        .tracking(1.8)
+                        .foregroundStyle(StudioColor.paper)
+                    Spacer()
+                    if let detail = EnvironmentLine.detail(EnvironmentDTO(state: "available", snapshot: snapshot, reason: nil, refreshAfterMs: 0, attribution: "")) {
+                        Text(detail)
+                            .font(StudioFont.body(10))
+                            .foregroundStyle(StudioColor.paperFaint)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
+                if hours.isEmpty {
+                    Text(snapshot.hourly == nil ? "Hourly forecast arrives with the next weather update." : "No more forecast hours for today.")
+                        .font(StudioFont.body(12))
+                        .foregroundStyle(StudioColor.paperFaint)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(hours) { hour in
+                                let isNow = TodayHours.isNow(hour, now: context.date)
+                                Button { selected = hour.time } label: {
+                                    WeatherHourCell(hour: hour, label: TodayHours.label(hour, now: context.date, timeZone: .current), isNow: isNow, isSelected: (selected ?? hours.first?.time) == hour.time)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .primaryNavigationExclusion()
+                    .sensoryFeedback(StudioHaptic.scrubStep, trigger: selected)
+                    if let hour = hours.first(where: { $0.time == (selected ?? hours.first?.time) }) {
+                        Text(TodayHours.detail(hour, now: context.date, timeZone: .current))
+                            .font(StudioFont.body(11))
+                            .foregroundStyle(StudioColor.paperSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("home.weather.hourDetail")
+                    }
+                }
+                HStack {
+                    Text((stale ? "Last updated " : "Updated ") + Date(timeIntervalSince1970: snapshot.fetchedAt / 1000).formatted(.relative(presentation: .named)))
+                    Spacer()
+                    if let attribution { Text(attribution) }
+                }
+                .font(StudioFont.body(9))
+                .foregroundStyle(StudioColor.paperFaint)
             }
-            HStack {
-                Text(updatedText)
-                Spacer()
-                if let attribution { Text(attribution) }
-            }
-            .font(StudioFont.body(9))
-            .foregroundStyle(StudioColor.paperFaint)
         }
         .padding(16)
         .background {
@@ -127,79 +151,127 @@ struct WeatherForecastView: View {
                         .strokeBorder(StudioColor.paper.opacity(0.12), lineWidth: 1)
                 }
         }
-        .accessibilityIdentifier("home.weather.forecast")
-    }
-
-    private var updatedText: String {
-        let fetched = Date(timeIntervalSince1970: snapshot.fetchedAt / 1000)
-        return (stale ? "Last updated " : "Updated ") + fetched.formatted(.relative(presentation: .named))
+        .accessibilityIdentifier("home.weather.today")
     }
 }
 
-struct WeatherForecastRow: View {
-    let day: EnvironmentDTO.ForecastDay
-    let isFirst: Bool
+/// One hour: time, condition glyph, temperature, rain chance (or amount).
+struct WeatherHourCell: View {
+    let hour: EnvironmentDTO.ForecastHour
+    let label: String
+    let isNow: Bool
+    let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
+        VStack(spacing: 6) {
             Text(label)
-                .font(StudioFont.body(13, weight: isFirst ? .semibold : .medium))
-                .foregroundStyle(StudioColor.paper)
-                .frame(width: 92, alignment: .leading)
+                .font(StudioFont.body(11, weight: isNow ? .semibold : .medium))
+                .foregroundStyle(isNow ? StudioColor.paper : StudioColor.paperSoft)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            Image(systemName: WeatherSymbol.name(day.conditionCode, night: false))
+            Image(systemName: WeatherSymbol.name(hour.conditionCode, night: hour.isNight ?? false))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(StudioColor.paper.opacity(0.8))
-                .frame(width: 24)
+                .font(.system(size: 16))
+                .foregroundStyle(StudioColor.paper.opacity(0.85))
+                .frame(height: 20)
                 .accessibilityHidden(true)
-            Text(precipitation ?? " ")
-                .font(StudioFont.body(11))
-                .foregroundStyle(StudioColor.paperFaint)
-                .frame(minWidth: 44, alignment: .leading)
-            Spacer(minLength: 4)
-            Text("\(EnvironmentLine.temperature(day.lowC))")
-                .font(StudioFont.body(13))
-                .foregroundStyle(StudioColor.paperFaint)
-                .monospacedDigit()
-            Text("\(EnvironmentLine.temperature(day.highC))")
-                .font(StudioFont.body(13, weight: .semibold))
+            Text(EnvironmentLine.temperature(hour.temperatureC))
+                .font(StudioFont.hero(16, weight: .semibold))
                 .foregroundStyle(StudioColor.paper)
                 .monospacedDigit()
+            Text(TodayHours.rain(hour) ?? " ")
+                .font(StudioFont.body(9, weight: .medium))
+                .foregroundStyle(StudioColor.paperFaint)
         }
-        .frame(minHeight: 40)
+        .frame(width: 58)
+        .padding(.vertical, 10)
+        .background {
+            if isNow || isSelected {
+                // The Studio glass key — NOW always; the chosen hour faintly.
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(StudioColor.paper.opacity(isNow ? 0.14 : 0.07))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(StudioColor.paper.opacity(isNow ? 0.28 : 0.12), lineWidth: 0.5)
+                    }
+            }
+        }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(day.condition ?? "conditions unknown"), high \(EnvironmentLine.temperature(day.highC)), low \(EnvironmentLine.temperature(day.lowC))\(precipitation.map { ", \($0) rain" } ?? "")")
+        .accessibilityLabel("\(label): \(WeatherSymbol.phrase(hour.conditionCode) ?? "conditions unknown"), \(EnvironmentLine.temperature(hour.temperatureC))\(TodayHours.rain(hour).map { ", rain \($0)" } ?? "")")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// Pure rules for today's hours — which to show, which is NOW, and how they
+/// read, always in the given (device) time zone.
+enum TodayHours {
+    /// Hours not yet over and on the device's local today, in order.
+    static func visible(_ hours: [EnvironmentDTO.ForecastHour], now: Date, timeZone: TimeZone) -> [EnvironmentDTO.ForecastHour] {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        return hours
+            .filter { $0.date.addingTimeInterval(3600) > now && cal.isDate($0.date, inSameDayAs: now) }
+            .sorted { $0.time < $1.time }
     }
 
-    private var label: String {
-        if day.partial == true { return "Rest of today" }
-        return WeatherForecastRow.dayName(day.date)
+    static func isNow(_ hour: EnvironmentDTO.ForecastHour, now: Date) -> Bool {
+        hour.date <= now && now < hour.date.addingTimeInterval(3600)
     }
 
-    private var precipitation: String? {
-        if let p = day.precipitationProbability { return "\(Int(p))%" }
-        if let mm = day.precipitationMm, mm >= 0.1 { return String(format: "%.1f mm", mm) }
+    /// "Now", or the local time — with minutes when the provider's hours
+    /// don't start on the hour (e.g. 6:30 PM in Colombo, UTC+5:30).
+    static func label(_ hour: EnvironmentDTO.ForecastHour, now: Date, timeZone: TimeZone, locale: Locale = .autoupdatingCurrent) -> String {
+        if isNow(hour, now: now) { return "Now" }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        let minute = cal.component(.minute, from: hour.date)
+        let f = DateFormatter()
+        f.locale = locale
+        f.timeZone = timeZone
+        f.setLocalizedDateFormatFromTemplate(minute == 0 ? "j" : "jmm")
+        return f.string(from: hour.date)
+    }
+
+    static func rain(_ hour: EnvironmentDTO.ForecastHour) -> String? {
+        if let p = hour.precipitationProbability { return "\(Int(p.rounded()))%" }
+        if let mm = hour.precipitationMm, mm >= 0.1 { return String(format: "%.1f mm", mm) }
         return nil
     }
 
-    /// "Tomorrow" or the weekday, for a local day key (calendar maths only).
-    static func dayName(_ key: String, now: Date = Date()) -> String {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = .current
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        guard let d = f.date(from: key) else { return key }
-        let cal = Calendar.current
-        if cal.isDateInToday(d) { return "Today" }
-        if cal.isDateInTomorrow(d) { return "Tomorrow" }
-        return d.formatted(.dateTime.weekday(.wide))
+    /// The selected hour's detail line — only what the provider gave.
+    static func detail(_ hour: EnvironmentDTO.ForecastHour, now: Date, timeZone: TimeZone) -> String {
+        var parts = [label(hour, now: now, timeZone: timeZone)]
+        if let phrase = WeatherSymbol.phrase(hour.conditionCode) { parts.append(phrase) }
+        parts.append(EnvironmentLine.temperature(hour.temperatureC))
+        if let p = hour.precipitationProbability { parts.append("\(Int(p.rounded()))% chance of rain") }
+        else if let mm = hour.precipitationMm { parts.append(mm >= 0.1 ? String(format: "Rain %.1f mm", mm) : "No rain") }
+        if let w = hour.windMs { parts.append("Wind \(Int(w.rounded())) m/s") }
+        if let h = hour.humidityPct { parts.append("Humidity \(Int(h.rounded()))%") }
+        return parts.joined(separator: " · ")
     }
 }
 
 /// Sombrey condition code → SF Symbol. The only place weather becomes an icon.
 enum WeatherSymbol {
+    /// The condition in words (hourly entries carry only the code).
+    static func phrase(_ code: String?) -> String? {
+        switch code {
+        case "clear": return "Clear"
+        case "mostly_clear": return "Mostly clear"
+        case "partly_cloudy": return "Partly cloudy"
+        case "cloudy": return "Cloudy"
+        case "fog": return "Fog"
+        case "light_rain": return "Light rain"
+        case "rain": return "Rain"
+        case "heavy_rain": return "Heavy rain"
+        case "sleet": return "Sleet"
+        case "snow": return "Snow"
+        case "thunder": return "Thunderstorms"
+        default: return nil
+        }
+    }
+
     static func name(_ code: String?, night: Bool) -> String {
         switch code {
         case "clear": return night ? "moon.stars" : "sun.max"

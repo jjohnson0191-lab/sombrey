@@ -24,6 +24,23 @@ struct EnvironmentDTO: Decodable, Equatable {
         let conditionCode: String?
         let isNight: Bool?
         let forecast: [ForecastDay]?
+        /// Today's hourly forecast (the provider's 1-hour periods, from the
+        /// hour containing the fetch time to local midnight).
+        let hourly: [ForecastHour]?
+    }
+    struct ForecastHour: Decodable, Equatable, Identifiable {
+        /// Epoch ms — the start of the hour; shown in the device's time zone.
+        let time: Double
+        let temperatureC: Double
+        let conditionCode: String?
+        let isNight: Bool?
+        let precipitationMm: Double?
+        /// Only where the provider publishes it.
+        let precipitationProbability: Double?
+        let windMs: Double?
+        let humidityPct: Double?
+        var id: Double { time }
+        var date: Date { Date(timeIntervalSince1970: time / 1000) }
     }
     struct ForecastDay: Decodable, Equatable, Identifiable {
         let date: String

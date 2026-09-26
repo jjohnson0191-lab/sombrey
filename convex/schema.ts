@@ -1431,6 +1431,16 @@ export default defineSchema({
       precipitationProbability: v.optional(v.number()),
       partial: v.optional(v.boolean()),
     }))),
+    hourly: v.optional(v.array(v.object({
+      time: v.number(),
+      temperatureC: v.number(),
+      conditionCode: v.optional(v.string()),
+      isNight: v.optional(v.boolean()),
+      precipitationMm: v.optional(v.number()),
+      precipitationProbability: v.optional(v.number()),
+      windMs: v.optional(v.number()),
+      humidityPct: v.optional(v.number()),
+    }))),
     source: v.literal("met_norway"),
   }).index("by_user_and_kind", ["userId", "kind"])
     .index("by_user_and_session", ["userId", "sessionId"]),

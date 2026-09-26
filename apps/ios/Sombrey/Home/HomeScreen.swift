@@ -136,7 +136,7 @@ struct HomeScreen: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 10) {
-                SombreyWordmark(score: currentScore)
+                SombreyLogo(score: currentScore, size: .home, tone: .onDark)
                 Spacer()
                 WearableStatusBadge(
                     state: wearableManager.displayState,

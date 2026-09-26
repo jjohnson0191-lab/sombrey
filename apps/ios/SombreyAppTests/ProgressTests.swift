@@ -183,11 +183,71 @@ struct ProductUpgradeTests {
         #expect(PrimaryPager.displayed(dragWidth: 100, hasNeighbour: false) < 30) // resisted at the ends
     }
 
-    @Test func everyPrimaryScreenCarriesTheBrandExceptFocusedMoments() {
-        #expect(StudioScene.home.brandStyle == .home)
-        #expect(StudioScene.aiCoach.brandStyle?.breathes == true)
-        #expect(StudioScene.settings.brandStyle!.face < StudioScene.home.brandStyle!.face)
-        #expect(StudioScene.trainActive.brandStyle == nil)
-        #expect(SombreyTab.allCases.count == 5)
+}
+
+/// Logo light and today's hourly weather.
+struct LogoAndHourlyWeatherTests {
+    @Test @MainActor func logoLightIsContinuousAndSeamless() {
+        let t0 = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        let a0 = SombreyLogo.angle(at: t0)
+        // Continuous: a thirtieth of a second moves it a fraction of a degree.
+        let step = SombreyLogo.angle(at: t0.addingTimeInterval(1.0 / 30)) - a0
+        #expect(step > 0 && step < 1)
+        // Seamless: one full period later it is exactly where it started.
+        let wrapped = SombreyLogo.angle(at: t0.addingTimeInterval(SombreyLogo.period))
+        #expect(abs(wrapped - a0) < 1e-6 || abs(abs(wrapped - a0) - 360) < 1e-6)
+        // Always within one revolution.
+        for i in 0..<100 {
+            let a = SombreyLogo.angle(at: t0.addingTimeInterval(Double(i) * 0.37))
+            #expect(a >= 0 && a < 360)
+        }
+    }
+
+    private func hour(_ t: Date, _ temp: Double = 28, code: String? = "partly_cloudy", prob: Double? = nil, mm: Double? = nil) -> EnvironmentDTO.ForecastHour {
+        EnvironmentDTO.ForecastHour(time: t.timeIntervalSince1970 * 1000, temperatureC: temp, conditionCode: code, isNight: false, precipitationMm: mm, precipitationProbability: prob, windMs: 3, humidityPct: 80)
+    }
+
+    @Test func hourlyShowsOnlyTodaysRemainingHoursInOrder() {
+        let colombo = TimeZone(identifier: "Asia/Colombo")!
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = colombo
+        let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 26, hour: 18, minute: 38))!
+        let starts = [17, 18, 19, 23].map { cal.date(from: DateComponents(year: 2026, month: 9, day: 26, hour: $0, minute: 30))! }
+        let tomorrow = cal.date(from: DateComponents(year: 2026, month: 9, day: 27, hour: 0, minute: 30))!
+        let hours = [hour(starts[3]), hour(tomorrow), hour(starts[1]), hour(starts[0]), hour(starts[2])]
+        let visible = TodayHours.visible(hours, now: now, timeZone: colombo)
+        // 17:30 is over, 00:30 is tomorrow, the feed's 20:30–22:30 gap stays a gap.
+        #expect(visible.map(\.time) == [starts[1], starts[2], starts[3]].map { $0.timeIntervalSince1970 * 1000 })
+        #expect(TodayHours.isNow(visible[0], now: now))
+        #expect(!TodayHours.isNow(visible[1], now: now))
+        #expect(TodayHours.label(visible[0], now: now, timeZone: colombo) == "Now")
+        let later = TodayHours.label(visible[1], now: now, timeZone: colombo, locale: Locale(identifier: "en_US"))
+        #expect(later.contains("7:30"))  // local time with the :30 offset, not UTC
+    }
+
+    @Test func hourlyLabelsFollowTheDeviceTimeZone() {
+        let t = Date(timeIntervalSince1970: 1_790_420_400) // 2026-09-26 11:00 UTC
+        let h = hour(t)
+        let far = Date(timeIntervalSince1970: 0)
+        let london = TodayHours.label(h, now: far, timeZone: TimeZone(identifier: "Europe/London")!, locale: Locale(identifier: "en_GB"))
+        let newYork = TodayHours.label(h, now: far, timeZone: TimeZone(identifier: "America/New_York")!, locale: Locale(identifier: "en_GB"))
+        #expect(london == "12")    // 12:00 BST (24-hour locale, on the hour)
+        #expect(newYork == "07")   // 07:00 EDT
+    }
+
+    @Test func rainShowsChanceWhenPublishedElseAmount() {
+        let t = Date()
+        #expect(TodayHours.rain(hour(t, prob: 40, mm: 0.2)) == "40%")
+        #expect(TodayHours.rain(hour(t, mm: 0.4)) == "0.4 mm")
+        #expect(TodayHours.rain(hour(t, mm: 0)) == nil)
+        #expect(WeatherSymbol.phrase("light_rain") == "Light rain")
+        #expect(WeatherSymbol.phrase(nil) == nil)
+    }
+
+    @Test func hourlyDecodes() throws {
+        let json = #"{"state":"available","snapshot":{"observedAt":0,"fetchedAt":0,"timeZone":"Asia/Colombo","temperatureC":28,"hourly":[{"time":1790418600000,"temperatureC":28.4,"conditionCode":"rain","isNight":false,"precipitationMm":0.4,"windMs":3.1,"humidityPct":82}]},"refreshAfterMs":1800000,"attribution":"x"}"#
+        let env = try JSONDecoder().decode(EnvironmentDTO.self, from: Data(json.utf8))
+        #expect(env.snapshot?.hourly?.first?.conditionCode == "rain")
+        #expect(env.snapshot?.hourly?.first?.precipitationProbability == nil)
     }
 }
+

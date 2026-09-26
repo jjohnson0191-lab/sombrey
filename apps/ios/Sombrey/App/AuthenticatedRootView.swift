@@ -41,7 +41,6 @@ struct AuthenticatedRootView: View {
                 ForEach(visibleTabs, id: \.self) { tab in
                     let offset = panelOffset(for: tab, width: width)
                     screen(for: tab)
-                        .environment(\.primaryPanelOffset, offset)
                         .offset(x: offset)
                         .transition(.opacity)
                         .accessibilityHidden(tab != appState.selectedTab)

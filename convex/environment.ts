@@ -54,6 +54,16 @@ const snapshotFields = {
     precipitationProbability: v.optional(v.number()),
     partial: v.optional(v.boolean()),
   }))),
+  hourly: v.optional(v.array(v.object({
+    time: v.number(),
+    temperatureC: v.number(),
+    conditionCode: v.optional(v.string()),
+    isNight: v.optional(v.boolean()),
+    precipitationMm: v.optional(v.number()),
+    precipitationProbability: v.optional(v.number()),
+    windMs: v.optional(v.number()),
+    humidityPct: v.optional(v.number()),
+  }))),
 };
 
 /** Fetch current weather for the phone's position. Coordinates are rounded,
@@ -111,6 +121,7 @@ export const latest = query({
       uvIndex: row.uvIndex, precipitationMm: row.precipitationMm, condition: row.condition,
       conditionCode: row.conditionCode as EnvironmentSnapshot["conditionCode"], isNight: row.isNight,
       forecast: row.forecast?.map((f) => ({ ...f, conditionCode: f.conditionCode as EnvironmentSnapshot["conditionCode"] })),
+      hourly: row.hourly?.map((h) => ({ ...h, conditionCode: h.conditionCode as EnvironmentSnapshot["conditionCode"] })),
       source: "met_norway",
     } : null;
     const state = environmentState(snapshot, Date.now(), args.locationDenied ?? false, args.timeZone);
@@ -131,7 +142,7 @@ export const captureForSession = mutation({
     const existing = await ctx.db.query("environmentSnapshots")
       .withIndex("by_user_and_session", (q) => q.eq("userId", user._id).eq("sessionId", args.sessionId)).first();
     // The conditions at the session — not the forecast.
-    const { _id, _creationTime, forecast: _forecast, ...fields } = current;
+    const { _id, _creationTime, forecast: _forecast, hourly: _hourly, ...fields } = current;
     const row = { ...fields, kind: "session" as const, sessionKind: args.sessionKind, sessionId: args.sessionId };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert("environmentSnapshots", row);

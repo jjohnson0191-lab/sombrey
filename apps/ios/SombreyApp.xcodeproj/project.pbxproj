@@ -15,7 +15,6 @@
 		000000000000000000000101 /* Haptics+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000100 /* Haptics+Studio.swift */; };
 		000000000000000000000046 /* StudioScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000006 /* StudioScene.swift */; };
 		000000000000000000000047 /* EnvironmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000007 /* EnvironmentView.swift */; };
-		000000000000000000000139 /* SombreyEnvironmentBranding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000138 /* SombreyEnvironmentBranding.swift */; };
 		000000000000000000000048 /* ScreenContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000008 /* ScreenContainer.swift */; };
 		000000000000000000000049 /* NavTicks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000009 /* NavTicks.swift */; };
 		00000000000000000000004A /* HeroNumberText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000A /* HeroNumberText.swift */; };
@@ -155,7 +154,6 @@
 		000000000000000000000100 /* Haptics+Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Haptics+Studio.swift"; sourceTree = "<group>"; };
 		000000000000000000000006 /* StudioScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StudioScene.swift"; sourceTree = "<group>"; };
 		000000000000000000000007 /* EnvironmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EnvironmentView.swift"; sourceTree = "<group>"; };
-		000000000000000000000138 /* SombreyEnvironmentBranding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyEnvironmentBranding.swift"; sourceTree = "<group>"; };
 		000000000000000000000008 /* ScreenContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScreenContainer.swift"; sourceTree = "<group>"; };
 		000000000000000000000009 /* NavTicks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NavTicks.swift"; sourceTree = "<group>"; };
 		00000000000000000000000A /* HeroNumberText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HeroNumberText.swift"; sourceTree = "<group>"; };
@@ -366,7 +364,6 @@
 			children = (
 			000000000000000000000006 /* StudioScene.swift */,
 			000000000000000000000007 /* EnvironmentView.swift */,
-			000000000000000000000138 /* SombreyEnvironmentBranding.swift */
 			);
 			name = "Environment";
 			path = "Environment";
@@ -867,7 +864,6 @@
 				000000000000000000000101 /* Haptics+Studio.swift */,
 				000000000000000000000046 /* StudioScene.swift */,
 				000000000000000000000047 /* EnvironmentView.swift */,
-				000000000000000000000139 /* SombreyEnvironmentBranding.swift */,
 				000000000000000000000048 /* ScreenContainer.swift */,
 				000000000000000000000049 /* NavTicks.swift */,
 				00000000000000000000004A /* HeroNumberText.swift */,
@@ -1055,7 +1051,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1086,7 +1082,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1111,7 +1107,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1137,7 +1133,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1159,7 +1155,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1184,7 +1180,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 40;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

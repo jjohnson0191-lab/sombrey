@@ -25,13 +25,16 @@ struct AICoachScreen: View {
         @Bindable var appState = appState
         ScreenContainer(scene: .aiCoach, scrolls: false, selection: $appState.selectedTab) {
             VStack(spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Sombrey AI")
+                // The screen title already says "Sombrey", so the logo carries
+                // it here and the title names the tab.
+                VStack(alignment: .leading, spacing: 10) {
+                    SombreyLogo(size: .header, tone: .onLight)
+                    Text("AI")
                         .font(StudioFont.hero(32, weight: .semibold))
                         .foregroundStyle(StudioColor.ink)
-                    Spacer()
                 }
-                .padding(.top, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 16)
 
                 AISectionControl(selection: $appState.aiSection)
                     .padding(.top, 10)

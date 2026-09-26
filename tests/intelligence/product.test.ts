@@ -134,3 +134,69 @@ test("neutral condition codes (no provider symbols reach the app)", () => {
   assert.equal(conditionCode("rainandthunder"), "thunder");
   assert.equal(conditionCode(undefined), undefined);
 });
+
+// ── Today's hourly forecast ──────────────────────────────────────────────
+
+import { todayHourly } from "../../convex/strain/environment.ts";
+import { localDayKey, localParts } from "../../convex/strain/time.ts";
+
+const hourEntry = (iso: string, temp: number, symbol = "partlycloudy_day", extra: Record<string, number> = {}) => ({
+  time: iso,
+  data: {
+    instant: { details: { air_temperature: temp, relative_humidity: 70, wind_speed: 3 } },
+    next_1_hours: { summary: { symbol_code: symbol }, details: { precipitation_amount: 0.1, ...extra } },
+    next_6_hours: { summary: { symbol_code: "rain" }, details: { precipitation_amount: 2 } },
+  },
+});
+
+test("hourly: from the hour containing now to local midnight, in order", () => {
+  const now = Date.UTC(2026, 8, 26, 13, 8); // 18:38 in Colombo
+  const series = [
+    hourEntry("2026-09-26T12:00:00Z", 29),            // 17:30–18:30 local — already over
+    hourEntry("2026-09-26T13:00:00Z", 28.4),          // 18:30 — contains now
+    hourEntry("2026-09-26T15:00:00Z", 27.7, "rain"),  // 20:30 (19:30 missing from the provider)
+    hourEntry("2026-09-26T14:00:00Z", 28.1),          // out of order in the feed
+    hourEntry("2026-09-26T18:00:00Z", 27.6),          // 23:30 — last of today
+    hourEntry("2026-09-26T19:00:00Z", 27.2),          // 00:30 tomorrow — excluded
+  ];
+  const h = todayHourly(series, "Asia/Colombo", now);
+  assert.deepEqual(h.map((x) => localParts(x.time, "Asia/Colombo").hour), [18, 19, 20, 23]);
+  assert.ok(h.every((x) => localDayKey(x.time, "Asia/Colombo") === "2026-09-26"));
+  assert.equal(h[0].temperatureC, 28.4);
+  assert.equal(h[2].conditionCode, "rain");
+  assert.equal(h.length, 4); // 21:30 and 22:30 aren't in the feed → not invented
+});
+
+test("hourly: the 6-hourly tail is never split into invented hours", () => {
+  const now = Date.UTC(2026, 8, 26, 0, 0);
+  const sixHourly = { time: "2026-09-26T06:00:00Z", data: { instant: { details: { air_temperature: 25 } }, next_6_hours: { summary: { symbol_code: "cloudy" }, details: {} } } };
+  assert.deepEqual(todayHourly([sixHourly], "UTC", now), []);
+});
+
+test("hourly: rain probability only when published; wind and humidity carried", () => {
+  const now = Date.UTC(2026, 8, 26, 9, 10);
+  const h = todayHourly([hourEntry("2026-09-26T09:00:00Z", 20, "lightrain", { probability_of_precipitation: 35 }), hourEntry("2026-09-26T10:00:00Z", 21)], "Europe/London", now);
+  assert.equal(h[0].precipitationProbability, 35);
+  assert.equal(h[1].precipitationProbability, undefined);
+  assert.equal(h[0].windMs, 3);
+  assert.equal(h[0].humidityPct, 70);
+});
+
+test("hourly: DST fall-back day (New York) keeps the repeated hour and stops at local midnight", () => {
+  const now = Date.UTC(2026, 10, 1, 4, 30); // 00:30 EDT, 1 Nov 2026
+  const series = Array.from({ length: 30 }, (_, i) => hourEntry(new Date(Date.UTC(2026, 10, 1, 4 + i)).toISOString(), 10 + i));
+  const h = todayHourly(series, "America/New_York", now);
+  const hours = h.map((x) => localParts(x.time, "America/New_York").hour);
+  assert.equal(hours.filter((x) => x === 1).length, 2);   // 1 AM happens twice
+  assert.equal(h.length, 25);                            // a 25-hour local day
+  assert.equal(hours[hours.length - 1], 23);
+});
+
+test("hourly: a time-zone change regroups 'today' in the new zone", () => {
+  const now = Date.UTC(2026, 8, 26, 20, 10);
+  const series = [hourEntry("2026-09-26T20:00:00Z", 20), hourEntry("2026-09-26T23:00:00Z", 19)];
+  // London (BST): 21:00 today; 00:00 is tomorrow → one hour.
+  assert.equal(todayHourly(series, "Europe/London", now).length, 1);
+  // Colombo: it's already 01:40 on the 27th, so both (01:30, 04:30) are Colombo's today.
+  assert.deepEqual(todayHourly(series, "Asia/Colombo", now).map((h) => localParts(h.time, "Asia/Colombo").hour), [1, 4]);
+});
