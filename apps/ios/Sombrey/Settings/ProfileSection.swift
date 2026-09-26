@@ -35,17 +35,20 @@ struct ProfileSection: View {
                         .foregroundStyle(StudioColor.inkSoft)
                 }
             }
+            // A plain String: PhotosPicker's label closure is Sendable and
+            // can't read main-actor view state.
+            let pickTitle = hasPhoto ? "Replace photo" : "Choose photo"
             HStack(spacing: 8) {
                 PhotosPicker(selection: $pickerItem, matching: .images, photoLibrary: .shared()) {
-                    chip(hasPhoto ? "Replace photo" : "Choose photo", systemImage: "photo")
+                    ProfileChip(title: pickTitle, systemImage: "photo")
                 }
                 .accessibilityIdentifier("settings.profile.choose")
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button { requestCamera() } label: { chip("Take photo", systemImage: "camera") }
+                    Button { requestCamera() } label: { ProfileChip(title: "Take photo", systemImage: "camera") }
                         .accessibilityIdentifier("settings.profile.camera")
                 }
                 if hasPhoto {
-                    Button(role: .destructive) { remove() } label: { chip("Remove", systemImage: "trash") }
+                    Button(role: .destructive) { remove() } label: { ProfileChip(title: "Remove", systemImage: "trash") }
                         .accessibilityIdentifier("settings.profile.remove")
                 }
             }
@@ -76,20 +79,6 @@ struct ProfileSection: View {
             }
             .ignoresSafeArea()
         }
-    }
-
-    private func chip(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(StudioFont.body(12, weight: .medium))
-            .foregroundStyle(StudioColor.ink)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .environment(\.colorScheme, .light)
-                    .overlay { Capsule(style: .continuous).strokeBorder(StudioColor.ink.opacity(0.08), lineWidth: 1) }
-            }
     }
 
     private func requestCamera() {
@@ -129,6 +118,27 @@ struct ProfileSection: View {
                 message = "Couldn't remove your photo right now."
             }
         }
+    }
+}
+
+/// A profile action — glass capsule, 44 pt tall. A View (not a helper
+/// method) so it can be built inside PhotosPicker's nonisolated label.
+struct ProfileChip: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(StudioFont.body(12, weight: .medium))
+            .foregroundStyle(StudioColor.ink)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background {
+                Capsule(style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .environment(\.colorScheme, .light)
+                    .overlay { Capsule(style: .continuous).strokeBorder(StudioColor.ink.opacity(0.08), lineWidth: 1) }
+            }
     }
 }
 
