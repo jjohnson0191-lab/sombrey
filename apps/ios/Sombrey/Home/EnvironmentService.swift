@@ -46,7 +46,7 @@ private struct EnvironmentRefreshResult: Decodable {
 /// the band never decides it.
 @Observable
 @MainActor
-final class EnvironmentService: NSObject {
+final class EnvironmentService {
     static let shared = EnvironmentService()
 
     enum Access: Equatable { case notDetermined, denied, allowed }
@@ -56,14 +56,30 @@ final class EnvironmentService: NSObject {
     let latest = ConvexQuery<EnvironmentDTO>()
 
     private let manager = CLLocationManager()
+    private let delegate = LocationDelegate()
     private var lastRefresh: Date?
     private var refreshing = false
     private var subscribed = false
     private static let refreshInterval: TimeInterval = 30 * 60
 
-    private override init() {
-        super.init()
-        manager.delegate = self
+    private init() {
+        delegate.onAuthorization = { [weak self] status in
+            Task { @MainActor in
+                guard let self else { return }
+                self.access = Self.access(for: status)
+                self.refreshIfDue()
+            }
+        }
+        delegate.onLocation = { [weak self] location in
+            Task { @MainActor in await self?.send(location) }
+        }
+        delegate.onFailure = { [weak self] message in
+            Task { @MainActor in
+                self?.lastError = message
+                self?.refreshing = false
+            }
+        }
+        manager.delegate = delegate
         manager.desiredAccuracy = kCLLocationAccuracyReduced
         access = Self.access(for: manager.authorizationStatus)
     }
@@ -101,7 +117,7 @@ final class EnvironmentService: NSObject {
 
     /// The device's zone city, for the time-zone fallback line
     /// ("Asia/Colombo" → "Colombo").
-    static var timeZoneCity: String {
+    nonisolated static var timeZoneCity: String {
         let id = TimeZone.current.identifier
         return (id.split(separator: "/").last.map(String.init) ?? id).replacingOccurrences(of: "_", with: " ")
     }
@@ -141,26 +157,24 @@ final class EnvironmentService: NSObject {
     private struct CaptureResult: Decodable { let captured: Bool }
 }
 
-extension EnvironmentService: CLLocationManagerDelegate {
-    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status = manager.authorizationStatus
-        Task { @MainActor in
-            self.access = Self.access(for: status)
-            self.refreshIfDue()
-        }
+/// Forwards CoreLocation callbacks (delivered on the thread the manager
+/// was created on — the main thread) to EnvironmentService.
+private final class LocationDelegate: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+    var onAuthorization: (@Sendable (CLAuthorizationStatus) -> Void)?
+    var onLocation: (@Sendable (CLLocation) -> Void)?
+    var onFailure: (@Sendable (String) -> Void)?
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        onAuthorization?(manager.authorizationStatus)
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        Task { @MainActor in await self.send(location) }
+        onLocation?(location)
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        let message = String(describing: error)
-        Task { @MainActor in
-            self.lastError = message
-            self.refreshing = false
-        }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        onFailure?(String(describing: error))
     }
 }
 
