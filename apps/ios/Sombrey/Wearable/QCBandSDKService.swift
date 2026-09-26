@@ -57,7 +57,37 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     private var scanContinuation: CheckedContinuation<[SombreyDevice], Never>?
     private var scanTimeoutTask: Task<Void, Never>?
-    private var pairContinuation: CheckedContinuation<Void, Error>?
+
+    // MARK: Link lifecycle (see "Connection lifecycle" below)
+
+    /// Every command waiting on the band; all failed at once on disconnect.
+    private let commands = BandCommandRegistry()
+    /// The link instance. Incremented every time the band is attached to
+    /// the SDK and every time the link is lost, so a callback from an
+    /// earlier link can be recognised as stale.
+    private var linkEpoch = 0
+    /// The paired band Sombrey should keep reconnecting to (set once a
+    /// connect succeeds or iOS restores one; cleared only by Forget Band).
+    private var autoReconnectId: DeviceID?
+    /// The one connect attempt in progress (peripheral id), if any. Manual
+    /// and automatic reconnects JOIN it rather than starting another.
+    private var connectingId: DeviceID?
+    /// Everyone awaiting the current connect attempt (pair, manual reconnect).
+    private var connectWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    /// Consecutive failed connect/attach attempts — drives `ReconnectBackoff`.
+    private var connectFailures = 0
+    private var reconnectTask: Task<Void, Never>?
+    /// A peripheral iOS handed back on state restoration, awaiting power-on.
+    private var restoredPeripheral: CBPeripheral?
+    /// A Sport+ stop the band never received (the link was down when the
+    /// user ended the session) — sent as soon as the link is back.
+    private var pendingSportStop: Int?
+
+    /// Commands may only be sent over a live, SDK-attached link.
+    private var isLinkLive: Bool {
+        guard let peripheral = connectedPeripheral else { return false }
+        return peripheral.state == .connected
+    }
 
     private var measurementContinuation: AsyncStream<WearableMeasurement>.Continuation?
     private var sportUpdateContinuation: AsyncStream<SportSessionLiveUpdate>.Continuation?
@@ -101,6 +131,12 @@ final class QCBandSDKService: NSObject, QCBandService {
             throw WearableSDKError.bluetoothUnavailable
         }
         stopScanIfNeeded()
+        // A scan still waiting (a second tap on Scan) is finished first, so
+        // its continuation is never overwritten and left hanging.
+        if let previous = scanContinuation {
+            scanContinuation = nil
+            previous.resume(returning: [])
+        }
         discoveredPeripherals.removeAll()
         WearableRuntimeDiagnostics.shared.recordDiscoveryStarted()
 
@@ -140,13 +176,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             throw WearableSDKError.deviceNotFound
         }
         WearableRuntimeDiagnostics.shared.recordPairingAttempt(deviceId: deviceId)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            pairContinuation = continuation
-            centralManager.connect(
-                peripheral,
-                options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true]
-            )
-        }
+        try await connect(peripheral, reason: "pair", waitLimit: 30)
     }
 
     func reconnectDevice(_ deviceId: DeviceID) async throws {
@@ -156,40 +186,198 @@ final class QCBandSDKService: NSObject, QCBandService {
         guard let uuid = UUID(uuidString: deviceId) else {
             throw WearableSDKError.deviceNotFound
         }
+        // Already connected to this band: nothing to do.
+        if isLinkLive, connectedPeripheral?.identifier == uuid { return }
         // `retrievePeripherals(withIdentifiers:)` gets a real CBPeripheral
         // handle for a device the system already knows about by UUID —
-        // standard CoreBluetooth, no scan required. Feeds it into the
-        // exact same `discoveredPeripherals`-backed connect path
-        // `pairDevice` already uses, rather than duplicating the connect
-        // logic.
+        // standard CoreBluetooth, no scan required.
         guard let peripheral = centralManager.retrievePeripherals(withIdentifiers: [uuid]).first else {
             throw WearableSDKError.deviceNotFound
         }
         discoveredPeripherals[deviceId] = peripheral
-        try await pairDevice(deviceId)
+        // A manual reconnect skips any backoff wait and joins (never
+        // duplicates) an automatic attempt already in progress. If the band
+        // isn't in range yet, the caller stops waiting after 20 s, but the
+        // pending connect stays armed and completes whenever it returns.
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        try await connect(peripheral, reason: "manual reconnect", waitLimit: 20)
     }
 
     func unpairDevice(_ deviceId: DeviceID) async throws {
-        // Explicit stop here rather than relying solely on the
-        // `didDisconnectPeripheral` delegate path below: `connectedPeripheral`
-        // is cleared synchronously a few lines down, which makes that
-        // delegate callback's own identity guard a no-op once it actually
-        // fires later.
+        // Forget Band: stop reconnecting, stop everything in flight.
+        autoReconnectId = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
         liveHeartRateTask?.cancel()
         liveHeartRateTask = nil
-        if let peripheral = connectedPeripheral {
+        pendingSportStop = nil
+        let cancelled = commands.failAll { WearableCommandError.cancelled(command: $0) }
+        if !cancelled.isEmpty { WearableRuntimeDiagnostics.shared.recordLinkEvent("forget band: cancelled \(cancelled.joined(separator: ", "))") }
+        failConnectWaiters(WearableCommandError.cancelled(command: "connect"))
+        if let peripheral = connectedPeripheral ?? restoredPeripheral {
             centralManager.cancelPeripheralConnection(peripheral)
         }
+        if let id = connectingId, let uuid = UUID(uuidString: id), let pending = centralManager.retrievePeripherals(withIdentifiers: [uuid]).first {
+            centralManager.cancelPeripheralConnection(pending)
+        }
+        connectingId = nil
+        restoredPeripheral = nil
         QCSDKManager.shareInstance().removeAllPeripheral()
         connectedPeripheral = nil
         activeDeviceId = nil
+        linkEpoch += 1
+    }
+
+    // MARK: - Connection lifecycle
+    //
+    // One authoritative connect attempt at a time:
+    //   connect(p)  → joins the attempt in progress, or starts one
+    //   didConnect  → attach to the SDK (QCSDKManager.add)
+    //   attached    → linkEpoch += 1, waiters succeed, `.connected`
+    //   didDisconnect → linkEpoch += 1, every in-flight command fails with
+    //                   `.disconnected`, `.reconnecting`, and a PENDING
+    //                   connect is re-armed (CoreBluetooth completes it when
+    //                   the band is back in range — also in the background)
+    //   connect/attach failure → retry after `ReconnectBackoff`
+    // Callbacks for a peripheral other than the one being connected/attached
+    // are stale and ignored.
+
+    /// Starts (or joins) the connect attempt for `peripheral` and waits for
+    /// it — at most `waitLimit` seconds, after which the waiter gets
+    /// `.timedOut` while the pending connect itself stays armed.
+    private func connect(_ peripheral: CBPeripheral, reason: String, waitLimit: TimeInterval) async throws {
+        let id = peripheral.identifier.uuidString
+        if isLinkLive, connectedPeripheral?.identifier == peripheral.identifier { return }
+        let waiter = UUID()
+        let timeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(waitLimit))
+            guard !Task.isCancelled, let self else { return }
+            if let c = self.connectWaiters.removeValue(forKey: waiter) {
+                c.resume(throwing: WearableCommandError.timedOut(command: "connect", seconds: Int(waitLimit)))
+                self.log("connect (\(reason)): not reachable within \(Int(waitLimit))s — still waiting in the background")
+            }
+        }
+        defer { timeout.cancel() }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                connectWaiters[waiter] = continuation
+                if connectingId == id {
+                    log("connect (\(reason)): joining the attempt already in progress")
+                    return
+                }
+                connectingId = id
+                autoReconnectId = id
+                log("connect (\(reason)): connecting")
+                centralManager.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                if let c = self?.connectWaiters.removeValue(forKey: waiter) {
+                    c.resume(throwing: WearableCommandError.cancelled(command: "connect"))
+                }
+            }
+        }
+    }
+
+    private func succeedConnectWaiters() {
+        let waiters = connectWaiters
+        connectWaiters.removeAll()
+        for c in waiters.values { c.resume() }
+    }
+
+    private func failConnectWaiters(_ error: Error) {
+        let waiters = connectWaiters
+        connectWaiters.removeAll()
+        for c in waiters.values { c.resume(throwing: error) }
+    }
+
+    /// Re-arms the connect for the paired band — immediately after a drop
+    /// (a pending CoreBluetooth connect costs nothing while the band is out
+    /// of range), or after the backoff delay following a failure.
+    private func scheduleReconnect(after delay: TimeInterval, reason: String) {
+        guard let id = autoReconnectId, let uuid = UUID(uuidString: id) else { return }
+        reconnectTask?.cancel()
+        reconnectTask = Task { @MainActor [weak self] in
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard !Task.isCancelled, let self, self.autoReconnectId == id, !self.isLinkLive else { return }
+            guard self.centralManager.state == .poweredOn else { return }
+            guard let peripheral = self.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first else {
+                self.log("reconnect: band unknown to iOS — waiting for a manual reconnect")
+                return
+            }
+            self.discoveredPeripherals[id] = peripheral
+            self.connectingId = id
+            self.log("reconnect (\(reason)): pending connect armed\(delay > 0 ? " after \(Int(delay))s backoff" : "")")
+            self.centralManager.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+        }
+    }
+
+    /// The band is connected at the BLE level: hand it to the SDK. Only a
+    /// successful attach makes the link live.
+    private func attach(_ peripheral: CBPeripheral) {
+        let id = peripheral.identifier.uuidString
+        log("attaching to the SDK")
+        // `@Sendable`: the SDK may call back on any queue (see `runCommand`).
+        QCSDKManager.shareInstance().add(peripheral) { @Sendable [weak self] success in
+            Task { @MainActor in self?.attachFinished(peripheral, id: id, success: success) }
+        }
+    }
+
+    private func attachFinished(_ peripheral: CBPeripheral, id: DeviceID, success: Bool) {
+        // Stale: a newer attempt, a forget, or a different band.
+        guard connectingId == id || (connectingId == nil && autoReconnectId == id && connectedPeripheral == nil) else {
+            log("attach result for a stale attempt ignored")
+            return
+        }
+        connectingId = nil
+        if success {
+            connectedPeripheral = peripheral
+            activeDeviceId = id
+            autoReconnectId = id
+            linkEpoch += 1
+            connectFailures = 0
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            log("connected (link #\(linkEpoch))")
+            WearableRuntimeDiagnostics.shared.recordPairingResult(success: true)
+            connectionStateContinuation?.yield(.connected)
+            succeedConnectWaiters()
+            sendPendingSportStopIfNeeded()
+        } else {
+            connectFailures += 1
+            WearableRuntimeDiagnostics.shared.recordPairingResult(success: false, error: "QCSDKManager.add(peripheral:) reported failure")
+            centralManager.cancelPeripheralConnection(peripheral)
+            failConnectWaiters(WearableSDKError.connectFailed)
+            connectionStateContinuation?.yield(autoReconnectId == id ? .reconnecting : .error)
+            scheduleReconnect(after: ReconnectBackoff.delay(afterFailures: connectFailures), reason: "SDK attach failed")
+        }
+    }
+
+    /// The link is gone (disconnect, Bluetooth off, or reset): fail every
+    /// command waiting on it — as `.disconnected`, never a data error.
+    private func linkLost(_ why: String) {
+        linkEpoch += 1
+        connectedPeripheral = nil
+        liveHeartRateTask?.cancel()
+        liveHeartRateTask = nil
+        let cancelled = commands.failAll { WearableCommandError.disconnected(command: $0) }
+        log("link lost (\(why)) — \(cancelled.isEmpty ? "no commands in flight" : "cancelled: \(cancelled.joined(separator: ", "))")")
+    }
+
+    private func log(_ message: String) {
+        WearableDiagnostics.log("link: \(message)")
+        WearableRuntimeDiagnostics.shared.recordLinkEvent(message)
     }
 
     // MARK: - Status & sync
 
     func deviceStatus(_ deviceId: DeviceID) async throws -> WearableDeviceStatus {
-        guard connectedPeripheral?.identifier.uuidString == deviceId else {
-            return WearableDeviceStatus(deviceId: deviceId, connectionState: .disconnected, batteryPct: nil, lastSeenAt: nil)
+        guard isLinkLive, connectedPeripheral?.identifier.uuidString == deviceId else {
+            // A band Sombrey is still reconnecting to reads as reconnecting,
+            // never as a plain disconnect.
+            let reconnecting = autoReconnectId == deviceId && centralManager.state == .poweredOn
+            return WearableDeviceStatus(deviceId: deviceId, connectionState: reconnecting ? .reconnecting : .disconnected, batteryPct: nil, lastSeenAt: nil)
         }
         let battery = try? await readBattery()
         return WearableDeviceStatus(
@@ -201,11 +389,11 @@ final class QCBandSDKService: NSObject, QCBandService {
     }
 
     func firmwareInfo(_ deviceId: DeviceID) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getDeviceSoftAndHardVersionSuccess({ hardVersion, softVersion in
-                continuation.resume(returning: "hw \(hardVersion) / sw \(softVersion)")
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("firmware version"))
+        try await runCommand("firmware version", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.getDeviceSoftAndHardVersionSuccess({ @Sendable hardVersion, softVersion in
+                finish(.success("hw \(hardVersion) / sw \(softVersion)"))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("firmware version")))
             })
         }
     }
@@ -218,8 +406,14 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// real-time callbacks use) so `WearableManager` has one place to
     /// persist from.
     func sync(_ deviceId: DeviceID) async throws -> WearableSyncResult {
-        guard connectedPeripheral?.identifier.uuidString == deviceId else {
-            throw WearableSDKError.noConnectedDevice
+        guard isLinkLive, connectedPeripheral?.identifier.uuidString == deviceId else {
+            throw WearableCommandError.notConnected(command: "sync")
+        }
+        // If the link drops mid-sync, the rest is abandoned as `.disconnected`
+        // (not "partial data") — the whole sync reruns after reconnecting.
+        let epoch = linkEpoch
+        func checkLink() throws {
+            guard isLinkLive, linkEpoch == epoch else { throw WearableCommandError.disconnected(command: "sync") }
         }
         WearableRuntimeDiagnostics.shared.recordSyncStarted()
         try? await setDeviceTime()
@@ -259,6 +453,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             anyFailed = true
         }
 
+        try checkLink()
         if let heartRateDays = try? await scheduledHeartRate(dayIndexes: Array(0...6)) {
             var count = 0
             for day in heartRateDays {
@@ -270,6 +465,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             anyFailed = true
         }
 
+        try checkLink()
         if let spo2 = try? await bloodOxygen(dayIndex: 0) {
             for reading in spo2 {
                 emit(deviceId: deviceId, type: .spo2, value: Double(reading.soa2), unit: "%", at: reading.date)
@@ -280,6 +476,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             anyFailed = true
         }
 
+        try checkLink()
         if let temps = try? await scheduledTemperature(dayIndex: 0) {
             for reading in temps {
                 emit(deviceId: deviceId, type: .skinTemperature, value: Double(reading.temperature), unit: "°C", at: reading.time)
@@ -290,6 +487,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             anyFailed = true
         }
 
+        try checkLink()
         await enableScheduledBloodPressureIfNeeded()
         if let bpHistory = try? await bloodPressureHistory() {
             for reading in bpHistory {
@@ -301,6 +499,7 @@ final class QCBandSDKService: NSObject, QCBandService {
         } else {
             anyFailed = true
         }
+        try checkLink()
         if let manualBP = try? await manualBloodPressureHistory() {
             for reading in manualBP {
                 emit(deviceId: deviceId, type: .bloodPressureSystolic, value: Double(reading.systolicPressure), unit: "mmHg", at: reading.date)
@@ -318,6 +517,7 @@ final class QCBandSDKService: NSObject, QCBandService {
         // letting an unverified supplementary fetch degrade the
         // already-meaningful `anyFailed` signal for everything else.
 
+        try checkLink()
         if let battery = try? await readBattery() {
             emit(deviceId: deviceId, type: .batteryPct, value: Double(battery.percent), unit: "%", at: now)
             synced += 1
@@ -326,6 +526,7 @@ final class QCBandSDKService: NSObject, QCBandService {
             anyFailed = true
         }
 
+        try checkLink()
         WearableRuntimeDiagnostics.shared.recordSyncCompleted(
             success: synced > 0,
             metricTypes: syncedTypes,
@@ -343,11 +544,12 @@ final class QCBandSDKService: NSObject, QCBandService {
         guard connectedPeripheral?.identifier.uuidString == deviceId else {
             throw WearableSDKError.noConnectedDevice
         }
-        let byDay: [String: [QCSleepModel]] = try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getSleepDetailData(fromDay: days, sleepDatas: { result in
-                continuation.resume(returning: result)
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("sleep history"))
+        guard isLinkLive else { throw WearableCommandError.notConnected(command: "sleep history") }
+        let byDay: [String: [QCSleepModel]] = try await runCommand("sleep history", timeout: BandCommandTimeout.history) { finish in
+            QCSDKCmdCreator.getSleepDetailData(fromDay: days, sleepDatas: { @Sendable result in
+                finish(.success(result))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("sleep history")))
             })
         }
         return byDay.values.compactMap(Self.sleepSession(from:)).sorted { $0.startedAt < $1.startedAt }
@@ -396,8 +598,19 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     func stopSportSession(_ deviceId: DeviceID) async throws {
         guard let sportType = activeSportType else { throw WearableSDKError.commandFailed("no active sport session") }
-        try await operateSportMode(sportType: sportType, state: Self.sportStateStop)
         activeSportType = nil
+        do {
+            try await operateSportMode(sportType: sportType, state: Self.sportStateStop)
+        } catch {
+            // Out of range (or no answer): the band keeps its own recording;
+            // the stop is sent the moment the link is back, and the band's
+            // record imports then (deduplicated against this session).
+            if error.isBandLinkLoss || error is WearableCommandError {
+                pendingSportStop = sportType
+                log("Sport+ stop queued until the band reconnects (\(error))")
+            }
+            throw error
+        }
     }
 
     func adoptSportSession(_ deviceId: DeviceID, sportType: Int) {
@@ -519,8 +732,12 @@ final class QCBandSDKService: NSObject, QCBandService {
         // can't be proven Sendable, but `OnDemandMeasurementResult` (a
         // plain Swift struct of Int?/Double?) can — confirmed by a real
         // Codemagic build ("sending 'result' risks causing data races").
-        return try await withCheckedThrowingContinuation { continuation in
-            var didResume = false
+        // The band's BP push arrives on `measuringHandle`, possibly on the
+        // SDK's own queue — kept in a lock-protected box (see `runCommand`
+        // for why every callback here is `@Sendable`).
+        let bpPush = BandPushBox()
+        let metricName = metric.rawValue
+        return try await runCommand("measure \(metricName)", timeout: BandCommandTimeout.measurement) { finish in
             // Blood pressure's only genuine device reading. Established
             // from the SDK binary (QCSDKManager / OdmBandNotifyCenter),
             // since neither the header nor the vendor demo shows a BP
@@ -535,93 +752,69 @@ final class QCBandSDKService: NSObject, QCBandService {
             //   substitutes a hardcoded 120/80 — then still reports
             //   `isSuccess`. Its `result` must therefore never be read
             //   as a BP reading.
-            var bandBloodPressure: (systolic: Int, diastolic: Int)?
             QCSDKManager.shareInstance().startToMeasuring(
                 withOperateType: qcType,
                 timeout: 30,
-                measuringHandle: { tick in
-                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): measuringHandle tick, type=\(String(describing: type(of: tick as Any))) value=\(String(describing: tick))")
+                measuringHandle: { @Sendable tick in
+                    WearableDiagnostics.log("measureNow(\(metricName)): measuringHandle tick, type=\(String(describing: type(of: tick as Any))) value=\(String(describing: tick))")
                     if isBP, let pair = BandBloodPressurePush.pair(from: tick) {
-                        bandBloodPressure = pair
+                        bpPush.set(pair)
                         Task { @MainActor in
                             WearableRuntimeDiagnostics.shared.recordBPBandPush(systolic: pair.systolic, diastolic: pair.diastolic)
                         }
                     }
                 },
-                completedHandle: { isSuccess, result, error in
-                    guard !didResume else { return }
-                    didResume = true
-                    // This line answers exactly what the vendor SDK
-                    // actually handed back for this device/firmware —
-                    // the dynamic type of `result` — rather than
-                    // continuing to assume `QCBloodPressureModel` (or
-                    // the dictionary fallback) is correct.
-                    //
-                    // Every string here is extracted synchronously,
-                    // before crossing into the `Task { @MainActor in }`
-                    // below: this ObjC completion handler isn't provably
-                    // MainActor-isolated (unlike the vendor's live-push
-                    // callbacks elsewhere in this file, which are called
-                    // from inside `Task { @MainActor in }` closures
-                    // created directly in MainActor-isolated methods),
-                    // so `WearableRuntimeDiagnostics` (a `@MainActor`
-                    // type) can't be touched directly from here — and
-                    // `result` itself (`Any?`) can't cross that boundary
-                    // at all, same reasoning as `parseMeasurementResult`
-                    // being called synchronously below, not inside the
-                    // Task (confirmed by a real Codemagic build: "sending
-                    // 'result' risks causing data races").
+                completedHandle: { @Sendable isSuccess, result, error in
+                    // Everything is extracted here, synchronously, before
+                    // anything crosses to the main actor: `result` (`Any?`)
+                    // can't cross that boundary at all.
                     let rawType = String(describing: type(of: result as Any))
                     let resultDescription = String(describing: result)
                     let errorDescription = error?.localizedDescription
-                    WearableDiagnostics.log("measureNow(\(metric.rawValue)): completedHandle isSuccess=\(isSuccess) resultType=\(rawType) resultIsNil=\(result == nil) error=\(errorDescription ?? "nil")")
-                    if isBP {
-                        Task { @MainActor in
-                            WearableRuntimeDiagnostics.shared.recordBPCallback(isSuccess: isSuccess, rawType: rawType, rawDescription: resultDescription, error: errorDescription)
-                        }
-                    }
-                    if isBP {
-                        let errorCode = (error as NSError?)?.code
-                        let bandPushReceived = bandBloodPressure != nil
-                        Task { @MainActor in
-                            WearableRuntimeDiagnostics.shared.recordBPCompletion(sdkErrorCode: errorCode, bandPushReceived: bandPushReceived)
-                        }
-                        // -3 (not worn) / -4 (uncalibrated) are the band
-                        // flagging the attempt invalid, so an earlier push
-                        // isn't trusted then; -2 only means the end command
-                        // wasn't acknowledged after the band had reported.
-                        if let pair = bandBloodPressure, isSuccess || errorCode == -2 {
-                            var parsed = OnDemandMeasurementResult()
-                            parsed.systolicMmHg = pair.systolic
-                            parsed.diastolicMmHg = pair.diastolic
-                            Task { @MainActor in
-                                WearableRuntimeDiagnostics.shared.recordBPParsed(systolic: pair.systolic, diastolic: pair.diastolic)
-                            }
-                            continuation.resume(returning: parsed)
-                        } else if isSuccess {
-                            Task { @MainActor in
-                                WearableRuntimeDiagnostics.shared.recordBPFailure("SDK window ended with no band BP push; completion value \(resultDescription) discarded (SDK default when band sends nothing)")
-                            }
-                            continuation.resume(throwing: WearableSDKError.bloodPressureNotReturnedByBand)
+                    WearableDiagnostics.log("measureNow(\(metricName)): completedHandle isSuccess=\(isSuccess) resultType=\(rawType) resultIsNil=\(result == nil) error=\(errorDescription ?? "nil")")
+                    guard isBP else {
+                        if isSuccess {
+                            finish(.success(Self.parseMeasurementResult(result, metric: metric)))
                         } else {
-                            Task { @MainActor in
-                                WearableRuntimeDiagnostics.shared.recordBPFailure(errorDescription ?? "SDK completedHandle reported failure with no NSError")
-                            }
-                            continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
+                            finish(.failure(error ?? WearableSDKError.commandFailed("on-demand measurement")))
                         }
                         return
                     }
-                    if isSuccess {
-                        continuation.resume(returning: Self.parseMeasurementResult(result, metric: metric))
+                    let errorCode = (error as NSError?)?.code
+                    let pair = bpPush.value
+                    Task { @MainActor in
+                        WearableRuntimeDiagnostics.shared.recordBPCallback(isSuccess: isSuccess, rawType: rawType, rawDescription: resultDescription, error: errorDescription)
+                        WearableRuntimeDiagnostics.shared.recordBPCompletion(sdkErrorCode: errorCode, bandPushReceived: pair != nil)
+                    }
+                    // -3 (not worn) / -4 (uncalibrated) are the band
+                    // flagging the attempt invalid, so an earlier push
+                    // isn't trusted then; -2 only means the end command
+                    // wasn't acknowledged after the band had reported.
+                    if let pair, isSuccess || errorCode == -2 {
+                        var parsed = OnDemandMeasurementResult()
+                        parsed.systolicMmHg = pair.systolic
+                        parsed.diastolicMmHg = pair.diastolic
+                        Task { @MainActor in
+                            WearableRuntimeDiagnostics.shared.recordBPParsed(systolic: pair.systolic, diastolic: pair.diastolic)
+                        }
+                        finish(.success(parsed))
+                    } else if isSuccess {
+                        Task { @MainActor in
+                            WearableRuntimeDiagnostics.shared.recordBPFailure("SDK window ended with no band BP push; completion value \(resultDescription) discarded (SDK default when band sends nothing)")
+                        }
+                        finish(.failure(WearableSDKError.bloodPressureNotReturnedByBand))
                     } else {
-                        continuation.resume(throwing: error ?? WearableSDKError.commandFailed("on-demand measurement"))
+                        Task { @MainActor in
+                            WearableRuntimeDiagnostics.shared.recordBPFailure(errorDescription ?? "SDK completedHandle reported failure with no NSError")
+                        }
+                        finish(.failure(error ?? WearableSDKError.commandFailed("on-demand measurement")))
                     }
                 }
             )
         }
     }
 
-    private static func parseMeasurementResult(_ raw: Any?, metric: OnDemandMetric) -> OnDemandMeasurementResult {
+    nonisolated private static func parseMeasurementResult(_ raw: Any?, metric: OnDemandMetric) -> OnDemandMeasurementResult {
         var result = OnDemandMeasurementResult()
         switch metric {
         case .heartRate:
@@ -638,13 +831,13 @@ final class QCBandSDKService: NSObject, QCBandService {
         return result
     }
 
-    private static func intValue(_ any: Any?) -> Int? {
+    nonisolated private static func intValue(_ any: Any?) -> Int? {
         if let number = any as? NSNumber { return number.intValue }
         if let string = any as? String { return Int(string) }
         return nil
     }
 
-    private static func doubleValue(_ any: Any?) -> Double? {
+    nonisolated private static func doubleValue(_ any: Any?) -> Double? {
         if let number = any as? NSNumber { return number.doubleValue }
         if let string = any as? String { return Double(string) }
         return nil
@@ -686,6 +879,10 @@ final class QCBandSDKService: NSObject, QCBandService {
             WearableDiagnostics.log("startLiveHeartRate: already running, no-op")
             return
         }
+        guard isLinkLive else {
+            WearableDiagnostics.log("startLiveHeartRate: link not live — will start after reconnect")
+            return
+        }
         WearableDiagnostics.log("startLiveHeartRate: sending Start command")
         WearableRuntimeDiagnostics.shared.recordHRStartCommand()
         QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdStart), finished: nil)
@@ -693,6 +890,9 @@ final class QCBandSDKService: NSObject, QCBandService {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.realTimeHRHoldInterval))
                 guard !Task.isCancelled, let self else { return }
+                // Never write into a dead link; the task ends and live HR
+                // is restarted by the reconnect.
+                guard self.isLinkLive else { return }
                 WearableDiagnostics.log("startLiveHeartRate: sending Hold command")
                 WearableRuntimeDiagnostics.shared.recordHRHoldCommand()
                 QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdHold), finished: nil)
@@ -709,6 +909,7 @@ final class QCBandSDKService: NSObject, QCBandService {
         WearableRuntimeDiagnostics.shared.recordHRStopCommand()
         liveHeartRateTask?.cancel()
         liveHeartRateTask = nil
+        guard isLinkLive else { return }
         QCSDKCmdCreator.realTimeHeartRate(with: QCBandRealTimeHeartRateCmdType(rawValue: Self.realTimeHRCmdEnd), finished: nil)
     }
 
@@ -895,6 +1096,62 @@ final class QCBandSDKService: NSObject, QCBandService {
 
     // MARK: - Command wrappers (each an independent BLE round trip)
 
+    /// The ONE way a band command is sent. Structurally safe:
+    ///
+    /// - refused (`.notConnected`) unless the link is live — nothing is ever
+    ///   sent into a dead connection;
+    /// - exactly one terminal path: the SDK's success OR failure callback,
+    ///   OR the time limit, OR link loss / task cancellation — whichever is
+    ///   first, via `OneShotCompletion`; every later callback is logged as
+    ///   stale and dropped, so a continuation can never resume twice;
+    /// - registered in `commands` for its whole life, so a disconnect fails
+    ///   it at once with `.disconnected` (never left hanging);
+    /// - the SDK callbacks handed out are `@Sendable` (nonisolated): the
+    ///   vendor SDK may invoke them on its own queue, and a main-actor
+    ///   closure called off the main thread is a Swift 6 runtime trap.
+    ///   `send` must only capture Sendable values in those callbacks and
+    ///   report through `finish`.
+    private func runCommand<T: Sendable>(
+        _ name: String,
+        timeout: TimeInterval,
+        _ send: (_ finish: @escaping @Sendable (Result<T, Error>) -> Void) -> Void
+    ) async throws -> T {
+        guard isLinkLive else {
+            log("\(name): not sent — band not connected")
+            throw WearableCommandError.notConnected(command: name)
+        }
+        let epoch = linkEpoch
+        let id = UUID()
+        let once = OneShotCompletion<T>(command: name)
+        let seconds = Int(timeout)
+        let timer = Task {
+            try? await Task.sleep(for: .seconds(timeout))
+            guard !Task.isCancelled else { return }
+            if once.complete(.failure(WearableCommandError.timedOut(command: name, seconds: seconds))) {
+                Task { @MainActor [weak self] in self?.log("\(name): timed out after \(seconds)s") }
+            }
+        }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+                commands.register(id, command: name, epoch: epoch) { error in once.complete(.failure(error)) }
+                once.install(continuation) {
+                    timer.cancel()
+                    Task { @MainActor [weak self] in self?.commands.unregister(id) }
+                }
+                send { result in
+                    if !once.complete(result) {
+                        // A late or duplicate SDK callback — the command
+                        // already ended (disconnect, timeout, or an earlier
+                        // callback). Dropped, never resumed again.
+                        Task { @MainActor [weak self] in self?.log("\(name): stale callback from link #\(epoch) dropped") }
+                    }
+                }
+            }
+        } onCancel: {
+            once.complete(.failure(WearableCommandError.cancelled(command: name)))
+        }
+    }
+
     // Raw values per the vendor header (QCDFU_Utils.h): Start=0x01,
     // Pause=0x02, Continue=0x03, Stop=0x04, Running=0x05, GetTime=0x06.
     // Matched by raw int for the same reason `SLEEPTYPE` is — this
@@ -904,6 +1161,32 @@ final class QCBandSDKService: NSObject, QCBandService {
     private static let sportStatePause = 0x02
     private static let sportStateContinue = 0x03
     private static let sportStateStop = 0x04
+
+    private static func sportStateName(_ state: Int) -> String {
+        switch state {
+        case sportStateStart: return "start"
+        case sportStatePause: return "pause"
+        case sportStateContinue: return "resume"
+        case sportStateStop: return "stop"
+        default: return "state \(state)"
+        }
+    }
+
+    /// A stop the band missed while out of range: sent once the link is
+    /// back, so the band's own recording ends and its record can import.
+    private func sendPendingSportStopIfNeeded() {
+        guard let sportType = pendingSportStop else { return }
+        pendingSportStop = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.operateSportMode(sportType: sportType, state: Self.sportStateStop)
+                self.log("sent the Sport+ stop the band missed while disconnected")
+            } catch {
+                self.log("Sport+ stop after reconnect failed: \(error)")
+            }
+        }
+    }
 
     private func operateSportMode(sportType: Int, state: Int) async throws {
         // QCSportState is a plain (non-NS_ENUM) C enum in the vendor
@@ -917,24 +1200,20 @@ final class QCBandSDKService: NSObject, QCBandService {
             throw WearableSDKError.commandFailed("invalid sport type")
         }
         let sportState = QCSportState(rawValue: UInt32(state))
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            QCSDKCmdCreator.operateSportMode(with: type, state: sportState) { _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+        let _: Void = try await runCommand("Sport+ \(Self.sportStateName(state))", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.operateSportMode(with: type, state: sportState) { @Sendable _, error in
+                if let error { finish(.failure(error)) } else { finish(.success(())) }
             }
         }
     }
 
     private func sportRecords(since timestamp: TimeInterval) async throws -> [OdmGeneralExerciseSummaryModel] {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getSportRecords(fromLastTimeStamp: timestamp) { summaries, error in
+        try await runCommand("Sport+ records", timeout: BandCommandTimeout.sportRecords) { finish in
+            QCSDKCmdCreator.getSportRecords(fromLastTimeStamp: timestamp) { @Sendable summaries, error in
                 if let summaries {
-                    continuation.resume(returning: summaries)
+                    finish(.success(summaries))
                 } else {
-                    continuation.resume(throwing: error ?? WearableSDKError.commandFailed("sport session history"))
+                    finish(.failure(error ?? WearableSDKError.commandFailed("sport session history")))
                 }
             }
         }
@@ -951,19 +1230,20 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// can tell "this band doesn't support X" apart from "the command
     /// failed for some other reason" — see `capabilityKey(for:)`.
     private func setDeviceTime() async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            QCSDKCmdCreator.setTime(Date(), success: { [weak self] featureList in
-                self?.capabilities = Self.parseCapabilities(featureList)
-                WearableDiagnostics.log("setDeviceTime: capabilities=\(self?.capabilities ?? [:])")
-                continuation.resume()
-            }, failed: {
-                WearableDiagnostics.error("setDeviceTime: failed")
-                continuation.resume(throwing: WearableSDKError.commandFailed("set device time"))
+        // The feature list is parsed inside the callback (into Sendable
+        // values) and applied back on the main actor.
+        let parsed: [String: Bool] = try await runCommand("set device time", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.setTime(Date(), success: { @Sendable featureList in
+                finish(.success(Self.parseCapabilities(featureList)))
+            }, failed: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("set device time")))
             })
         }
+        capabilities = parsed
+        WearableDiagnostics.log("setDeviceTime: capabilities=\(capabilities)")
     }
 
-    private static func parseCapabilities(_ featureList: [AnyHashable: Any]) -> [String: Bool] {
+    nonisolated private static func parseCapabilities(_ featureList: [AnyHashable: Any]) -> [String: Bool] {
         var result: [String: Bool] = [:]
         for (rawKey, rawValue) in featureList {
             guard let key = rawKey as? String else { continue }
@@ -998,55 +1278,55 @@ final class QCBandSDKService: NSObject, QCBandService {
     }
 
     private func currentSport() async throws -> QCSportModel {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getCurrentSportSucess({ sport in
-                continuation.resume(returning: sport)
-            }, failed: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("current activity"))
+        try await runCommand("today's activity", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.getCurrentSportSucess({ @Sendable sport in
+                finish(.success(sport))
+            }, failed: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("current activity")))
             })
         }
     }
 
     private func scheduledHeartRate(dayIndexes: [Int]) async throws -> [QCSchedualHeartRateModel] {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getSchedualHeartRateData(withDayIndexs: dayIndexes.map { NSNumber(value: $0) }, success: { models in
-                continuation.resume(returning: models)
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("heart rate history"))
+        try await runCommand("heart rate history", timeout: BandCommandTimeout.history) { finish in
+            QCSDKCmdCreator.getSchedualHeartRateData(withDayIndexs: dayIndexes.map { NSNumber(value: $0) }, success: { @Sendable models in
+                finish(.success(models))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("heart rate history")))
             })
         }
     }
 
     private func bloodOxygen(dayIndex: Int) async throws -> [QCBloodOxygenModel] {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getBloodOxygenData(byDayIndex: dayIndex) { result, error in
+        try await runCommand("SpO2 history", timeout: BandCommandTimeout.history) { finish in
+            QCSDKCmdCreator.getBloodOxygenData(byDayIndex: dayIndex) { @Sendable result, error in
                 if let models = result as? [QCBloodOxygenModel] {
-                    continuation.resume(returning: models)
+                    finish(.success(models))
                 } else {
-                    continuation.resume(throwing: error ?? WearableSDKError.commandFailed("SpO2 history"))
+                    finish(.failure(error ?? WearableSDKError.commandFailed("SpO2 history")))
                 }
             }
         }
     }
 
     private func scheduledTemperature(dayIndex: Int) async throws -> [QCTemperatureModel] {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getSchedualTemperatureData(byDayIndex: dayIndex) { result, error in
+        try await runCommand("temperature history", timeout: BandCommandTimeout.history) { finish in
+            QCSDKCmdCreator.getSchedualTemperatureData(byDayIndex: dayIndex) { @Sendable result, error in
                 if let models = result as? [QCTemperatureModel] {
-                    continuation.resume(returning: models)
+                    finish(.success(models))
                 } else {
-                    continuation.resume(throwing: error ?? WearableSDKError.commandFailed("temperature history"))
+                    finish(.failure(error ?? WearableSDKError.commandFailed("temperature history")))
                 }
             }
         }
     }
 
     private func bloodPressureHistory() async throws -> [QCBloodPressureModel] {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getSchedualBPHistoryData(success: { models in
-                continuation.resume(returning: models)
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("blood pressure history"))
+        try await runCommand("blood pressure history", timeout: BandCommandTimeout.history) { finish in
+            QCSDKCmdCreator.getSchedualBPHistoryData(success: { @Sendable models in
+                finish(.success(models))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("blood pressure history")))
             })
         }
     }
@@ -1065,23 +1345,23 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// parameters (`beginTime:"00:00" endTime:"23:59" minuteInterval:60`),
     /// not invented. Best-effort: failure here doesn't fail `sync()`.
     private func enableScheduledBloodPressureIfNeeded() async {
-        let isOn: Bool? = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-            QCSDKCmdCreator.getSchedualBPInfo({ featureOn, _, _, _ in
-                continuation.resume(returning: featureOn)
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("scheduled BP status"))
+        let isOn: Bool? = try? await runCommand("scheduled BP status", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.getSchedualBPInfo({ @Sendable featureOn, _, _, _ in
+                finish(.success(featureOn))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("scheduled BP status")))
             })
         }
         WearableDiagnostics.log("enableScheduledBloodPressureIfNeeded: currently on=\(String(describing: isOn))")
         guard isOn == false else { return }
-        try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            QCSDKCmdCreator.setSchedualBPInfoOn(true, beginTime: "00:00", endTime: "23:59", minuteInterval: 60, success: { _, _, _, _ in
-                WearableDiagnostics.log("enableScheduledBloodPressureIfNeeded: enabled")
-                continuation.resume()
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("enable scheduled BP"))
+        let enabled: Void? = try? await runCommand("enable scheduled BP", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.setSchedualBPInfoOn(true, beginTime: "00:00", endTime: "23:59", minuteInterval: 60, success: { @Sendable _, _, _, _ in
+                finish(.success(()))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("enable scheduled BP")))
             })
         }
+        if enabled != nil { WearableDiagnostics.log("enableScheduledBloodPressureIfNeeded: enabled") }
     }
 
     /// The vendor demo's `getBloodPressure` fetches this immediately
@@ -1090,23 +1370,24 @@ final class QCBandSDKService: NSObject, QCBandService {
     /// app-scheduled one above. `0` = "since the beginning," matching
     /// the demo's own call exactly.
     private func manualBloodPressureHistory() async throws -> [QCBloodPressureModel] {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.getManualBloodPressureData(withLastUnixSeconds: 0, success: { models in
-                continuation.resume(returning: models)
-            }, fail: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("manual blood pressure history"))
+        try await runCommand("manual blood pressure history", timeout: BandCommandTimeout.history) { finish in
+            QCSDKCmdCreator.getManualBloodPressureData(withLastUnixSeconds: 0, success: { @Sendable models in
+                finish(.success(models))
+            }, fail: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("manual blood pressure history")))
             })
         }
     }
 
     private func readBattery() async throws -> (percent: Int, charging: Bool) {
-        try await withCheckedThrowingContinuation { continuation in
-            QCSDKCmdCreator.readBatterySuccess({ battery, charging in
-                continuation.resume(returning: (Int(battery), charging))
-            }, failed: {
-                continuation.resume(throwing: WearableSDKError.commandFailed("battery"))
+        let reading: BatteryReading = try await runCommand("battery", timeout: BandCommandTimeout.quick) { finish in
+            QCSDKCmdCreator.readBatterySuccess({ @Sendable battery, charging in
+                finish(.success(BatteryReading(percent: Int(battery), charging: charging)))
+            }, failed: { @Sendable in
+                finish(.failure(WearableSDKError.commandFailed("battery")))
             })
         }
+        return (reading.percent, reading.charging)
     }
 }
 
@@ -1135,7 +1416,37 @@ extension QCBandSDKService: CBCentralManagerDelegate {
                 self.stopScanIfNeeded()
                 self.scanContinuation?.resume(returning: [])
                 self.scanContinuation = nil
+                // Bluetooth off/resetting invalidates every peripheral and
+                // CoreBluetooth may not deliver a didDisconnect for it.
+                if self.connectedPeripheral != nil || self.connectingId != nil {
+                    self.linkLost("Bluetooth \(Self.stateDescription(central.state))")
+                }
+                self.connectingId = nil
+                self.reconnectTask?.cancel()
+                self.reconnectTask = nil
+                self.failConnectWaiters(WearableSDKError.bluetoothUnavailable)
                 self.connectionStateContinuation?.yield(.unavailable)
+                return
+            }
+            // Powered on: resume the paired band — a restored peripheral
+            // that's still connected is attached directly; otherwise a
+            // pending connect is armed.
+            if let restored = self.restoredPeripheral {
+                self.restoredPeripheral = nil
+                let id = restored.identifier.uuidString
+                self.autoReconnectId = id
+                self.discoveredPeripherals[id] = restored
+                if restored.state == .connected {
+                    self.connectingId = id
+                    self.log("restored band still connected — re-attaching")
+                    self.attach(restored)
+                } else {
+                    self.connectionStateContinuation?.yield(.reconnecting)
+                    self.scheduleReconnect(after: 0, reason: "restored by iOS")
+                }
+            } else if self.autoReconnectId != nil, !self.isLinkLive, self.connectingId == nil {
+                self.connectionStateContinuation?.yield(.reconnecting)
+                self.scheduleReconnect(after: 0, reason: "Bluetooth back on")
             }
         }
     }
@@ -1162,53 +1473,64 @@ extension QCBandSDKService: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
-            QCSDKManager.shareInstance().add(peripheral) { [weak self] success in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if success {
-                        self.connectedPeripheral = peripheral
-                        self.activeDeviceId = peripheral.identifier.uuidString
-                        self.connectionStateContinuation?.yield(.connected)
-                        WearableRuntimeDiagnostics.shared.recordPairingResult(success: true)
-                        self.pairContinuation?.resume()
-                    } else {
-                        self.connectionStateContinuation?.yield(.error)
-                        WearableRuntimeDiagnostics.shared.recordPairingResult(success: false, error: "QCSDKManager.add(peripheral:) reported failure")
-                        self.pairContinuation?.resume(throwing: WearableSDKError.connectFailed)
-                    }
-                    self.pairContinuation = nil
-                }
+            let id = peripheral.identifier.uuidString
+            // Stale: not the attempt in progress (a forgotten band, or a
+            // connect superseded by another).
+            guard self.connectingId == id || (self.connectingId == nil && self.autoReconnectId == id && !self.isLinkLive) else {
+                self.log("didConnect for a peripheral no longer being connected — ignored")
+                return
             }
+            self.connectingId = id
+            self.attach(peripheral)
         }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        let message = String(describing: error)
         Task { @MainActor in
-            self.connectionStateContinuation?.yield(.error)
-            WearableRuntimeDiagnostics.shared.recordPairingResult(success: false, error: String(describing: error))
-            self.pairContinuation?.resume(throwing: error ?? WearableSDKError.connectFailed)
-            self.pairContinuation = nil
+            let id = peripheral.identifier.uuidString
+            guard self.connectingId == id else {
+                self.log("didFailToConnect for a stale attempt — ignored")
+                return
+            }
+            self.connectingId = nil
+            self.connectFailures += 1
+            WearableRuntimeDiagnostics.shared.recordPairingResult(success: false, error: message)
+            self.failConnectWaiters(error ?? WearableSDKError.connectFailed)
+            if self.autoReconnectId == id {
+                self.connectionStateContinuation?.yield(.reconnecting)
+                self.scheduleReconnect(after: ReconnectBackoff.delay(afterFailures: self.connectFailures), reason: "connect failed")
+            } else {
+                self.connectionStateContinuation?.yield(.error)
+            }
         }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        let message = error.map { String(describing: $0) } ?? "no error"
         Task { @MainActor in
             QCSDKManager.shareInstance().remove(peripheral)
-            guard self.connectedPeripheral?.identifier == peripheral.identifier else { return }
-            self.connectedPeripheral = nil
-            // The band itself is gone — no point continuing to send hold
-            // commands into a dead connection; `WearableManager` clears
-            // the stale live BPM value once it observes `.reconnecting`/
-            // `.disconnected` via `connectionStateUpdates`.
-            self.liveHeartRateTask?.cancel()
-            self.liveHeartRateTask = nil
-            // Best-effort automatic reconnect — mirrors the vendor demo's
-            // own behavior for an unexpected drop (not a user-initiated
-            // `unpairDevice`, which clears `connectedPeripheral` itself
-            // before this delegate call would fire from a real teardown).
+            let id = peripheral.identifier.uuidString
+            let wasLive = self.connectedPeripheral?.identifier == peripheral.identifier
+            let wasAttaching = self.connectingId == id
+            // Stale: an older link or a band already forgotten.
+            guard wasLive || wasAttaching else {
+                self.log("didDisconnect for a stale link — ignored")
+                return
+            }
+            self.connectingId = nil
+            self.linkLost("disconnected: \(message)")
+            if wasAttaching { self.failConnectWaiters(WearableCommandError.disconnected(command: "connect")) }
+            guard self.autoReconnectId == id else {
+                self.connectionStateContinuation?.yield(.disconnected)
+                return
+            }
             if central.state == .poweredOn {
+                // The band walked out of range (or similar): an honest
+                // `.reconnecting`, and a pending connect that completes on
+                // its own when the band is back — no polling, no timeout.
                 self.connectionStateContinuation?.yield(.reconnecting)
-                central.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+                self.scheduleReconnect(after: 0, reason: "link dropped")
             } else {
                 self.connectionStateContinuation?.yield(.unavailable)
             }
@@ -1223,9 +1545,11 @@ extension QCBandSDKService: CBCentralManagerDelegate {
         // actually need does.
         guard let peripheral = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first else { return }
         Task { @MainActor in
-            self.connectedPeripheral = peripheral
-            self.activeDeviceId = peripheral.identifier.uuidString
-            peripheral.delegate = nil
+            // Not live until it's re-attached to the SDK: the attach (or a
+            // pending reconnect) happens once Bluetooth reports powered-on.
+            self.restoredPeripheral = peripheral
+            self.autoReconnectId = peripheral.identifier.uuidString
+            self.log("iOS restored the band's connection state (\(peripheral.state.rawValue == 2 ? "connected" : "not connected"))")
         }
     }
 }
@@ -1245,3 +1569,27 @@ extension QCTemperatureModel: @unchecked Sendable {}
 extension QCBloodPressureModel: @unchecked Sendable {}
 extension QCSportInfoModel: @unchecked Sendable {}
 extension OdmGeneralExerciseSummaryModel: @unchecked Sendable {}
+// Same boundary, now crossing through `runCommand`'s Sendable result.
+extension QCSportModel: @unchecked Sendable {}
+
+/// The latest band BP push during a measurement, shared between the SDK's
+/// tick and completion callbacks (which may run on any queue).
+final class BandPushBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pair: (systolic: Int, diastolic: Int)?
+
+    func set(_ value: (systolic: Int, diastolic: Int)) {
+        lock.lock(); pair = value; lock.unlock()
+    }
+
+    var value: (systolic: Int, diastolic: Int)? {
+        lock.lock(); defer { lock.unlock() }
+        return pair
+    }
+}
+
+/// Battery answer as a Sendable value (tuples can't carry a conformance).
+struct BatteryReading: Sendable {
+    let percent: Int
+    let charging: Bool
+}

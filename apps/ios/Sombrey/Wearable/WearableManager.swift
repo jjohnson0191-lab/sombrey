@@ -85,6 +85,8 @@ final class WearableManager {
     private let gpsTracker = GPSTracker()
     private var measurementTask: Task<Void, Never>?
     private var sportUpdateTask: Task<Void, Never>?
+    /// Whether the app is in the foreground (live HR only runs then).
+    private var isAppActive = true
     private var sportRecordTask: Task<Void, Never>?
     private var isImportingSportRecords = false
     /// Set when an import is requested while one is running; the running
@@ -199,8 +201,17 @@ final class WearableManager {
             WearableRuntimeDiagnostics.shared.recordReconnectResult(success: true)
             await sync()
         } catch {
-            status = WearableDeviceStatus(deviceId: device.id, connectionState: .disconnected, batteryPct: status?.batteryPct, lastSeenAt: nil)
-            lastError = String(describing: error)
+            if case WearableCommandError.timedOut = error {
+                // Not in range yet — the pending reconnect stays armed and
+                // completes on its own; say so rather than "disconnected".
+                status = WearableDeviceStatus(deviceId: device.id, connectionState: .reconnecting, batteryPct: status?.batteryPct, lastSeenAt: status?.lastSeenAt)
+                subscribeToMeasurements(deviceId: device.id)
+                subscribeToConnectionState(deviceId: device.id)
+                lastError = "Your band isn't in range yet — Sombrey will reconnect automatically when it is."
+            } else {
+                status = WearableDeviceStatus(deviceId: device.id, connectionState: .disconnected, batteryPct: status?.batteryPct, lastSeenAt: nil)
+                lastError = String(describing: error)
+            }
             WearableRuntimeDiagnostics.shared.recordReconnectResult(success: false, error: String(describing: error))
         }
     }
@@ -237,8 +248,26 @@ final class WearableManager {
                     await self.refreshStatus()
                     // Real-time HR is not ambient like steps/battery — it
                     // requires an explicit start command, only meaningful
-                    // once actually connected (see `QCBandSDKService`).
-                    await self.service.startLiveHeartRate(deviceId)
+                    // once actually connected (see `QCBandSDKService`) —
+                    // and only while someone can see it (foreground).
+                    if self.isAppActive {
+                        await self.service.startLiveHeartRate(deviceId)
+                    }
+                    // Back from a drop: bring in what the band recorded
+                    // meanwhile (history, Sport+ records). Everything it
+                    // returns is deduplicated server-side, so a re-sync
+                    // never creates duplicates.
+                    if let previousState, previousState != .connected, previousState != .syncing {
+                        Task { await self.sync() }
+                    }
+                } else if state == .reconnecting {
+                    // The link is down but coming back: the last BPM is no
+                    // longer live — clear it so nothing shows it as current;
+                    // the next genuinely new reading after reconnecting is
+                    // what appears as LIVE. Workouts and activities are not
+                    // touched: the connection and the session are separate.
+                    self.latestMeasurements[.heartRate] = nil
+                    self.liveHeartRateTrace.removeAll()
                 } else if state == .disconnected || state == .error || state == .unavailable {
                     // The band is genuinely gone (not merely
                     // `.reconnecting`, which is a transient auto-retry) —
@@ -295,7 +324,15 @@ final class WearableManager {
 
     func sync() async {
         guard let device = pairedDevice else { return }
-        syncTask?.cancel()
+        // One sync at a time: a reconnect, a foreground and a pull-to-sync
+        // arriving together join the one already running.
+        if let running = syncTask {
+            await running.value
+            return
+        }
+        // Only over a live link — a sync while reconnecting would fail every
+        // command; the reconnect itself triggers the catch-up sync.
+        guard status?.connectionState == .connected || status?.connectionState == .syncing else { return }
         status = WearableDeviceStatus(deviceId: device.id, connectionState: .syncing, batteryPct: status?.batteryPct, lastSeenAt: status?.lastSeenAt)
 
         let task = Task {
@@ -315,12 +352,16 @@ final class WearableManager {
                 self.lastSyncAt = Date()
             } catch {
                 guard !Task.isCancelled else { return }
-                self.lastError = String(describing: error)
+                // The link dropped mid-sync: not a data error — the sync
+                // reruns in full once the band reconnects.
+                if !error.isBandLinkLoss { self.lastError = String(describing: error) }
+                WearableRuntimeDiagnostics.shared.recordLinkEvent("sync \(error.isBandLinkLoss ? "interrupted by disconnect — will rerun after reconnect" : "failed: \(error)")")
                 await self.refreshStatus()
             }
         }
         syncTask = task
         await task.value
+        syncTask = nil
     }
 
     /// Returns whether a sleep session ending within the last 12 hours
@@ -380,6 +421,19 @@ final class WearableManager {
         }
     }
 
+    /// A Sport+ control error in words. Out of range is not a failure of
+    /// the session: the band keeps recording, and a missed stop is sent as
+    /// soon as it reconnects (`QCBandSDKService.pendingSportStop`).
+    static func sportCommandMessage(_ error: Error) -> String {
+        if error.isBandLinkLoss {
+            return "Your band is out of range — your session continues, and the band keeps its own recording. It will update when the band reconnects."
+        }
+        if case WearableCommandError.timedOut = error {
+            return "Your band didn't answer in time — your session continues. Sombrey will try again when the band reconnects."
+        }
+        return String(describing: error)
+    }
+
     /// Picks a running session back up after the app was relaunched: the
     /// band is still recording, but this process no longer knew about it.
     /// Nothing is sent to the band; pause/stop work again afterwards.
@@ -395,7 +449,7 @@ final class WearableManager {
         do {
             try await service.pauseSportSession(device.id)
         } catch {
-            lastError = String(describing: error)
+            lastError = Self.sportCommandMessage(error)
         }
     }
 
@@ -404,7 +458,7 @@ final class WearableManager {
         do {
             try await service.resumeSportSession(device.id)
         } catch {
-            lastError = String(describing: error)
+            lastError = Self.sportCommandMessage(error)
         }
     }
 
@@ -429,7 +483,7 @@ final class WearableManager {
         do {
             try await service.stopSportSession(device.id)
         } catch {
-            lastError = String(describing: error)
+            lastError = Self.sportCommandMessage(error)
         }
 
         let liveUpdate = active.liveUpdate
@@ -643,6 +697,7 @@ final class WearableManager {
 
     /// Call from the root view's `.onChange(of: scenePhase)`.
     func handleScenePhaseChange(isActive: Bool) {
+        isAppActive = isActive
         guard let device = pairedDevice else { return }
         if isActive {
             Task {

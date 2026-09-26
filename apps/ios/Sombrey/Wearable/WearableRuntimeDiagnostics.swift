@@ -68,6 +68,17 @@ final class WearableRuntimeDiagnostics {
         log("connection: \(state.rawValue) device=\(deviceId ?? "none")")
     }
 
+    /// Link lifecycle evidence — disconnect → cancelled commands →
+    /// reconnect (with backoff) → sync → connected — from `QCBandSDKService`.
+    private(set) var linkDropCount = 0
+    private(set) var lastLinkEvent: String?
+
+    func recordLinkEvent(_ message: String) {
+        if message.hasPrefix("link lost") { linkDropCount += 1 }
+        lastLinkEvent = message
+        log("link: \(message)")
+    }
+
     func recordReconnectAttempt() {
         reconnectAttemptCount += 1
         log("reconnect: attempt #\(reconnectAttemptCount)")

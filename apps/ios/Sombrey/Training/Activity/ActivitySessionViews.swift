@@ -241,6 +241,9 @@ struct ActiveActivityView: View {
     /// Fresh band heart rate: the real-time stream, else the session's
     /// own push — whichever arrived within `heartRateFreshness`.
     private func liveHeartRate(at now: Date) -> Double? {
+        // Nothing is "live" while the link is down — the last value would
+        // otherwise linger for the freshness window after a drop.
+        guard bandConnected else { return nil }
         if let hr = wearableManager.latestMeasurements[.heartRate], now.timeIntervalSince(hr.recordedAt) < Self.heartRateFreshness {
             return hr.value
         }

@@ -143,3 +143,64 @@ struct BloodPressureFailureDetailTests {
 // Xcode build settings blind (this environment can't build this project
 // locally to verify — see the wearable/BP audit report) is a bigger risk
 // than this audit should take on for one extra test.
+
+/// Band link lifecycle: every command has exactly one terminal path, a
+/// disconnect fails what's in flight as `.disconnected` (not a data error),
+/// and reconnects back off after failures.
+struct BandCommandLifecycleTests {
+    @Test func aCommandCompletesExactlyOnceUnderRacingCallbacks() async throws {
+        for _ in 0..<200 {
+            let once = OneShotCompletion<Int>(command: "race")
+            let value = try await withCheckedThrowingContinuation { (c: CheckedContinuation<Int, Error>) in
+                once.install(c) { }
+                #expect(once.complete(.success(1)))                                                    // SDK success
+                #expect(!once.complete(.failure(WearableSDKError.commandFailed("race"))))              // SDK failure after it
+                #expect(!once.complete(.failure(WearableCommandError.timedOut(command: "race", seconds: 15)))) // timeout
+                #expect(!once.complete(.failure(WearableCommandError.disconnected(command: "race"))))  // disconnect
+            }
+            #expect(value == 1)
+        }
+    }
+
+    @Test func aTerminalPathBeforeInstallIsDeliveredOnInstall() async {
+        let once = OneShotCompletion<Int>(command: "early")
+        #expect(once.complete(.failure(WearableCommandError.cancelled(command: "early"))))
+        do {
+            _ = try await withCheckedThrowingContinuation { (c: CheckedContinuation<Int, Error>) in once.install(c) { } }
+            Issue.record("expected the early cancellation")
+        } catch {
+            #expect((error as? WearableCommandError) == .cancelled(command: "early"))
+        }
+        #expect(!once.complete(.success(5)))
+    }
+
+    @Test @MainActor func disconnectFailsEveryInFlightCommandAsDisconnected() {
+        let registry = BandCommandRegistry()
+        let battery = OneShotCompletion<Int>(command: "battery")
+        let history = OneShotCompletion<Int>(command: "heart rate history")
+        registry.register(UUID(), command: "battery", epoch: 2) { battery.complete(.failure($0)) }
+        registry.register(UUID(), command: "heart rate history", epoch: 2) { history.complete(.failure($0)) }
+        let cancelled = registry.failAll { WearableCommandError.disconnected(command: $0) }
+        #expect(cancelled == ["battery", "heart rate history"])
+        #expect(registry.count == 0)
+        #expect(battery.isFinished && history.isFinished)
+        #expect(!battery.complete(.success(90)))   // the band's late answer is stale
+    }
+
+    @Test func disconnectIsDistinctFromADataError() {
+        #expect(WearableCommandError.disconnected(command: "sync").isLinkLoss)
+        #expect(WearableCommandError.notConnected(command: "sync").isLinkLoss)
+        #expect(!WearableCommandError.timedOut(command: "sync", seconds: 45).isLinkLoss)
+        #expect(!(WearableSDKError.commandFailed("battery") as Error).isBandLinkLoss)
+    }
+
+    @Test func reconnectBacksOffAfterFailures() {
+        #expect((0...8).map { ReconnectBackoff.delay(afterFailures: $0) } == [0, 1, 2, 4, 8, 16, 32, 60, 60])
+    }
+
+    @Test @MainActor func sessionControlWhileOutOfRangeSaysTheSessionContinues() {
+        let message = WearableManager.sportCommandMessage(WearableCommandError.disconnected(command: "Sport+ stop"))
+        #expect(message.contains("session continues"))
+        #expect(!message.contains("disconnected before answering"))
+    }
+}
