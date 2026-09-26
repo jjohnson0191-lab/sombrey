@@ -652,6 +652,9 @@ struct HomeScreen: View {
 private struct HomeClock: View {
     let firstName: String?
     @State private var timeChange = 0
+    @State private var showWeatherDetail = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var environment: EnvironmentService { EnvironmentService.shared }
 
     var body: some View {
         TimelineView(.everyMinute) { context in
@@ -674,11 +677,42 @@ private struct HomeClock: View {
                 Text("\(part.greeting)\(firstName.map { ", \($0)" } ?? "") · \(context.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
                     .font(StudioFont.body(13))
                     .foregroundStyle(StudioColor.paperSoft)
+                weather
             }
             .id(timeChange)
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in timeChange += 1 }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in timeChange += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in environment.start() }
+        .onAppear { environment.start() }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Ambient weather — context only, one quiet line; tap for the detail.
+    @ViewBuilder
+    private var weather: some View {
+        if let line = EnvironmentLine.text(environment.latest.value, access: environment.access) {
+            let detail = EnvironmentLine.detail(environment.latest.value)
+            Button {
+                guard detail != nil, environment.access != .denied else { return }
+                withAnimation(StudioMotion.resolve(StudioMotion.unfold, reduceMotion: reduceMotion)) { showWeatherDetail.toggle() }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(line)
+                        .font(StudioFont.body(12, weight: .medium))
+                        .foregroundStyle(StudioColor.paperFaint)
+                    if showWeatherDetail, let detail, environment.access != .denied {
+                        Text(detail)
+                            .font(StudioFont.body(11))
+                            .foregroundStyle(StudioColor.paperFaint)
+                            .transition(.opacity)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .sensoryFeedback(trigger: showWeatherDetail) { _, open in open ? StudioHaptic.expand : StudioHaptic.collapse }
+            .accessibilityLabel([line, detail].compactMap { $0 }.joined(separator: ". "))
+        }
     }
 }

@@ -485,6 +485,8 @@ final class TrainingSessionManager {
             ]
             if let sportPlusSessionId { args["sportPlusSessionId"] = sportPlusSessionId }
             try await ConvexClientProvider.client.mutation("sombreyWorkouts:finishWorkout", with: args)
+            // The conditions it happened in — context only, never load.
+            EnvironmentService.shared.captureForSession(kind: "workout", id: workoutId)
             completionSaved = pendingUploadCount == 0
             persistError = completionSaved ? nil : "Some sets are still uploading."
             if completionSaved {

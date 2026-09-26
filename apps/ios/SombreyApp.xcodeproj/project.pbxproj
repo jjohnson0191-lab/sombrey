@@ -41,6 +41,8 @@
 		00000000000000000000005D /* AuthenticatedRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001D /* AuthenticatedRootView.swift */; };
 		00000000000000000000005E /* ComingSoonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001E /* ComingSoonView.swift */; };
 		00000000000000000000005F /* HomeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001F /* HomeScreen.swift */; };
+		000000000000000000000135 /* EnvironmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000134 /* EnvironmentService.swift */; };
+		000000000000000000000137 /* WeatherPrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000136 /* WeatherPrivacyView.swift */; };
 		000000000000000000000060 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000020 /* SettingsScreen.swift */; };
 		000000000000000000000061 /* TrainScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000021 /* TrainScreen.swift */; };
 		000000000000000000000062 /* ProgressScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000022 /* ProgressScreen.swift */; };
@@ -171,6 +173,8 @@
 		00000000000000000000001D /* AuthenticatedRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AuthenticatedRootView.swift"; sourceTree = "<group>"; };
 		00000000000000000000001E /* ComingSoonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ComingSoonView.swift"; sourceTree = "<group>"; };
 		00000000000000000000001F /* HomeScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HomeScreen.swift"; sourceTree = "<group>"; };
+		000000000000000000000134 /* EnvironmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EnvironmentService.swift"; sourceTree = "<group>"; };
+		000000000000000000000136 /* WeatherPrivacyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WeatherPrivacyView.swift"; sourceTree = "<group>"; };
 		000000000000000000000020 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsScreen.swift"; sourceTree = "<group>"; };
 		000000000000000000000021 /* TrainScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrainScreen.swift"; sourceTree = "<group>"; };
 		000000000000000000000022 /* ProgressScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProgressScreen.swift"; sourceTree = "<group>"; };
@@ -460,7 +464,8 @@
 		00000000000000000000008D /* Home */ = {
 			isa = PBXGroup;
 			children = (
-			00000000000000000000001F /* HomeScreen.swift */
+			00000000000000000000001F /* HomeScreen.swift */,
+			000000000000000000000134 /* EnvironmentService.swift */
 			);
 			name = "Home";
 			path = "Home";
@@ -492,6 +497,7 @@
 			000000000000000000000020 /* SettingsScreen.swift */,
 			0000000000000000000000D8 /* WearableBandSection.swift */,
 			0000000000000000000000E2 /* NotificationSettingsView.swift */,
+			000000000000000000000136 /* WeatherPrivacyView.swift */,
 			0000000000000000000000E4 /* MealScheduleView.swift */,
 			0000000000000000000000E6 /* WorkoutScheduleView.swift */
 			);
@@ -863,6 +869,8 @@
 				00000000000000000000005D /* AuthenticatedRootView.swift */,
 				00000000000000000000005E /* ComingSoonView.swift */,
 				00000000000000000000005F /* HomeScreen.swift */,
+				000000000000000000000135 /* EnvironmentService.swift */,
+				000000000000000000000137 /* WeatherPrivacyView.swift */,
 				000000000000000000000060 /* SettingsScreen.swift */,
 				000000000000000000000061 /* TrainScreen.swift */,
 				000000000000000000000062 /* ProgressScreen.swift */,
@@ -1015,7 +1023,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 38;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1046,7 +1054,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 38;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1071,7 +1079,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 38;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1097,7 +1105,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 38;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1119,7 +1127,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 38;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1144,7 +1152,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 38;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

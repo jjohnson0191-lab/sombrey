@@ -37,3 +37,36 @@ struct ProgressModelTests {
         #expect(ProgressProvenance.label(nil) == nil)
     }
 }
+
+/// Sombrey intelligence on the phone: the pipeline's state decodes, no
+/// strain number is carried before approval, and weather states read
+/// honestly.
+struct IntelligenceModelTests {
+    @Test func pipelineStateDecodesWithoutAValue() throws {
+        let json = #"{"date":"2026-09-26","load":{"date":"2026-09-26","sessionCount":1,"activeMinutes":40,"workoutMinutes":0,"activityMinutes":40,"bandRecordedMinutes":40},"score":{"state":"no_formula"},"engine":{"id":"sombrey-intelligence","version":"proposal-1","validated":false},"intelligence":{"state":"BUILDING_BASELINE","confidence":"LOW_CONFIDENCE","baseline":{"status":"building","historyDays":5,"activeDays":3,"qualitySessions":1,"required":{"historyDays":14,"activeDays":6,"qualitySessions":4}},"sessions":[{"id":"a","basis":"activity","resistance":false,"confidence":"LOW_CONFIDENCE","trimmed":false}],"duplicatesRemoved":0},"baselineDays":5,"context":[],"week":[]}"#
+        let day = try JSONDecoder().decode(StrainDayDTO.self, from: Data(json.utf8))
+        #expect(day.score.value == nil)
+        #expect(day.intelligence?.state == "BUILDING_BASELINE")
+        #expect(day.intelligence?.baseline.required.activeDays == 6)
+        #expect(StrainIntelligenceDTO.confidenceLabel("LOW_CONFIDENCE") == "Low")
+        #expect(day.intelligence.map { StrainIntelligenceDTO.basisLabel($0.sessions[0]) } == "Activity type")
+    }
+
+    @Test func olderServerWithoutIntelligenceStillDecodes() throws {
+        let json = #"{"date":"2026-09-26","load":{"date":"2026-09-26","sessionCount":0,"activeMinutes":0,"workoutMinutes":0,"activityMinutes":0,"bandRecordedMinutes":0},"score":{"state":"no_formula"},"engine":{"id":"none","version":"0","validated":false},"baselineDays":0,"context":[],"week":[]}"#
+        let day = try JSONDecoder().decode(StrainDayDTO.self, from: Data(json.utf8))
+        #expect(day.intelligence == nil)
+    }
+
+    @Test @MainActor func weatherLineStates() throws {
+        let json = #"{"state":"available","snapshot":{"observedAt":0,"fetchedAt":0,"timeZone":"Asia/Colombo","locality":"Colombo","temperatureC":28.4,"feelsLikeC":33.1,"humidityPct":78,"condition":"Partly cloudy"},"refreshAfterMs":1800000,"attribution":"Weather data: MET Norway (CC BY 4.0)"}"#
+        let env = try JSONDecoder().decode(EnvironmentDTO.self, from: Data(json.utf8))
+        let line = EnvironmentLine.text(env, access: .allowed)
+        #expect(line?.hasPrefix("Colombo · ") == true)
+        #expect(line?.hasSuffix("Partly cloudy") == true)
+        #expect(EnvironmentLine.detail(env)?.contains("Humidity 78%") == true)
+        #expect(EnvironmentLine.text(env, access: .denied)?.hasSuffix("Weather unavailable") == true)
+        let unavailable = try JSONDecoder().decode(EnvironmentDTO.self, from: Data(#"{"state":"unavailable","reason":"not_fetched","refreshAfterMs":1800000,"attribution":"x"}"#.utf8))
+        #expect(EnvironmentLine.text(unavailable, access: .allowed) == nil)
+    }
+}

@@ -1,0 +1,45 @@
+// Sombrey Strain — the user-facing interpretation of Daily Load. Pure.
+//
+// Strain answers "how much load did I experience today, for me?". It is NOT
+// adjusted by readiness, calories or weather.
+//
+// PROPOSED formula (Sombrey synthesis — pending review, not in production):
+//   strain = 100 × (1 − 2^(−DailyLoad / reference))
+// where `reference` is the user's typical training-day load (baseline.ts).
+// A typical day ≈ 50, twice typical ≈ 75, three times ≈ 88 — saturating, so
+// no day exceeds 100 and differences at the top compress as effort does.
+// Until the formula is approved (and the hardware validated), the value is
+// computed internally for review and NOT shown or sent to the AI Coach.
+
+import { type Confidence, RANK } from "./confidence.ts";
+import type { Baseline } from "./baseline.ts";
+import type { DailyLoadResult } from "./dailyLoad.ts";
+
+export const STRAIN_FORMULA_APPROVED = false;
+export const STRAIN_FORMULA_VERSION = "proposal-1";
+
+export type StrainState = "NOT_ENOUGH_DATA" | "BUILDING_BASELINE" | "LOW_CONFIDENCE" | "READY";
+
+export type Strain = {
+  state: StrainState;
+  confidence: Confidence;
+  /** The proposed value — internal review only while not approved. */
+  proposedValue?: number;
+  /** What a user may see: only when the formula is approved. */
+  value?: number;
+  approved: boolean;
+  version: string;
+};
+
+export function proposedStrain(load: number, reference: number): number {
+  return Math.round(100 * (1 - Math.pow(2, -load / reference)));
+}
+
+export function strainFor(today: DailyLoadResult, baseline: Baseline, approved = STRAIN_FORMULA_APPROVED): Strain {
+  const base = { approved, version: STRAIN_FORMULA_VERSION, confidence: today.confidence };
+  if (today.sessions > 0 && today.confidence === "INSUFFICIENT_DATA") return { ...base, state: "NOT_ENOUGH_DATA" };
+  if (baseline.status !== "ready" || baseline.reference === undefined || baseline.reference <= 0) return { ...base, state: "BUILDING_BASELINE" };
+  const proposed = proposedStrain(today.load, baseline.reference);
+  const state: StrainState = RANK[today.confidence] <= RANK.LOW_CONFIDENCE ? "LOW_CONFIDENCE" : "READY";
+  return { ...base, state, proposedValue: proposed, value: approved ? proposed : undefined };
+}

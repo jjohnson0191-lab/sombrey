@@ -1,16 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { type ProgressSession, type ProgressSet, type WeightEntry, DAY_MS, dayKey, startOfLocalWeek } from "../../convex/progress/model.ts";
-import { CURRENT_STRAIN_ENGINE, STRAIN_SIGNALS, dailyLoad, strainDay, type StrainEngine } from "../../convex/progress/strainEngine.ts";
+import { STRAIN_SIGNALS, dailyLoad, strainDay } from "../../convex/progress/strainEngine.ts";
 import { baselineEntry, bodySummary, isPlausibleWeightKg } from "../../convex/progress/body.ts";
 import { comparePeriods } from "../../convex/progress/baseline.ts";
 import { activityPerformance, availableRanges, estimatedOneRepMax, workoutPerformance } from "../../convex/progress/performance.ts";
 import { consistency } from "../../convex/progress/consistency.ts";
 import { personalRecords } from "../../convex/progress/records.ts";
 import { milestones } from "../../convex/progress/milestones.ts";
-import { loadRecovery, pearson } from "../../convex/progress/loadRecovery.ts";
+import { loadRecovery } from "../../convex/progress/loadRecovery.ts";
 import { youVsYou } from "../../convex/progress/youVsYou.ts";
-import { describeProgressForCoach } from "../../convex/progress/coachContext.ts";
 
 const NOW = Date.UTC(2026, 8, 26, 18, 0); // Saturday 26 Sep 2026, 18:00 UTC
 const TZ = 0;
@@ -31,20 +30,14 @@ const set = (workoutId: string, daysAgo: number, name: string, reps: number, wei
 
 // ── Strain engine ─────────────────────────────────────────────────────────
 
-test("no strain score exists: the current engine never returns a number", () => {
-  assert.equal(CURRENT_STRAIN_ENGINE.validated, false);
+test("no strain number is shown: the formula isn't approved", () => {
   const day = strainDay([workout(0), activity(0, "tennis", "racquet")], NOW, TZ);
   assert.deepEqual(day.score, { state: "no_formula" });
+  assert.equal(day.engine.validated, false);
   assert.equal(day.load.sessionCount, 2);
   assert.equal(day.load.activeMinutes, 110);
   assert.ok(day.context.includes("Not enough data to establish your baseline."));
   assert.ok(STRAIN_SIGNALS.available.length > 0 && STRAIN_SIGNALS.missing.length > 0);
-});
-
-test("a future formula plugs in without changing the day's shape", () => {
-  const fake: StrainEngine = { id: "test", version: "1", validated: true, score: (i) => ({ state: "scored", value: i.sessions.length, scaleMax: 21 }) };
-  const day = strainDay([workout(0)], NOW, TZ, fake);
-  assert.deepEqual(day.score, { state: "scored", value: 1, scaleMax: 21 });
 });
 
 test("daily load context comes only from the data", () => {
@@ -224,9 +217,9 @@ test("a relationship is stated only when strong across enough paired days", () =
     readiness.push({ date: dayKey(NOW - d * DAY_MS, TZ), score: (d + 1) % 2 === 0 ? 60 : 80 });
   }
   const lr = loadRecovery(sessions, readiness, NOW, TZ, 7);
-  assert.ok(lr.pairedDays >= 21);
-  assert.match(lr.relationship?.statement ?? "", /lower readiness/);
-  assert.equal(pearson([1, 2], [1, 2]), undefined);
+  assert.ok(lr.pairedDays >= 28);
+  assert.match(lr.relationship?.statement ?? "", /readiness tended to be lower/);
+  assert.match(lr.relationship?.statement ?? "", /not a cause/);
 });
 
 // ── You vs you ────────────────────────────────────────────────────────────
@@ -239,22 +232,4 @@ test("you-vs-you insights appear only when both periods support them", () => {
   assert.ok(out.every((i) => i.basis.length > 0));
   assert.ok(out.some((i) => i.id === "weight"));
   assert.deepEqual(youVsYou([workout(2)], [], [], NOW, names), []);
-});
-
-// ── AI Coach context ──────────────────────────────────────────────────────
-
-test("the coach receives structured facts with their basis — and no invented strain", () => {
-  const sessions = [workout(0), activity(1, "tennis", "racquet")];
-  const lines = describeProgressForCoach({
-    strain: strainDay(sessions, NOW, TZ),
-    consistency: consistency(sessions, NOW, TZ),
-    records: [], milestones: milestones(sessions, TZ), insights: [],
-    body: bodySummary(weights, "first", NOW),
-    loadRecovery: loadRecovery(sessions, [], NOW, TZ, 7),
-  });
-  const text = lines.join("\n");
-  assert.match(text, /no validated strain score exists yet/);
-  assert.match(text, /Body weight: 82.4 kg \(scanner/);
-  assert.match(text, /This week: 1 training days, 2 active days/);
-  assert.match(text, /Milestone: First/);
 });

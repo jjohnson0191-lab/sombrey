@@ -69,6 +69,12 @@ export default defineSchema({
     // Marketing consent — opt-in only, recorded at the profile creation step
     marketingConsent: v.optional(v.boolean()),        // true = opted in
     marketingConsentAt: v.optional(v.string()),       // ISO 8601 UTC when consent was given
+    // The phone's IANA time zone (e.g. "Asia/Colombo"), reported by the
+    // app. Sombrey owns the time zone: every "day" (Progress, Daily Load,
+    // readiness, AI context) is this zone's calendar day. The band never
+    // decides it. See convex/strain/time.ts.
+    timeZone: v.optional(v.string()),
+    timeZoneUpdatedAt: v.optional(v.number()),
   }).index("by_token", ["tokenIdentifier"])
     .index("by_coach", ["coachId"])
     .index("by_payment_status", ["paymentStatus"]),
@@ -1186,6 +1192,17 @@ export default defineSchema({
     firmwareVersion: v.optional(v.string()),
     lastConnectedAt: v.optional(v.number()),  // epoch ms
     lastSyncedAt: v.optional(v.number()),     // epoch ms
+    // How this band's Sport+ start times are to be read (convex/strain/
+    // time.ts) — established from app-started sessions, where Sombrey knows
+    // the true start instant. Unset until enough unambiguous evidence.
+    bandClockBasis: v.optional(v.union(v.literal("epoch_utc"), v.literal("local_wall_clock"))),
+    bandClockEvidence: v.optional(v.object({
+      epochUtc: v.number(),
+      localWallClock: v.number(),
+      ambiguous: v.number(),
+      none: v.number(),
+      lastAt: v.number(),
+    })),
   }).index("by_user", ["userId"])
     .index("by_user_and_device", ["userId", "deviceId"]),
 
@@ -1298,6 +1315,16 @@ export default defineSchema({
     // Set when the record's timing is implausible (e.g. it ends well in the
     // future) — kept, flagged, never silently "corrected".
     timestampSuspect: v.optional(v.boolean()),
+    // How `startedAt` was derived from bandStartTimeSec: the basis used and
+    // whether it was calibrated for this band, inferred from this record,
+    // or assumed (the historical epoch reading). Absent on older rows and
+    // on app-started rows (the app's own clock).
+    timestampBasis: v.optional(v.union(v.literal("epoch_utc"), v.literal("local_wall_clock"))),
+    timestampBasisHow: v.optional(v.union(v.literal("calibrated"), v.literal("inferred"), v.literal("assumed"))),
+    // The band's own start as a canonical instant (epoch ms), read through
+    // timestampBasis. Differs from startedAt on app-started rows, whose
+    // startedAt is the app's own clock.
+    bandStartedAt: v.optional(v.number()),
     importedAt: v.optional(v.number()),
     // Active time as timed by the Sombrey app for an activity started in
     // the app (wall clock minus pauses) — kept apart from durationSeconds,
@@ -1313,6 +1340,31 @@ export default defineSchema({
   }).index("by_user", ["userId"])
     .index("by_user_and_startedAt", ["userId", "startedAt"])
     .index("by_user_and_bandStart", ["userId", "bandStartTimeSec"]),
+
+  // Weather context (convex/environment.ts). NEVER coordinates: the app's
+  // position is rounded to ~1 km only to ask the provider, then discarded.
+  // One "current" row per user (upserted), plus one row per finished
+  // session for future physiology-vs-conditions comparison. Context only —
+  // never an input to load or Strain.
+  environmentSnapshots: defineTable({
+    userId: v.id("users"),
+    kind: v.union(v.literal("current"), v.literal("session")),
+    sessionKind: v.optional(v.union(v.literal("workout"), v.literal("activity"))),
+    sessionId: v.optional(v.string()),
+    observedAt: v.number(),
+    fetchedAt: v.number(),
+    timeZone: v.string(),
+    locality: v.optional(v.string()),
+    temperatureC: v.optional(v.number()),
+    feelsLikeC: v.optional(v.number()),
+    humidityPct: v.optional(v.number()),
+    windMs: v.optional(v.number()),
+    uvIndex: v.optional(v.number()),
+    precipitationMm: v.optional(v.number()),
+    condition: v.optional(v.string()),
+    source: v.literal("met_norway"),
+  }).index("by_user_and_kind", ["userId", "kind"])
+    .index("by_user_and_session", ["userId", "sessionId"]),
 
   // Activities the user named after Sombrey noticed them ("We noticed
   // activity" — convex/activityDetection.ts), and prompts they dismissed.

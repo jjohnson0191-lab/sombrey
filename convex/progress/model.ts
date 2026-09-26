@@ -5,6 +5,8 @@
 // field is present only when its source recorded it, and every figure
 // carries where it came from.
 
+import { type Zone, localDayKey, localDayKeyDaysAgo, startOfLocalDay as timeStartOfLocalDay, startOfLocalWeek as timeStartOfLocalWeek } from "../strain/time.ts";
+
 export type Provenance =
   | "band_record"   // the band's own session record
   | "band_live"     // the band's live figures during an app-started session
@@ -39,6 +41,11 @@ export type ProgressSession = {
   movementSource?: Provenance;
   /** A workout started from a day of the user's training plan. */
   fromPlan?: boolean;
+  /** The band's Sport+ record of this session (its own row for band/app
+   * activities; the attached record for a workout). */
+  bandSessionId?: string;
+  /** The band record's timing couldn't be real (strain/time.ts). */
+  timestampSuspect?: boolean;
 };
 
 export type ProgressSet = {
@@ -56,24 +63,29 @@ export type WeightEntry = { id: string; date: number; weightKg: number; source: 
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The user's local calendar day ("2026-09-26") for an instant, given the
- * phone's UTC offset in minutes. */
-export function dayKey(ms: number, tzOffsetMinutes: number): string {
-  const d = new Date(ms + tzOffsetMinutes * 60 * 1000);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+// Days are the user's local calendar days in their time zone — an IANA
+// name (DST-correct), or a fixed offset from older clients. See
+// convex/strain/time.ts, the one time model.
+export type { Zone } from "../strain/time.ts";
+
+/** The user's local calendar day ("2026-09-26") for an instant. */
+export function dayKey(ms: number, zone: Zone): string {
+  return localDayKey(ms, zone);
 }
 
 /** Local midnight (as epoch ms) of the day containing `ms`. */
-export function startOfLocalDay(ms: number, tzOffsetMinutes: number): number {
-  const off = tzOffsetMinutes * 60 * 1000;
-  return Math.floor((ms + off) / DAY_MS) * DAY_MS - off;
+export function startOfLocalDay(ms: number, zone: Zone): number {
+  return timeStartOfLocalDay(ms, zone);
 }
 
 /** Local Monday 00:00 of the week containing `ms`. */
-export function startOfLocalWeek(ms: number, tzOffsetMinutes: number): number {
-  const day = startOfLocalDay(ms, tzOffsetMinutes);
-  const weekday = new Date(day + tzOffsetMinutes * 60 * 1000).getUTCDay(); // 0 = Sunday
-  return day - ((weekday + 6) % 7) * DAY_MS;
+export function startOfLocalWeek(ms: number, zone: Zone): number {
+  return timeStartOfLocalWeek(ms, zone);
+}
+
+/** The local day `n` calendar days before the day of `ms`. */
+export function dayKeyDaysAgo(ms: number, n: number, zone: Zone): string {
+  return localDayKeyDaysAgo(ms, n, zone);
 }
 
 export function minutes(s: ProgressSession): number {

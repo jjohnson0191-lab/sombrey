@@ -1,36 +1,37 @@
-// Load ↔ Recovery — each day's measured load beside the next morning's
-// readiness. Pure. A relationship is described only when there are enough
-// paired days and the pattern is strong enough to say anything.
+// Load ↔ Recovery — each day's measured load beside what followed. Pure.
+//
+// A relationship is described only under strain/relationships.ts rules
+// (Spearman, n ≥ 28 paired days, p < 0.05, |ρ| ≥ 0.4), in "tended to"
+// language — a pattern in the user's history, never a cause. Load here is
+// measured active time (a fact), not the unapproved strain formula.
 
 import { dailyLoad } from "./strainEngine.ts";
-import { type ProgressSession, type ReadinessDay, dayKey } from "./model.ts";
+import { type ProgressSession, type ReadinessDay, type Zone, dayKey, dayKeyDaysAgo } from "./model.ts";
+import { describeRelationship, RELATIONSHIP_RULES, type Outcome, type Relationship } from "../strain/relationships.ts";
 
 export type LoadRecoveryDay = { date: string; activeMinutes: number; sessions: number; readiness?: number; nextMorningReadiness?: number };
 
 export type LoadRecovery = {
   days: LoadRecoveryDay[];
   pairedDays: number;
+  /** The readiness relationship, when one holds (what Progress shows). */
   relationship?: { correlation: number; statement: string };
+  /** Every outcome that holds (for the AI Coach). */
+  relationships: Relationship[];
 };
 
-export const MIN_PAIRED_DAYS = 21;
-export const MIN_CORRELATION = 0.4;
+export const MIN_PAIRED_DAYS = RELATIONSHIP_RULES.minPairs;
 
-export function pearson(xs: number[], ys: number[]): number | undefined {
-  const n = xs.length;
-  if (n < 3 || ys.length !== n) return undefined;
-  const mx = xs.reduce((a, b) => a + b, 0) / n, my = ys.reduce((a, b) => a + b, 0) / n;
-  let num = 0, dx = 0, dy = 0;
-  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); dx += (xs[i] - mx) ** 2; dy += (ys[i] - my) ** 2; }
-  return dx === 0 || dy === 0 ? undefined : num / Math.sqrt(dx * dy);
-}
+/** Per local day: the next-morning resting HR and the sleep ending that
+ * morning — keyed by the day they were measured (the morning after). */
+export type RecoveryOutcomes = { restingHR?: Map<string, number>; sleepMinutes?: Map<string, number> };
 
 /** Readiness dates are the day they describe (the morning after the night). */
-export function loadRecovery(sessions: ProgressSession[], readiness: ReadinessDay[], nowMs: number, tz: number, days = 7): LoadRecovery {
+export function loadRecovery(sessions: ProgressSession[], readiness: ReadinessDay[], nowMs: number, tz: Zone, days = 7, outcomes: RecoveryOutcomes = {}): LoadRecovery {
   const scoreByDate = new Map(readiness.filter((r) => r.score !== undefined).map((r) => [r.date, r.score!]));
   const byDay = new Map<string, ProgressSession[]>();
   for (const s of sessions) { const k = dayKey(s.startedAt, tz); byDay.set(k, [...(byDay.get(k) ?? []), s]); }
-  const keyAt = (i: number) => dayKey(nowMs - i * 86_400_000, tz);
+  const keyAt = (i: number) => dayKeyDaysAgo(nowMs, i, tz);
   const row = (i: number): LoadRecoveryDay => {
     const date = keyAt(i);
     const load = dailyLoad(date, byDay.get(date) ?? []);
@@ -38,23 +39,26 @@ export function loadRecovery(sessions: ProgressSession[], readiness: ReadinessDa
   };
   const shown = Array.from({ length: days }, (_, i) => row(days - 1 - i));
 
-  // Pairs over up to 90 days: load on D, readiness the morning of D+1.
-  const pairs: [number, number][] = [];
+  // Pairs over up to 90 days: load on D, the outcome measured on D+1.
+  const pairs: Record<Outcome, { load: number; outcome: number }[]> = {
+    next_morning_readiness: [], next_morning_resting_hr: [], next_night_sleep_minutes: [],
+  };
   for (let i = 1; i <= 90; i++) {
-    const r = row(i);
-    if (r.nextMorningReadiness !== undefined) pairs.push([r.activeMinutes, r.nextMorningReadiness]);
+    const load = dailyLoad(keyAt(i), byDay.get(keyAt(i)) ?? []).activeMinutes;
+    const next = keyAt(i - 1);
+    const r = scoreByDate.get(next), hr = outcomes.restingHR?.get(next), sl = outcomes.sleepMinutes?.get(next);
+    if (r !== undefined) pairs.next_morning_readiness.push({ load, outcome: r });
+    if (hr !== undefined) pairs.next_morning_resting_hr.push({ load, outcome: hr });
+    if (sl !== undefined) pairs.next_night_sleep_minutes.push({ load, outcome: sl });
   }
-  let relationship: LoadRecovery["relationship"];
-  if (pairs.length >= MIN_PAIRED_DAYS) {
-    const r = pearson(pairs.map((p) => p[0]), pairs.map((p) => p[1]));
-    if (r !== undefined && Math.abs(r) >= MIN_CORRELATION) {
-      relationship = {
-        correlation: Math.round(r * 100) / 100,
-        statement: r < 0
-          ? "Higher-load days have typically been followed by lower readiness the next morning."
-          : "Higher-load days have typically been followed by higher readiness the next morning.",
-      };
-    }
-  }
-  return { days: shown, pairedDays: pairs.length, relationship };
+  const relationships = (Object.keys(pairs) as Outcome[])
+    .map((o) => describeRelationship(o, pairs[o]))
+    .filter((r): r is Relationship => r !== null);
+  const readinessRel = relationships.find((r) => r.outcome === "next_morning_readiness");
+  return {
+    days: shown,
+    pairedDays: pairs.next_morning_readiness.length,
+    relationship: readinessRel ? { correlation: readinessRel.rho, statement: readinessRel.statement } : undefined,
+    relationships,
+  };
 }

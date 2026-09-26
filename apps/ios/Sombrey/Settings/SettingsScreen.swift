@@ -17,6 +17,7 @@ struct SettingsScreen: View {
     @State private var isSavingGoal = false
     @State private var selectedGoalCategory: GoalCategory = .generalFitness
     @State private var showingNotificationSettings = false
+    @State private var showingWeatherInfo = false
     @State private var placeholder: SettingsPlaceholder?
     @State private var confirmingDelete = false
     @State private var confirmingDeleteFinal = false
@@ -89,6 +90,7 @@ struct SettingsScreen: View {
                     row("Cookie Policy") { placeholder = .cookiePolicy }
                     row("AI Disclosure") { placeholder = .aiDisclosure }
                     row("Health & Medical Disclaimer") { placeholder = .healthDisclaimer }
+                    row("Weather & location", detail: "MET Norway") { showingWeatherInfo = true }
                 }
 
                 settingsGroup("SUPPORT") {
@@ -131,6 +133,9 @@ struct SettingsScreen: View {
             if let category = newValue.flatMap({ $0 })?.category, let match = GoalCategory(rawValue: category) {
                 selectedGoalCategory = match
             }
+        }
+        .sheet(isPresented: $showingWeatherInfo) {
+            WeatherPrivacyView()
         }
         .sheet(isPresented: $showingNotificationSettings) {
             NotificationSettingsView()

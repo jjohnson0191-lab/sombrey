@@ -16,6 +16,8 @@ export type BandSession = {
   startedAt: number;
   endedAt?: number;
   bandStartTimeSec?: number;
+  /** The band start as a canonical instant (strain/time.ts); older rows lack it. */
+  bandStartedAt?: number;
   durationSeconds?: number;
   summarySource?: "band_record" | "live_final_tick";
   timestampSuspect?: boolean;
@@ -49,7 +51,7 @@ export const MAX_KCAL_PER_MINUTE = 25;
 export function bandBounds(s: BandSession): { start: number; end: number } | undefined {
   if (s.summarySource !== "band_record" || s.timestampSuspect) return undefined;
   if (s.bandStartTimeSec === undefined || !(s.durationSeconds !== undefined && s.durationSeconds > 0)) return undefined;
-  const start = s.bandStartTimeSec * 1000;
+  const start = s.bandStartedAt ?? s.bandStartTimeSec * 1000;
   return { start, end: start + s.durationSeconds * 1000 };
 }
 

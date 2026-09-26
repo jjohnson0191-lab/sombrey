@@ -39,6 +39,7 @@ function workoutSession(w: Doc<"sombreyWorkouts">): ProgressSession | null {
     distanceMeters: w.distanceMeters,
     movementSource: w.distanceMeters !== undefined ? "manual" : undefined,
     fromPlan: w.source === "plan",
+    bandSessionId: w.sportPlusSessionId,
   };
 }
 
@@ -63,6 +64,8 @@ function activitySession(a: ActivityRecord): ProgressSession {
     averageSpeed: a.averageSpeedMetersPerSecond,
     climbMeters: a.climbMeters,
     movementSource: a.movementSource === "band_live" ? "band_live" : a.movementSource ? "band_record" : undefined,
+    bandSessionId: a.provenance === "user_labelled" ? undefined : a.id,
+    timestampSuspect: a.timestampSuspect,
   };
 }
 
@@ -73,6 +76,8 @@ export type ProgressData = {
   weights: WeightEntry[];
   plannedPerWeek?: number;
   estimatedMaxHeartRate?: number;
+  age?: number;
+  timeZone?: string;
 };
 
 export async function loadProgressData(ctx: QueryCtx, userId: Id<"users">, nowMs: number): Promise<ProgressData> {
@@ -122,5 +127,7 @@ export async function loadProgressData(ctx: QueryCtx, userId: Id<"users">, nowMs
       .map((m) => ({ id: m._id, date: m.date, weightKg: m.weight!, source: (m.source ?? "manual") as Provenance })),
     plannedPerWeek: weekdays > 0 ? weekdays : undefined,
     estimatedMaxHeartRate: estimatedMaxHeartRate(ageFromDateOfBirth(user?.dateOfBirth, nowMs)),
+    age: ageFromDateOfBirth(user?.dateOfBirth, nowMs),
+    timeZone: user?.timeZone,
   };
 }

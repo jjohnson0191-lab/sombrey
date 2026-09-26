@@ -40,7 +40,7 @@ struct ProgressScreen: View {
         }
         .task { photos.subscribe(to: "progressPhotos:list") }
         .task(id: bodyBaseline) {
-            overview.subscribe(to: "progress:overview", with: ["tzOffsetMinutes": tzOffsetMinutes, "bodyBaseline": bodyBaseline])
+            overview.subscribe(to: "progress:overview", with: ["timeZone": TimeZone.current.identifier, "tzOffsetMinutes": tzOffsetMinutes, "bodyBaseline": bodyBaseline])
         }
         .fullScreenCover(isPresented: $showingVitals) { VitalsScreen() }
     }

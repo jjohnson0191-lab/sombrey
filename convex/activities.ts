@@ -245,7 +245,7 @@ export const history = query({
 });
 
 /** What intensity can be expressed against. `estimatedMaxHeartRate` is
- * the age-predicted estimate (220 − age), present only with a date of
+ * the age-predicted estimate (Tanaka, 208 − 0.7·age), present only with a date of
  * birth; `restingHeartRate` is the band's most recent resting reading. */
 export const intensityContext = query({
   args: {},

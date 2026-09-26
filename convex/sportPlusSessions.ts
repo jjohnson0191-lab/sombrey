@@ -2,7 +2,10 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { normalizeSportPlusType } from "./activityTaxonomy";
-import { findAppStartedMatch, isMalformed, isTimestampSuspect } from "./sportPlusImport";
+import type { Doc } from "./_generated/dataModel";
+import { addClockEvidence, findAppStartedMatch, findAppStartedMatchAnyBasis, isMalformed, isTimestampSuspect } from "./sportPlusImport";
+import { bandStartInstant, normalizeBandStart } from "./strain/time";
+import { resolveZone } from "./userTimeZone";
 import { reconcileWorkoutsForSession } from "./workoutBandSync";
 
 // QCBand Sport+ activity sessions — the wearable's own physiological/
@@ -209,10 +212,20 @@ const bandRecordValidator = v.object({
  * Absent fields stay absent — the client only sends values the band
  * actually reported. */
 export const importBandSessions = mutation({
-  args: { deviceId: v.string(), records: v.array(bandRecordValidator) },
+  // timeZone: the phone's IANA zone — needed to read a band start that is
+  // local wall-clock time (strain/time.ts). Older clients omit it; the
+  // user's stored zone is used, else UTC.
+  args: { deviceId: v.string(), records: v.array(bandRecordValidator), timeZone: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
     const now = Date.now();
+    const zone = resolveZone(user, args.timeZone);
+    const device = await ctx.db
+      .query("wearableDevices")
+      .withIndex("by_user_and_device", (q) => q.eq("userId", user._id).eq("deviceId", args.deviceId))
+      .first();
+    let calibrated = device?.bandClockBasis;
+    let clockEvidence = device?.bandClockEvidence;
     let inserted = 0;
     let merged = 0;
     let refreshed = 0;
@@ -224,7 +237,42 @@ export const importBandSessions = mutation({
         continue;
       }
       const activity = normalizeSportPlusType(record.sportType);
-      const startedAt = record.bandStartTimeSec * 1000;
+      let reading = normalizeBandStart(record.bandStartTimeSec, record.durationSeconds, zone, now, calibrated);
+      const epochMs = bandStartInstant(record.bandStartTimeSec, "epoch_utc", zone);
+      const localMs = bandStartInstant(record.bandStartTimeSec, "local_wall_clock", zone);
+
+      const already = await ctx.db
+        .query("sportPlusSessions")
+        .withIndex("by_user_and_bandStart", (q) => q.eq("userId", user._id).eq("bandStartTimeSec", record.bandStartTimeSec))
+        .first();
+
+      // An app-started row this record completes: the app knows the true
+      // start instant, so the reading that lands on it is evidence of how
+      // this band's clock is to be read.
+      let appRow: Doc<"sportPlusSessions"> | undefined;
+      if (!already) {
+        const lo = Math.min(epochMs, localMs) - 5 * 60 * 1000, hi = Math.max(epochMs, localMs) + 5 * 60 * 1000;
+        const nearby = await ctx.db
+          .query("sportPlusSessions")
+          .withIndex("by_user_and_startedAt", (q) => q.eq("userId", user._id).gte("startedAt", lo).lte("startedAt", hi))
+          .collect();
+        if (calibrated) {
+          appRow = findAppStartedMatch(nearby, record, reading.instant);
+        } else {
+          const match = findAppStartedMatchAnyBasis(nearby, record, zone);
+          if (match) {
+            appRow = match.row;
+            const next = addClockEvidence(clockEvidence, match.evidence, now);
+            clockEvidence = next.evidence;
+            if (next.basis) calibrated = next.basis;
+            if (match.evidence !== "ambiguous") {
+              reading = { instant: bandStartInstant(record.bandStartTimeSec, match.evidence, zone), basis: match.evidence, how: calibrated ? "calibrated" : "inferred" };
+            }
+          }
+        }
+      }
+
+      const startedAt = reading.instant;
       const summary = {
         sportType: record.sportType,
         recordSource: record.recordSource,
@@ -249,27 +297,26 @@ export const importBandSessions = mutation({
         activityKey: activity.activityKey,
         activityCategory: activity.activityCategory,
         summarySource: "band_record" as const,
-        timestampSuspect: isTimestampSuspect(record, now) || undefined,
+        timestampSuspect: isTimestampSuspect(record, now, startedAt) || undefined,
+        bandStartedAt: startedAt,
+        timestampBasis: reading.basis,
+        timestampBasisHow: reading.how,
         importedAt: now,
       };
 
-      const already = await ctx.db
-        .query("sportPlusSessions")
-        .withIndex("by_user_and_bandStart", (q) => q.eq("userId", user._id).eq("bandStartTimeSec", record.bandStartTimeSec))
-        .first();
-
       let sessionId;
       if (already) {
-        await ctx.db.patch(already._id, summary);
+        // Re-import (idempotent): refresh the band's figures. A row whose
+        // start came from the band (not an app-started row, which keeps the
+        // app's own clock) also takes the start as read now — so a band
+        // later calibrated corrects its earlier records in place.
+        const bandTimed = already.timestampBasis !== undefined
+          ? already.startedAt === already.bandStartedAt
+          : already.startedAt === record.bandStartTimeSec * 1000;
+        await ctx.db.patch(already._id, bandTimed ? { ...summary, startedAt } : { ...summary, endedAt: already.endedAt ?? summary.endedAt });
         sessionId = already._id;
         refreshed += 1;
       } else {
-        const nearby = await ctx.db
-          .query("sportPlusSessions")
-          .withIndex("by_user_and_startedAt", (q) =>
-            q.eq("userId", user._id).gte("startedAt", startedAt - 5 * 60 * 1000).lte("startedAt", startedAt + 5 * 60 * 1000))
-          .collect();
-        const appRow = findAppStartedMatch(nearby, record);
         if (appRow) {
           // The same real session Sombrey started from the app: keep the
           // app's start time (when the user pressed start), take the band's
@@ -325,6 +372,9 @@ export const importBandSessions = mutation({
       const stored = await ctx.db.get(sessionId);
       if (stored) await reconcileWorkoutsForSession(ctx, stored);
     }
-    return { inserted, merged, refreshed, skipped };
+    if (device && (clockEvidence !== device.bandClockEvidence || calibrated !== device.bandClockBasis)) {
+      await ctx.db.patch(device._id, { bandClockEvidence: clockEvidence, bandClockBasis: calibrated });
+    }
+    return { inserted, merged, refreshed, skipped, clockBasis: calibrated ?? null };
   },
 });

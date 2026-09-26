@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { isValidTimeZone, localDayKey } from "./strain/time";
 import { ALGORITHM_VERSION, computeReadinessScore, deriveSleepSignal, scoreBand, confidenceBand, type DailyAggregate } from "./readiness/scoring";
 
 // Sombrey Readiness Score — see `readiness/scoring.ts` for the algorithm
@@ -11,10 +12,10 @@ import { ALGORITHM_VERSION, computeReadinessScore, deriveSleepSignal, scoreBand,
 // interpretable if the algorithm changes later (see `readinessScores` in
 // schema.ts).
 //
-// Day boundaries here are computed from each timestamp's UTC calendar
-// date (`toISOString().slice(0, 10)`) — a deliberate V1 simplification,
-// not per-user-timezone-aware. Documented, not hidden: see the Phase 3
-// readiness report.
+// Day boundaries: the user's local calendar day in their IANA time zone
+// (Sombrey owns the time zone — convex/strain/time.ts). The app sends its
+// zone with each computation and `date` in that zone; older clients that
+// send neither fall back to UTC days, as V1 did. Scoring is unchanged.
 
 async function requireAuth(ctx: QueryCtx | MutationCtx) {
   const identity = await ctx.auth.getUserIdentity();
@@ -27,14 +28,13 @@ async function requireAuth(ctx: QueryCtx | MutationCtx) {
   return user;
 }
 
-function utcDay(timestampMs: number): string {
-  return new Date(timestampMs).toISOString().slice(0, 10);
-}
-
 export const computeAndStore = mutation({
-  args: { date: v.string() },
+  args: { date: v.string(), timeZone: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
+    const zone = args.timeZone && isValidTimeZone(args.timeZone) ? args.timeZone : "UTC";
+    if (zone !== "UTC" && user.timeZone !== zone) await ctx.db.patch(user._id, { timeZone: zone, timeZoneUpdatedAt: Date.now() });
+    const utcDay = (timestampMs: number): string => localDayKey(timestampMs, zone);
     const now = Date.now();
     const windowStart = now - 30 * 24 * 60 * 60 * 1000;
 

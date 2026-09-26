@@ -434,11 +434,11 @@ struct ReadinessGauge: View {
     }
 
     /// "yyyy-MM-dd" for the last `count` days, oldest first — the same
-    /// UTC day key `readiness:computeAndStore` writes (see
+    /// local day key `readiness:computeAndStore` writes (see
     /// `WearableManager.triggerReadinessRecompute`).
     static func lastDays(_ count: Int, now: Date = Date()) -> [String] {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.timeZone = TimeZone.current
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone

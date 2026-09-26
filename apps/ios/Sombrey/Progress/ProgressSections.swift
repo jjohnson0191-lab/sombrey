@@ -76,7 +76,7 @@ struct StrainHero: View {
                 Text("Building your baseline…")
                     .font(StudioFont.hero(26, weight: .semibold))
                     .foregroundStyle(StudioColor.paper)
-                Text("Strain scoring arrives once Sombrey's formula is validated. Today's measured load is below.")
+                Text(stateNote)
                     .font(StudioFont.body(12))
                     .foregroundStyle(StudioColor.paperFaint)
                     .fixedSize(horizontal: false, vertical: true)
@@ -121,15 +121,40 @@ struct StrainHero: View {
                 .font(StudioFont.body(12))
                 .foregroundStyle(StudioColor.paperSoft)
                 .fixedSize(horizontal: false, vertical: true)
+            if let intel = strain.intelligence {
+                HStack(spacing: 18) {
+                    stat("Data quality", StrainIntelligenceDTO.confidenceLabel(intel.confidence))
+                    stat("Active days", "\(Int(intel.baseline.activeDays)) of \(Int(intel.baseline.required.activeDays))")
+                    stat("History", "\(Int(min(intel.baseline.historyDays, intel.baseline.required.historyDays))) of \(Int(intel.baseline.required.historyDays)) days")
+                }
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text("How strain will be scored")
                     .font(StudioFont.body(12, weight: .semibold))
                     .foregroundStyle(StudioColor.paper)
-                Text("Sombrey doesn't score strain yet. It will combine heart-rate intensity, time and session type against your own baseline — once that formula is validated. Until then, only measured minutes and sessions are shown.")
+                Text("Sombrey measures each session's load from time in your heart-rate zones (or, without usable heart rate, the activity itself) plus the sets you lift — against your own typical day. Readiness, calories and weather are never part of it. The number appears once the band's readings are validated and the formula is reviewed.")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.paperFaint)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// One honest sentence for the pipeline's state.
+    private var stateNote: String {
+        guard let intel = strain.intelligence else {
+            return "Strain scoring arrives once Sombrey's formula is validated. Today's measured load is below."
+        }
+        let b = intel.baseline
+        switch intel.state {
+        case "NOT_ENOUGH_DATA":
+            return "Today's sessions don't have enough heart-rate or set data to measure load yet."
+        case "BUILDING_BASELINE":
+            return "\(Int(b.activeDays)) of \(Int(b.required.activeDays)) active days and \(Int(min(b.historyDays, b.required.historyDays))) of \(Int(b.required.historyDays)) days of history toward your personal baseline. Today's measured load is below."
+        case "LOW_CONFIDENCE":
+            return "Baseline ready. Today's readings are too sparse to rely on — measured load is below."
+        default:
+            return "Baseline ready. Strain appears once Sombrey's formula is reviewed. Today's measured load is below."
         }
     }
 
@@ -406,7 +431,7 @@ struct PerformanceSection: View {
     private var queryKey: String { "\(mode)|\(subject ?? "")|\(metric ?? "")|\(range ?? "")" }
 
     private func subscribe() {
-        var args: [String: ConvexEncodable?] = ["tzOffsetMinutes": Double(TimeZone.current.secondsFromGMT() / 60), "mode": mode]
+        var args: [String: ConvexEncodable?] = ["timeZone": TimeZone.current.identifier, "tzOffsetMinutes": Double(TimeZone.current.secondsFromGMT() / 60), "mode": mode]
         if let subject { args["subject"] = subject }
         if let metric { args["metric"] = metric }
         if let range { args["range"] = range }

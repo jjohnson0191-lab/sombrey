@@ -62,8 +62,9 @@ test("age comes from a real date of birth only", () => {
 });
 
 test("intensity needs both a heart rate and an estimate", () => {
-  const max = estimatedMaxHeartRate(40); // 180
+  const max = estimatedMaxHeartRate(40); // Tanaka: 208 − 28 = 180
   assert.equal(max, 180);
+  assert.equal(estimatedMaxHeartRate(20), 194); // not 200 (220 − age)
   assert.deepEqual(intensityFor(142, max), { zone: 3, label: "Moderate", percentOfMax: 79 });
   assert.equal(intensityFor(150, max)?.label, "Hard");
   assert.equal(intensityFor(80, max), undefined); // below zone 1

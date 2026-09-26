@@ -112,7 +112,8 @@ final class WearableManager {
     private static let readinessDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(identifier: "UTC")
+        // The user's local day — Sombrey owns the time zone; the server
+        // buckets readings in the same zone (sent with each computation).
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter
     }()
@@ -458,6 +459,8 @@ final class WearableManager {
                 args["appActiveSeconds"] = Double(appActiveSeconds)
             }
             try await ConvexClientProvider.client.mutation("sportPlusSessions:finishSession", with: args)
+            // The conditions it happened in — context only, never load.
+            EnvironmentService.shared.captureForSession(kind: "activity", id: active.convexSessionId)
         } catch {
             lastError = String(describing: error)
         }
@@ -495,8 +498,9 @@ final class WearableManager {
     /// when a genuinely fresh sleep session was just found — never from
     /// a workout-triggered recompute, and never on a fixed clock time.
     private func triggerReadinessRecompute(postMorningSummary: Bool = false) async {
+        Self.readinessDateFormatter.timeZone = TimeZone.current
         let dateString = Self.readinessDateFormatter.string(from: Date())
-        let result: ReadinessComputeResult? = try? await ConvexClientProvider.client.mutation("readiness:computeAndStore", with: ["date": dateString])
+        let result: ReadinessComputeResult? = try? await ConvexClientProvider.client.mutation("readiness:computeAndStore", with: ["date": dateString, "timeZone": TimeZone.current.identifier])
         guard postMorningSummary, let result else { return }
         guard let preferences = await NotificationManager.shared.currentPreferences() else { return }
         await NotificationManager.shared.postMorningSummaryIfNeeded(score: result.score, sleepSignal: result.sleepSignal, preferences: preferences)
@@ -786,6 +790,7 @@ final class WearableManager {
                 result = try await ConvexClientProvider.client.mutation("sportPlusSessions:importBandSessions", with: [
                     "deviceId": deviceId,
                     "records": boxed,
+                    "timeZone": TimeZone.current.identifier,
                 ])
             }
             let status = SportImportStatus(

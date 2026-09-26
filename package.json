@@ -13,7 +13,8 @@
     "test:readiness": "node --experimental-strip-types --test tests/readiness/scoring.test.ts",
     "test:activity": "node --experimental-strip-types --test tests/activity/*.test.ts",
     "test:exercise": "node --experimental-strip-types --test tests/exercise/*.test.ts",
-    "test:progress": "node --experimental-strip-types --test tests/progress/*.test.ts"
+    "test:progress": "node --experimental-strip-types --test tests/progress/*.test.ts",
+    "test:intelligence": "node --experimental-strip-types --test tests/intelligence/*.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

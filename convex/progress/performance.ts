@@ -6,7 +6,7 @@
 import { termsFor } from "../activityFamilies.ts";
 import type { ActivityCategory } from "../activityTaxonomy.ts";
 import { comparePeriods, type Comparison } from "./baseline.ts";
-import { type ProgressSession, type ProgressSet, type Provenance, DAY_MS, dayKey, mean, minutes } from "./model.ts";
+import { type ProgressSession, type ProgressSet, type Provenance, DAY_MS, dayKey, mean, minutes, type Zone } from "./model.ts";
 
 export const RANGES = [
   { id: "7d", days: 7 },
@@ -134,7 +134,7 @@ function finish(all: SeriesPoint[], subjects: PerformanceResult["subjects"], sub
 /** Workouts: "all" (per workout) or one exercise (per workout day). */
 export function workoutPerformance(
   sessions: ProgressSession[], sets: ProgressSet[], subject: string | undefined, metricKey: string | undefined,
-  range: RangeId | undefined, nowMs: number, tzOffsetMinutes: number,
+  range: RangeId | undefined, nowMs: number, tzOffsetMinutes: Zone,
 ): PerformanceResult {
   const workouts = sessions.filter((s) => s.kind === "workout");
   const byExercise = new Map<string, ProgressSet[]>();

@@ -2,7 +2,7 @@
 // Each definition is a threshold over the user's own data; a milestone
 // exists only once the data crosses it, dated to the session that did.
 
-import { type ProgressSession, DAY_MS, startOfLocalWeek, dayKey } from "./model.ts";
+import { type ProgressSession, DAY_MS, startOfLocalWeek, dayKey, type Zone } from "./model.ts";
 
 export type Milestone = { id: string; title: string; detail: string; achievedAt: number };
 
@@ -15,7 +15,7 @@ const COUNTERS: Counter[] = [
   { id: "distance", unit: "km", thresholds: [50, 100, 250, 500, 1000, 2500], title: (n) => `${n} km recorded`, value: (s) => (s.distanceMeters ?? 0) / 1000 },
 ];
 
-export function milestones(sessions: ProgressSession[], tz: number): Milestone[] {
+export function milestones(sessions: ProgressSession[], tz: Zone): Milestone[] {
   const ordered = [...sessions].sort((a, b) => a.startedAt - b.startedAt);
   const out: Milestone[] = [];
   for (const c of COUNTERS) {
@@ -41,7 +41,7 @@ export function milestones(sessions: ProgressSession[], tz: number): Milestone[]
   let run = 0, prev: number | undefined;
   for (const w of weeks) {
     const ok = (workoutDaysByWeek.get(w)?.size ?? 0) >= 2;
-    run = ok && prev !== undefined && w - prev === 7 * DAY_MS ? run + 1 : ok ? 1 : 0;
+    run = ok && prev !== undefined && Math.round((w - prev) / (7 * DAY_MS)) === 1 ? run + 1 : ok ? 1 : 0;
     prev = w;
     if (run === 4) {
       const last = ordered.filter((s) => s.kind === "workout" && startOfLocalWeek(s.startedAt, tz) === w).pop()!;

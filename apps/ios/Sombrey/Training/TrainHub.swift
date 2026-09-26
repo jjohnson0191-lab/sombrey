@@ -131,6 +131,9 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
     let sampleRateSeconds: Double?
     let userActivityKey: String?
     let reviewedAt: Double?
+    let timestampBasis: String?
+    let timestampBasisHow: String?
+    let bandStartedAt: Double?
 
     enum CodingKeys: String, CodingKey {
         case id = "_id"
@@ -139,6 +142,7 @@ struct SportSessionHistoryDTO: Decodable, Identifiable, Equatable {
         case averageSpeedMetersPerSecond, fastestSpeedMetersPerSecond, steps, stepFrequency, actionCount
         case averageAltitudeMeters, climbMeters, descentMeters, bandStartTimeSec, bandDurationRaw, timestampSuspect, importedAt
         case appActiveSeconds, sampleRateSeconds, userActivityKey, reviewedAt
+        case timestampBasis, timestampBasisHow, bandStartedAt
     }
 
     /// In progress (app-started, not stopped, no band record yet).
@@ -1225,6 +1229,10 @@ struct SportSessionDetailView: View {
                     group("RECORDING DETAILS") {
                         line("Figures from", summarySourceText)
                         line("Band start (raw)", session.bandStartTimeSec.map { String(format: "%.0f", $0) })
+                        line("Band clock read as", timestampBasisText)
+                        if let bandStartedAt = session.bandStartedAt, abs(bandStartedAt - session.startedAt) > 1000 {
+                            line("Band start", Date(timeIntervalSince1970: bandStartedAt / 1000).formatted(.dateTime.hour().minute().second()))
+                        }
                         line("Band duration (raw)", session.bandDurationRaw.map { String(format: "%.0f", $0) })
                         line("Imported", session.importedAt.map { Date(timeIntervalSince1970: $0 / 1000).formatted(.dateTime.month(.abbreviated).day().hour().minute()) })
                     }
@@ -1253,6 +1261,17 @@ struct SportSessionDetailView: View {
         case "band_record": return "Your band's full record"
         case "live_final_tick": return "Your band's last live update (full record not in yet)"
         default: return "—"
+        }
+    }
+
+    /// How the band's raw start was turned into a time (convex/strain/time.ts).
+    private var timestampBasisText: String? {
+        guard let basis = session.timestampBasis else { return nil }
+        let reading = basis == "local_wall_clock" ? "Local time" : "UTC"
+        switch session.timestampBasisHow {
+        case "calibrated": return "\(reading) (confirmed for this band)"
+        case "inferred": return "\(reading) (inferred from this record)"
+        default: return "\(reading) (assumed — not yet confirmed)"
         }
     }
 

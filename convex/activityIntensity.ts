@@ -3,9 +3,12 @@
 // Sombrey does not have a validated intensity or load model yet (that
 // arrives with Strain). Until then intensity is expressed with the widely
 // used five-zone scale over percent of maximum heart rate, where maximum
-// heart rate is the standard age-predicted estimate (220 − age). Both are
+// heart rate is the age-predicted estimate Sombrey uses everywhere (Tanaka,
+// 208 − 0.7·age — convex/strain/zones.ts). Both are
 // estimates, and every surface that shows a zone says so. With no date of
 // birth there is no estimate — and no intensity label: nothing is guessed.
+
+import { estimatedMaxHR } from "./strain/zones.ts";
 
 export const INTENSITY_ZONES = [
   { zone: 1, label: "Very light", minPercent: 50 },
@@ -30,9 +33,10 @@ export function ageFromDateOfBirth(dateOfBirth: string | undefined, nowMs: numbe
   return age >= 10 && age <= 100 ? age : undefined;
 }
 
-/** The age-predicted maximum heart rate (220 − age). */
+/** The age-predicted maximum heart rate — the one estimate Sombrey uses
+ * (Tanaka et al. 2001), shared with the load model. */
 export function estimatedMaxHeartRate(age: number | undefined): number | undefined {
-  return age === undefined ? undefined : 220 - age;
+  return age === undefined ? undefined : estimatedMaxHR(age);
 }
 
 /** The zone a heart rate falls in, or undefined below zone 1 / without an

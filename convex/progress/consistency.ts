@@ -2,7 +2,7 @@
 // No streaks: training days, active days, time, planned-vs-completed, and
 // the user's own usual week once there are enough weeks to say.
 
-import { type ProgressSession, DAY_MS, dayKey, median, minutes, startOfLocalWeek } from "./model.ts";
+import { type ProgressSession, DAY_MS, dayKey, median, minutes, startOfLocalWeek, type Zone } from "./model.ts";
 
 export type WeekDay = { date: string; trained: boolean; active: boolean; minutes: number; isFuture: boolean };
 
@@ -24,8 +24,10 @@ export type Consistency = {
 
 export const MIN_WEEKS_FOR_USUAL = 3;
 
-function summarize(sessions: ProgressSession[], weekStart: number, tz: number): WeekSummary {
-  const inWeek = sessions.filter((s) => s.startedAt >= weekStart && s.startedAt < weekStart + 7 * DAY_MS);
+function summarize(sessions: ProgressSession[], weekStart: number, tz: Zone): WeekSummary {
+  // The next local Monday (calendar step, so a DST week of 167/169 h is still one week).
+  const weekEnd = startOfLocalWeek(weekStart + 7 * DAY_MS + 12 * 60 * 60 * 1000, tz);
+  const inWeek = sessions.filter((s) => s.startedAt >= weekStart && s.startedAt < weekEnd);
   const trainingDays = new Set(inWeek.filter((s) => s.kind === "workout").map((s) => dayKey(s.startedAt, tz)));
   const activeDays = new Set(inWeek.map((s) => dayKey(s.startedAt, tz)));
   return {
@@ -40,7 +42,7 @@ function summarize(sessions: ProgressSession[], weekStart: number, tz: number): 
 
 /** `plannedPerWeek`: how many of the current plan's days are tied to a
  * weekday (only then is "planned this week" a real number). */
-export function consistency(sessions: ProgressSession[], nowMs: number, tz: number, plannedPerWeek?: number): Consistency {
+export function consistency(sessions: ProgressSession[], nowMs: number, tz: Zone, plannedPerWeek?: number): Consistency {
   const weekStart = startOfLocalWeek(nowMs, tz);
   const today = dayKey(nowMs, tz);
   const summary = summarize(sessions, weekStart, tz);
@@ -60,8 +62,8 @@ export function consistency(sessions: ProgressSession[], nowMs: number, tz: numb
   const first = sessions.length ? Math.min(...sessions.map((s) => s.startedAt)) : undefined;
   const previousWeeks: WeekSummary[] = [];
   for (let i = 1; i <= 8; i++) {
-    const start = weekStart - i * 7 * DAY_MS;
-    if (first === undefined || start + 7 * DAY_MS <= first) break;
+    const start = startOfLocalWeek(weekStart - i * 7 * DAY_MS + 12 * 60 * 60 * 1000, tz);
+    if (first === undefined || startOfLocalWeek(start + 7 * DAY_MS + 12 * 60 * 60 * 1000, tz) <= first) break;
     previousWeeks.push(summarize(sessions, start, tz));
   }
   const enough = previousWeeks.length >= MIN_WEEKS_FOR_USUAL;

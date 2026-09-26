@@ -31,10 +31,54 @@ struct DailyLoadDTO: Decodable, Equatable {
 }
 
 struct StrainScoreDTO: Decodable, Equatable {
-    let state: String          // "no_formula" | "insufficient_data" | "scored"
+    let state: String          // "no_formula" | "scored" (only once the formula is approved)
     let value: Double?
     let scaleMax: Double?
     let reason: String?
+}
+
+/// The Sombrey intelligence pipeline's view of today (convex/strain/*):
+/// Strain STATE, data confidence and baseline progress — never the
+/// unapproved value.
+struct StrainIntelligenceDTO: Decodable, Equatable {
+    struct Baseline: Decodable, Equatable {
+        struct Required: Decodable, Equatable { let historyDays: Double; let activeDays: Double; let qualitySessions: Double }
+        let status: String
+        let historyDays: Double
+        let activeDays: Double
+        let qualitySessions: Double
+        let required: Required
+    }
+    struct Session: Decodable, Equatable {
+        let id: String
+        let basis: String          // "cardio" | "activity" | "none"
+        let resistance: Bool
+        let confidence: String
+        let trimmed: Bool
+    }
+    let state: String              // NOT_ENOUGH_DATA | BUILDING_BASELINE | LOW_CONFIDENCE | READY
+    let confidence: String
+    let baseline: Baseline
+    let sessions: [Session]
+    let duplicatesRemoved: Double
+
+    static func confidenceLabel(_ c: String) -> String {
+        switch c {
+        case "HIGH_CONFIDENCE": return "High"
+        case "MODERATE_CONFIDENCE": return "Moderate"
+        case "LOW_CONFIDENCE": return "Low"
+        default: return "Insufficient"
+        }
+    }
+
+    static func basisLabel(_ s: Session) -> String {
+        let aerobic: String? = s.basis == "cardio" ? "Heart rate" : s.basis == "activity" ? "Activity type" : nil
+        return [aerobic, s.resistance ? "Sets" : nil].compactMap { $0 }.joined(separator: " + ").nonEmpty ?? "Duration only"
+    }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 struct StrainDayDTO: Decodable, Equatable {
@@ -43,6 +87,7 @@ struct StrainDayDTO: Decodable, Equatable {
     let load: DailyLoadDTO
     let score: StrainScoreDTO
     let engine: Engine
+    let intelligence: StrainIntelligenceDTO?
     let usualActiveMinutes: Double?
     let baselineDays: Double
     let context: [String]
