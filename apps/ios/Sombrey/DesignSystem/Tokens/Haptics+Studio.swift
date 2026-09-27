@@ -32,6 +32,14 @@ enum StudioHaptic {
     static let workoutStart = SensoryFeedback.impact(flexibility: .solid, intensity: 0.7)
     static let workoutFinish = SensoryFeedback.success
 
+    // Nutrition — the AI Macro Calculator.
+    /// Sombrey's estimate of a photographed meal arrived for review.
+    static let estimateReady = SensoryFeedback.impact(flexibility: .soft, intensity: 0.45)
+    /// The user corrected one food (portion, calories, removed/restored).
+    static let estimateAdjusted = SensoryFeedback.selection
+    /// The reviewed meal was logged.
+    static let mealLogged = SensoryFeedback.success
+
     /// An on-demand measurement returned a real reading from the band.
     static let measurementComplete = SensoryFeedback.success
     /// An on-demand measurement ended without a reading.

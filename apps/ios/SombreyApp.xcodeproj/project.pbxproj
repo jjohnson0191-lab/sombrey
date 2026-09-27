@@ -69,6 +69,7 @@
 		00000000000000000000006D /* NutritionDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002D /* NutritionDate.swift */; };
 		00000000000000000000006E /* NutritionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002E /* NutritionScreen.swift */; };
 		00000000000000000000014D /* MacroCalculatorFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000014C /* MacroCalculatorFlow.swift */; };
+		000000000000000000000151 /* MacroReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000150 /* MacroReview.swift */; };
 		00000000000000000000006F /* AddMealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002F /* AddMealView.swift */; };
 		000000000000000000000070 /* BricolageGrotesque-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* BricolageGrotesque-SemiBold.ttf */; };
 		000000000000000000000071 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000034 /* BricolageGrotesque-Bold.ttf */; };
@@ -212,6 +213,7 @@
 		00000000000000000000002D /* NutritionDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionDate.swift"; sourceTree = "<group>"; };
 		00000000000000000000002E /* NutritionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionScreen.swift"; sourceTree = "<group>"; };
 		00000000000000000000014C /* MacroCalculatorFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MacroCalculatorFlow.swift"; sourceTree = "<group>"; };
+		000000000000000000000150 /* MacroReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MacroReview.swift"; sourceTree = "<group>"; };
 		00000000000000000000002F /* AddMealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddMealView.swift"; sourceTree = "<group>"; };
 		000000000000000000000030 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
 		000000000000000000000031 /* SombreyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SombreyApp.entitlements"; sourceTree = "<group>"; };
@@ -608,6 +610,7 @@
 			00000000000000000000002D /* NutritionDate.swift */,
 			00000000000000000000002E /* NutritionScreen.swift */,
 			00000000000000000000014C /* MacroCalculatorFlow.swift */,
+			000000000000000000000150 /* MacroReview.swift */,
 			00000000000000000000002F /* AddMealView.swift */
 			);
 			name = "Nutrition";
@@ -944,6 +947,7 @@
 				00000000000000000000006D /* NutritionDate.swift */,
 				00000000000000000000006E /* NutritionScreen.swift */,
 				00000000000000000000014D /* MacroCalculatorFlow.swift */,
+				000000000000000000000151 /* MacroReview.swift in Sources */,
 				00000000000000000000006F /* AddMealView.swift */,
 				0000000000000000000000C4 /* WearablePersistencePayloads.swift */,
 				0000000000000000000000D1 /* SombreySportType.swift */,
@@ -1067,7 +1071,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1098,7 +1102,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1123,7 +1127,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1149,7 +1153,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1171,7 +1175,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1196,7 +1200,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 44;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

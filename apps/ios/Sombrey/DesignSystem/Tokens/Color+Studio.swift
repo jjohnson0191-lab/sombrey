@@ -38,6 +38,10 @@ enum StudioColor {
     static let training = Color(hex: 0x4C7A9E)
     static let nutrition = Color(hex: 0x7C8F5F)
     static let danger = Color(hex: 0x9C4A3A)
+    /// An estimate that needs the user's eye — a partial result, a value
+    /// Sombrey isn't sure of. Warm, quiet, never an alarm (that's `danger`).
+    /// Text, hairlines and low-opacity tints only, never a fill.
+    static let caution = Color(hex: 0x9A6A2C)
 
     // MARK: Activity character — the low-opacity backlight inside an
     // activity's hero bezel only (see `ActivityCharacter`): where the

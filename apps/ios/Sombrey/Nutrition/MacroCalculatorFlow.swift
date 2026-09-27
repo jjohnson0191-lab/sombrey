@@ -4,7 +4,7 @@ import UIKit
 
 /// `mealPhotos:get` — the live status and estimate. Never carries the photo.
 struct PhotoMealDTO: Decodable, Equatable {
-    struct Item: Decodable, Equatable, Identifiable {
+    struct Item: Decodable, Equatable {
         let foodName: String
         let grams: Double
         let calories: Double
@@ -12,11 +12,17 @@ struct PhotoMealDTO: Decodable, Equatable {
         let carbs: Double
         let fat: Double
         let matched: Bool
-        var id: String { "\(foodName)-\(grams)" }
+        // How it was read and matched (absent on analyses from before them).
+        var preparationState: String? = nil     // raw | dry | cooked | fried | … | unknown
+        var confidence: String? = nil           // high | medium | low (Gemini's own signal)
+        var matchedFood: String? = nil          // the Edamam entry used
+        var preparationMatched: Bool? = nil     // that entry states the preparation seen
+        var preparationAssumed: Bool? = nil     // cooked-or-dry unseen; matched as cooked
+        var lookupIssue: String? = nil          // why there's no nutrition (not shown raw)
     }
     let id: String
     let status: String          // pending | done | error
-    let reason: String?         // not_configured | no_food | failed
+    let reason: String?         // not_configured | no_food | nutrition_unavailable | failed
     let items: [Item]
     let calories: Double?
     let protein: Double?
@@ -52,6 +58,8 @@ struct MacroCalculatorFlow: View {
     @State private var showingCamera = false
     @State private var analysis = ConvexQuery<PhotoMealDTO?>()
     @State private var problem: String?
+    /// An analysis that ended without an estimate: title + plain message.
+    @State private var notice: (title: String, message: String)?
 
     // Review fields — the user's own values from here on.
     @State private var name = ""
@@ -62,6 +70,15 @@ struct MacroCalculatorFlow: View {
     @State private var fat: Double = 0
     @State private var logging = false
     @State private var loggedTick = 0
+    // Per-food corrections (index into the analysis's items), the food
+    // open for review, and whether the user typed their own total.
+    @State private var edits: [Int: FoodEdit] = [:]
+    @State private var reviewing: ReviewTarget?
+    @State private var totalTypedByUser = false
+    @State private var estimateTick = 0
+    @State private var adjustTick = 0
+
+    struct ReviewTarget: Identifiable { let index: Int; var id: Int { index } }
 
     nonisolated static let mealTypes = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -73,8 +90,8 @@ struct MacroCalculatorFlow: View {
                     VStack(alignment: .leading, spacing: 22) {
                         switch stage {
                         case .capture: captureStage
-                        case .uploading: analyzingStage(label: "Preparing your photo…")
-                        case .analyzing: analyzingStage(label: "Reading your meal…")
+                        case .uploading: MealAnalyzingPanel(image: preview, sending: true)
+                        case .analyzing: MealAnalyzingPanel(image: preview, sending: false)
                         case .review: reviewStage
                         case .logged(let meal): loggedStage(meal)
                         }
@@ -103,9 +120,12 @@ struct MacroCalculatorFlow: View {
                 protein = dto.protein ?? 0
                 carbs = dto.carbs ?? 0
                 fat = dto.fat ?? 0
+                edits = [:]
+                totalTypedByUser = false
+                estimateTick += 1
                 withAnimation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion)) { stage = .review(id) }
             case "error":
-                problem = Self.message(for: dto.reason)
+                notice = (Self.title(for: dto.reason), Self.message(for: dto.reason))
                 withAnimation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion)) { stage = .capture }
             default: break
             }
@@ -117,7 +137,17 @@ struct MacroCalculatorFlow: View {
             }
             .ignoresSafeArea()
         }
-        .sensoryFeedback(.success, trigger: loggedTick)
+        .sensoryFeedback(StudioHaptic.mealLogged, trigger: loggedTick)
+        .sensoryFeedback(StudioHaptic.estimateReady, trigger: estimateTick)
+        .sensoryFeedback(StudioHaptic.estimateAdjusted, trigger: adjustTick)
+        .sheet(item: $reviewing) { target in
+            if let items = (analysis.value ?? nil)?.items, items.indices.contains(target.index) {
+                let item = items[target.index]
+                FoodReviewSheet(item: item, draft: MacroReview.edit(for: item, edits[target.index])) { applyEdit(target.index, $0) }
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     // MARK: Bar
@@ -165,6 +195,10 @@ struct MacroCalculatorFlow: View {
                 guidance("fork.knife", "Before you eat, with everything that's part of the meal")
             }
 
+            if let notice {
+                MealAnalysisNotice(title: notice.title, message: notice.message)
+                    .studioReveal()
+            }
             if let problem {
                 Text(problem)
                     .font(StudioFont.body(13))
@@ -175,7 +209,7 @@ struct MacroCalculatorFlow: View {
 
             VStack(spacing: 10) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button { problem = nil; showingCamera = true } label: {
+                    Button { problem = nil; notice = nil; showingCamera = true } label: {
                         Label("Take photo", systemImage: "camera").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.illuminatedCTA)
@@ -208,36 +242,26 @@ struct MacroCalculatorFlow: View {
         }
     }
 
-    // MARK: Analyzing
-
-    private func analyzingStage(label: String) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if let preview {
-                MealAnalysisImage(image: preview, analyzing: true)
-                    .padding(.top, 16)
-            }
-            Text(label)
-                .font(StudioFont.hero(22, weight: .semibold))
-                .foregroundStyle(StudioColor.ink)
-                .accessibilityAddTraits(.updatesFrequently)
-            Text("Identifying the foods and estimating each portion.")
-                .font(StudioFont.body(13))
-                .foregroundStyle(StudioColor.inkSoft)
-        }
-    }
-
     // MARK: Review
 
     private var reviewStage: some View {
-        let dto = analysis.value ?? nil
-        return VStack(alignment: .leading, spacing: 20) {
+        let items = (analysis.value ?? nil)?.items ?? []
+        let completeness = MacroReview.completeness(items, edits: edits, totalTypedByUser: totalTypedByUser)
+        let toReview = items.indices.filter { MacroReview.needsReview(MacroReview.signal(items[$0], edits[$0])) }.count
+        let uncountedOnly = items.indices.allSatisfy { !MacroReview.edit(for: items[$0], edits[$0]).included || MacroReview.isUncounted(items[$0], edits[$0]) }
+        return VStack(alignment: .leading, spacing: 22) {
             if let preview {
-                MealAnalysisImage(image: preview, analyzing: false)
-                    .frame(height: 180)
-                    .padding(.top, 16)
+                ZStack(alignment: .bottomLeading) {
+                    MealAnalysisImage(image: preview, analyzing: false, height: 200)
+                    completenessBadge(completeness)
+                        .padding(12)
+                }
+                .padding(.top, 16)
+                .studioReveal()
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("DETECTED MEAL")
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("SOMBREY ESTIMATE")
                     .font(StudioFont.body(11, weight: .semibold))
                     .tracking(1.8)
                     .foregroundStyle(StudioColor.inkSoft)
@@ -247,55 +271,41 @@ struct MacroCalculatorFlow: View {
                     .submitLabel(.done)
                     .accessibilityLabel("Meal name")
             }
+            .studioReveal(index: 1)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    MacroNumberField(value: $calories, font: StudioFont.hero(44, weight: .bold), accessibility: "Calories")
-                    Text("kcal")
-                        .font(StudioFont.body(14))
-                        .foregroundStyle(StudioColor.inkSoft)
+            VStack(alignment: .leading, spacing: 14) {
+                MealEstimateHeader(completeness: completeness, calories: $calories) { totalTypedByUser = true }
+                HStack(spacing: 10) {
+                    macroCell("Protein", $protein)
+                    macroCell("Carbs", $carbs)
+                    macroCell("Fat", $fat)
                 }
-                Text("SOMBREY ESTIMATE · from your photo — check it before logging")
-                    .font(StudioFont.body(10, weight: .semibold))
-                    .tracking(1.1)
-                    .foregroundStyle(StudioColor.inkFaint)
             }
+            .studioReveal(index: 2)
 
-            HStack(spacing: 12) {
-                macroCell("Protein", $protein)
-                macroCell("Carbs", $carbs)
-                macroCell("Fat", $fat)
-            }
-
-            if let items = dto?.items, !items.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("WHAT SOMBREY SAW")
-                        .font(StudioFont.body(10, weight: .semibold))
-                        .tracking(1.6)
-                        .foregroundStyle(StudioColor.inkSoft)
-                    ForEach(items) { item in
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(item.foodName.prefix(1).uppercased() + item.foodName.dropFirst())
-                                .font(StudioFont.body(13, weight: .medium))
-                                .foregroundStyle(StudioColor.ink)
-                            Text("≈ \(Int(item.grams)) g")
-                                .font(StudioFont.body(12))
-                                .foregroundStyle(StudioColor.inkSoft)
-                            Spacer()
-                            Text(item.matched ? "\(Int(item.calories)) kcal" : "not found")
-                                .font(StudioFont.body(12))
-                                .foregroundStyle(item.matched ? StudioColor.inkSoft : StudioColor.inkFaint)
-                                .monospacedDigit()
+            if !items.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("WHAT SOMBREY SAW")
+                            .font(StudioFont.body(10, weight: .semibold))
+                            .tracking(1.6)
+                            .foregroundStyle(StudioColor.inkSoft)
+                        Spacer()
+                        if toReview > 0 {
+                            Text(toReview == 1 ? "1 to review" : "\(toReview) to review")
+                                .font(StudioFont.body(11, weight: .semibold))
+                                .foregroundStyle(StudioColor.caution)
                         }
-                        .accessibilityElement(children: .combine)
                     }
-                    if items.contains(where: { !$0.matched }) {
-                        Text("Items marked “not found” have no nutrition data — add them to the totals above if they matter.")
-                            .font(StudioFont.body(11))
-                            .foregroundStyle(StudioColor.inkFaint)
-                            .fixedSize(horizontal: false, vertical: true)
+                    ForEach(items.indices, id: \.self) { index in
+                        FoodResultRow(item: items[index], edit: edits[index]) { reviewing = ReviewTarget(index: index) }
                     }
+                    Text("Tap a food to correct its portion, add what Sombrey couldn't find, or remove it.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .studioReveal(index: 3)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -323,12 +333,68 @@ struct MacroCalculatorFlow: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.illuminatedCTA)
-                .disabled(logging || name.trimmingCharacters(in: .whitespaces).isEmpty)
+                // Nothing counted and nothing typed: logging would record a false 0.
+                .disabled(logging || name.trimmingCharacters(in: .whitespaces).isEmpty || (uncountedOnly && calories <= 0))
                 .accessibilityIdentifier("macro.logMeal")
+                Text(Self.confirmNote(completeness))
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkFaint)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
                 Button("Discard") { close() }
                     .buttonStyle(.outlineCTA)
             }
         }
+    }
+
+    /// Complete vs partial, readable in a second, on the photo itself.
+    private func completenessBadge(_ completeness: MacroReview.Completeness) -> some View {
+        let (text, partial): (String, Bool) = {
+            switch completeness {
+            case .complete(let foods): return (foods == 1 ? "1 FOOD · ALL COUNTED" : "\(foods) FOODS · ALL COUNTED", false)
+            case .partial(let counted, let of): return ("\(counted) OF \(of) COUNTED", true)
+            case .adjusted: return ("ADJUSTED BY YOU", false)
+            }
+        }()
+        return HStack(spacing: 6) {
+            Circle().fill(partial ? StudioColor.caution : StudioColor.nutrition).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(text)
+                .font(StudioFont.body(10, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(StudioColor.ink)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background { Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .light) }
+        .overlay { Capsule().strokeBorder(Color.white.opacity(0.7), lineWidth: 1) }
+        .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: text)
+        .accessibilityElement(children: .combine)
+    }
+
+    nonisolated static func confirmNote(_ completeness: MacroReview.Completeness) -> String {
+        switch completeness {
+        case .partial: return "Nothing is logged until you tap Log meal. Foods without nutrition aren't counted unless you add them."
+        default: return "Nothing is logged until you tap Log meal."
+        }
+    }
+
+    /// A correction to one food moves the totals by exactly what that food
+    /// adds or loses — values the user typed into the totals are kept.
+    private func applyEdit(_ index: Int, _ new: FoodEdit) {
+        guard let items = (analysis.value ?? nil)?.items, items.indices.contains(index) else { return }
+        let item = items[index]
+        let before = MacroReview.contribution(item, edits[index])
+        let after = MacroReview.contribution(item, new)
+        let r1 = { (v: Double) in (v * 10).rounded() / 10 }
+        withAnimation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion)) {
+            edits[index] = new
+            calories = max(0, (calories + after.calories - before.calories).rounded())
+            protein = max(0, r1(protein + after.protein - before.protein))
+            carbs = max(0, r1(carbs + after.carbs - before.carbs))
+            fat = max(0, r1(fat + after.fat - before.fat))
+        }
+        adjustTick += 1
     }
 
     private func macroCell(_ label: String, _ value: Binding<Double>) -> some View {
@@ -436,7 +502,17 @@ struct MacroCalculatorFlow: View {
         switch reason {
         case "not_configured": return "Photo analysis isn't switched on for Sombrey yet. You can still log the meal from search."
         case "no_food": return "Sombrey couldn't find food in that photo. Try again with the whole plate in frame."
+        case "nutrition_unavailable": return "Sombrey recognised the food but couldn't look up its nutrition just now. Try again in a minute, or log the meal from search."
         default: return "Sombrey couldn't analyse that photo. Try again, or log the meal from search."
+        }
+    }
+
+    nonisolated static func title(for reason: String?) -> String {
+        switch reason {
+        case "not_configured": return "Photo analysis is off"
+        case "no_food": return "No food found"
+        case "nutrition_unavailable": return "Nutrition unavailable right now"
+        default: return "Couldn't analyse that photo"
         }
     }
 
@@ -481,6 +557,7 @@ struct MacroNumberField: View {
 struct MealAnalysisImage: View {
     let image: UIImage
     let analyzing: Bool
+    var height: CGFloat = 240
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sweep = false
 
@@ -489,7 +566,7 @@ struct MealAnalysisImage: View {
             .resizable()
             .scaledToFill()
             .frame(maxWidth: .infinity)
-            .frame(height: 240)
+            .frame(height: height)
             .clipped()
             .overlay {
                 if analyzing {

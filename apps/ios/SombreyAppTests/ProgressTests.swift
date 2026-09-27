@@ -331,3 +331,75 @@ struct SombreyToolsTests {
         #expect(AppState.AISection.allCases.count == 2)
     }
 }
+
+/// Macro Calculator review: the total never claims completeness it doesn't
+/// have, and corrections move it by exactly what the food adds.
+struct MacroReviewTests {
+    private func item(_ name: String, grams: Double = 100, kcal: Double = 200, matched: Bool = true,
+                      state: String? = "cooked", confidence: String? = "high",
+                      prepMatched: Bool? = true, assumed: Bool? = false) -> PhotoMealDTO.Item {
+        PhotoMealDTO.Item(foodName: name, grams: grams, calories: kcal, protein: 10, carbs: 20, fat: 5, matched: matched,
+                          preparationState: state, confidence: confidence, matchedFood: matched ? name : nil,
+                          preparationMatched: prepMatched, preparationAssumed: assumed, lookupIssue: matched ? nil : "no_safe_match")
+    }
+
+    @Test func newFieldsDecodeAndOldAnalysesStillDecode() throws {
+        let json = #"{"id":"m1","status":"done","items":[{"foodName":"pasta","grams":220,"calories":348,"protein":12.8,"carbs":68,"fat":2,"matched":true,"preparationState":"cooked","confidence":"high","matchedFood":"Cooked Spaghetti","preparationMatched":true,"preparationAssumed":false},{"foodName":"sambol","grams":40,"calories":0,"protein":0,"carbs":0,"fat":0,"matched":false,"preparationState":"raw","confidence":"medium","preparationMatched":false,"preparationAssumed":false,"lookupIssue":"no_safe_match"}],"calories":348,"protein":12.8,"carbs":68,"fat":2,"suggestedName":"pasta, sambol","confirmed":false}"#
+        let dto = try JSONDecoder().decode(PhotoMealDTO.self, from: Data(json.utf8))
+        #expect(dto.items[0].preparationState == "cooked" && dto.items[0].matchedFood == "Cooked Spaghetti")
+        #expect(dto.items[1].lookupIssue == "no_safe_match")
+        let old = try JSONDecoder().decode(PhotoMealDTO.Item.self, from: Data(#"{"foodName":"rice","grams":200,"calories":260,"protein":5,"carbs":57,"fat":1,"matched":true}"#.utf8))
+        #expect(old.confidence == nil && old.preparationState == nil)
+        #expect(MacroReview.signal(old, nil) == nil)
+    }
+
+    @Test func anUnmatchedFoodMakesTheTotalPartialNotZero() {
+        let items = [item("rice"), item("chicken"), item("pol sambol", kcal: 0, matched: false)]
+        #expect(MacroReview.completeness(items, edits: [:], totalTypedByUser: false) == .partial(counted: 2, of: 3))
+        #expect(MacroReview.isUncounted(items[2], nil))
+        #expect(MacroReview.signal(items[2], nil) == .noNutrition)
+        // Adding its calories, or removing it, makes the meal complete.
+        #expect(MacroReview.completeness(items, edits: [2: FoodEdit(grams: 40, addedCalories: 120)], totalTypedByUser: false) == .complete(foods: 3))
+        #expect(MacroReview.completeness(items, edits: [2: FoodEdit(grams: 40, included: false)], totalTypedByUser: false) == .complete(foods: 2))
+        #expect(MacroReview.completeness(items, edits: [:], totalTypedByUser: true) == .adjusted)
+    }
+
+    @Test func aPortionCorrectionScalesOnlyThatFood() {
+        let rice = item("rice", grams: 200, kcal: 260)
+        let c = MacroReview.contribution(rice, FoodEdit(grams: 300))
+        #expect(c.calories == 390 && c.protein == 15 && c.carbs == 30 && c.fat == 7.5)
+        #expect(MacroReview.contribution(rice, FoodEdit(grams: 300, included: false)).calories == 0)
+        #expect(MacroReview.contribution(rice, nil).calories == 260)
+        #expect(MacroReview.detail(rice, FoodEdit(grams: 300)) == "Cooked · 300 g · adjusted")
+        #expect(MacroReview.detail(item("salmon", state: "unknown"), nil) == "100 g")
+    }
+
+    @Test func signalsAreDistinctAndOnlyTheConsequentialOnesStandOut() {
+        #expect(MacroReview.signal(item("curry", confidence: "low"), nil) == .unsure)
+        #expect(MacroReview.signal(item("rice", assumed: true), nil) == .assumedCooked("cooked"))
+        #expect(MacroReview.signal(item("ground beef", prepMatched: false), nil) == .generalEntry("cooked"))
+        #expect(MacroReview.signal(item("salmon", state: "unknown", prepMatched: false), nil) == nil)
+        #expect(MacroReview.signal(item("sauce", confidence: "medium"), nil) == .glance)
+        #expect(MacroReview.signal(item("chicken"), nil) == nil)
+        #expect(MacroReview.needsReview(.unsure) && MacroReview.needsReview(.noNutrition))
+        #expect(!MacroReview.needsReview(.glance) && !MacroReview.needsReview(nil))
+        // Technical reasons never reach the screen.
+        for s in [MacroReview.Signal.noNutrition, .unsure, .assumedCooked("cooked"), .generalEntry("grilled"), .glance] {
+            #expect(!MacroReview.signalText(s).contains("_"))
+        }
+    }
+
+    @Test func failuresHaveATitleAndNeverSayZero() {
+        #expect(MacroCalculatorFlow.title(for: "nutrition_unavailable") == "Nutrition unavailable right now")
+        #expect(MacroCalculatorFlow.message(for: "nutrition_unavailable").contains("couldn't look up"))
+        #expect(MacroCalculatorFlow.title(for: "no_food") == "No food found")
+        #expect(MacroCalculatorFlow.confirmNote(.partial(counted: 1, of: 2)).contains("aren't counted"))
+        #expect(MacroCalculatorFlow.confirmNote(.complete(foods: 2)) == "Nothing is logged until you tap Log meal.")
+    }
+
+    @Test func portionStepsAreFinerForSmallPortions() {
+        #expect(MacroReview.portionStep(40) == 5)
+        #expect(MacroReview.portionStep(150) == 10)
+        #expect(MacroReview.portionStep(400) == 25)
+    }
+}
