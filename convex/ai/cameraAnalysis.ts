@@ -7,30 +7,21 @@
  *
  * Workflow:
  *   1. Fetch the meal photo from Convex storage.
- *   2. Send image to Gemini Vision to identify foods + estimate grams.
- *   3. Look up each food in Edamam Food Database for per-100g nutrition.
- *   4. Scale nutrition by estimated grams and return results.
+ *   2. Send image to Gemini Vision: each food's identity, preparation state,
+ *      served weight and confidence (structured output).
+ *   3. Look up each food in the Edamam Food Database, matched on identity
+ *      AND preparation state (nutrition/foodMatch.ts) — per-100g nutrition.
+ *   4. Scale nutrition by served grams and return results.
  */
 import { action, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v, ConvexError } from "convex/values";
+import {
+  CONFIDENCE_LEVELS, PREPARATION_STATES, chooseCandidate, matchQueries, parseIdentifiedFoods, scaleCandidate,
+  type Candidate, type Confidence, type IdentifiedFood, type MatchChoice, type PreparationState,
+} from "../nutrition/foodMatch";
 
-// ─── Internal types ───────────────────────────────────────────────────────────
-
-type GeminiFoodItem = {
-  foodName: string;
-  grams: number;
-  preparation?: string;
-};
-
-type EdamamNutrients = {
-  ENERC_KCAL?: number;
-  PROCNT?: number;
-  CHOCDF?: number;
-  FAT?: number;
-};
-
-// ─── Public return types ──────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type AnalyzedFoodItem = {
   foodName: string;
@@ -40,6 +31,15 @@ export type AnalyzedFoodItem = {
   carbs: number;
   fat: number;
   edamamMatched: boolean;
+  /** As Gemini saw it (controlled set), and how sure it was. */
+  preparationState: PreparationState;
+  confidence: Confidence;
+  /** The Edamam entry the nutrition came from. */
+  matchedFood?: string;
+  /** That entry's label states the preparation (see nutrition/foodMatch.ts). */
+  preparationMatched: boolean;
+  /** The state was unknown and a staple was matched as cooked. */
+  preparationAssumed: boolean;
 };
 
 type AnalyzeResult = {
@@ -50,20 +50,13 @@ type AnalyzeResult = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function lookupEdamam(
-  foodName: string,
-  preparation: string | undefined,
-  grams: number,
-  appId: string,
-  appKey: string,
-): Promise<{ calories: number; protein: number; carbs: number; fat: number; matched: boolean; failure?: string }> {
-  const query = preparation ? `${preparation} ${foodName}` : foodName;
+/** One Edamam parser query → its candidates (`parsed` first, then hints). */
+async function edamamCandidates(query: string, appId: string, appKey: string): Promise<{ candidates: Candidate[]; failure?: string }> {
   const url =
     `https://api.edamam.com/api/food-database/v2/parser` +
     `?ingr=${encodeURIComponent(query)}` +
     `&app_id=${appId}&app_key=${appKey}` +
     `&nutrition-type=cooking`;
-
   try {
     const resp = await fetch(url);
     // The HTTP status (never the key) is kept so a failing provider is
@@ -74,30 +67,57 @@ async function lookupEdamam(
       const raw = (await resp.text().catch(() => "")).split(appId).join("[app_id]");
       let message = "";
       try { message = String((JSON.parse(raw) as { message?: unknown }).message ?? "").slice(0, 120); } catch { /* HTML error page */ }
-      return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false, failure: `http_${resp.status}${message ? ` ${message}` : ""}` };
+      return { candidates: [], failure: `http_${resp.status}${message ? ` ${message}` : ""}` };
     }
-
-    const data = await resp.json() as Record<string, unknown>;
-    const hints = data.hints as Array<Record<string, unknown>> | undefined;
-    if (!hints || hints.length === 0) return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false, failure: "no_hints" };
-
-    const food = (hints[0] as Record<string, unknown>).food as Record<string, unknown>;
-    const nutrients = food.nutrients as EdamamNutrients | undefined;
-    if (!nutrients) return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false };
-
-    // Edamam returns per-100g values; scale by estimated grams
-    const factor = grams / 100;
-    return {
-      calories: Math.round((nutrients.ENERC_KCAL ?? 0) * factor),
-      protein: Math.round((nutrients.PROCNT ?? 0) * factor * 10) / 10,
-      carbs: Math.round((nutrients.CHOCDF ?? 0) * factor * 10) / 10,
-      fat: Math.round((nutrients.FAT ?? 0) * factor * 10) / 10,
-      matched: true,
-    };
+    const data = await resp.json() as { parsed?: Array<{ food?: unknown }>; hints?: Array<{ food?: unknown }> };
+    const candidates: Candidate[] = [];
+    for (const entry of [...(data.parsed ?? []), ...(data.hints ?? [])]) {
+      const food = entry.food as { label?: unknown; category?: unknown; nutrients?: Record<string, unknown> } | undefined;
+      const n = food?.nutrients;
+      if (typeof food?.label !== "string" || !n || typeof n.ENERC_KCAL !== "number") continue;
+      candidates.push({
+        label: food.label,
+        category: typeof food.category === "string" ? food.category : undefined,
+        kcal: n.ENERC_KCAL,
+        protein: Number(n.PROCNT ?? 0),
+        carbs: Number(n.CHOCDF ?? 0),
+        fat: Number(n.FAT ?? 0),
+      });
+    }
+    return candidates.length ? { candidates } : { candidates, failure: "no_hints" };
   } catch {
-    // Edamam lookup failed — caller will display zeros for user to edit
-    return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false, failure: "network" };
+    return { candidates: [], failure: "network" };
   }
+}
+
+/** Nutrition for one identified food, matched on identity AND preparation
+ * state (nutrition/foodMatch.ts). Queries run most-specific first and stop
+ * at the first entry whose label states the right preparation; an entry
+ * that contradicts it is never used — no match beats a wrong one. */
+async function lookupNutrition(food: IdentifiedFood, appId: string, appKey: string): Promise<AnalyzedFoodItem & { failure?: string }> {
+  const plan = matchQueries(food);
+  const pool: Candidate[] = [];
+  const failures: string[] = [];
+  let choice: MatchChoice | null = null;
+  for (const query of plan.queries) {
+    const r = await edamamCandidates(query, appId, appKey);
+    if (r.failure) failures.push(r.failure);
+    if (r.failure?.startsWith("http_") || r.failure === "network") break; // provider down: don't hammer it
+    pool.push(...r.candidates);
+    choice = chooseCandidate(plan.name, plan.state, pool);
+    if (choice && (choice.preparationMatched || plan.state === "unknown")) break;
+  }
+  const base = {
+    foodName: food.foodName,
+    grams: food.grams,
+    preparationState: food.preparationState,
+    confidence: food.confidence,
+    preparationAssumed: plan.assumed,
+  };
+  if (!choice) {
+    return { ...base, calories: 0, protein: 0, carbs: 0, fat: 0, edamamMatched: false, preparationMatched: false, failure: failures[0] ?? "no_safe_match" };
+  }
+  return { ...base, ...scaleCandidate(choice.candidate, food.grams), edamamMatched: true, matchedFood: choice.candidate.label, preparationMatched: choice.preparationMatched };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -119,37 +139,53 @@ export async function analyzeImageAtUrl(imageUrl: string, geminiKey: string, eda
 
     // ── 2. Call Gemini Vision ─────────────────────────────────────────────────
     const prompt = `Analyze this meal photo. Identify every distinct food item visible.
-For each item, estimate the portion weight in grams using visual cues such as plate size,
-typical serving amounts, and visible volume.
 
-Return ONLY a valid JSON array — no markdown, no code fences, no extra text.
-Example: [{"foodName":"grilled chicken breast","grams":150},{"foodName":"white rice","grams":200,"preparation":"cooked"}]
+For each item give, as SEPARATE facts:
+- foodName: the food's identity only — a simple common English name good for a nutrition database search ("pasta", "white rice", "chicken breast"). Do not put the cooking method in the name.
+- preparationState: one of ${PREPARATION_STATES.join(", ")}.
+  • "dry" = uncooked grain/pasta/legume/oats as sold; "raw" = uncooked meat, fish, egg, vegetable or fruit.
+  • Use the specific method (fried, grilled, boiled, steamed, baked, roasted) when it is visible; "cooked" when it is clearly cooked but the method isn't clear.
+  • Pasta, rice, noodles, oats/porridge, grains, beans and lentils served on a plate or in a bowl as part of a meal are cooked unless they are visibly dry (in a packet, jar or measuring cup).
+  • Use "unknown" when the state genuinely cannot be determined. Never guess.
+- estimatedWeightGrams: integer weight of the portion as it is SERVED in the photo (cooked weight for cooked food), using plate size, typical servings and visible volume.
+- confidence: high, medium or low — how sure you are of the identity, state and weight together.
 
-Rules:
-- foodName: simple common English name (good for a nutrition database search)
-- grams: integer weight estimate of the visible portion
-- preparation: optional (grilled, fried, boiled, raw, baked, steamed, etc.)
-- Include ALL visible foods including sauces, dressings, and sides
-- If you cannot identify any food, return exactly: []`;
+Include ALL visible foods, including sauces, dressings, oils and sides. If you cannot identify any food, return an empty array.`;
 
-    const geminiPayload = {
-      contents: [{
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
-        ],
-      }],
-      generationConfig: { temperature: 0.1 },
+    const itemSchema = {
+      type: "OBJECT",
+      properties: {
+        foodName: { type: "STRING" },
+        preparationState: { type: "STRING", enum: [...PREPARATION_STATES] },
+        estimatedWeightGrams: { type: "INTEGER" },
+        confidence: { type: "STRING", enum: [...CONFIDENCE_LEVELS] },
+      },
+      required: ["foodName", "preparationState", "estimatedWeightGrams", "confidence"],
+      propertyOrdering: ["foodName", "preparationState", "estimatedWeightGrams", "confidence"],
     };
-
-    const geminiResp = await fetch(
+    const callGemini = (structured: boolean) => fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_VISION_MODEL ?? "gemini-3.5-flash-lite"}:generateContent?key=${geminiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiPayload),
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: structured ? prompt : `${prompt}\n\nReturn ONLY a JSON array of {foodName, preparationState, estimatedWeightGrams, confidence} — no markdown, no extra text.` },
+              { inlineData: { mimeType: imageMimeType, data: imageBase64 } },
+            ],
+          }],
+          generationConfig: structured
+            ? { temperature: 0.1, responseMimeType: "application/json", responseSchema: { type: "ARRAY", items: itemSchema } }
+            : { temperature: 0.1 },
+        }),
       },
     );
+
+    // Structured output (the enum is enforced by Gemini); a model that
+    // rejects the schema falls back to the same prompt as plain JSON.
+    let geminiResp = await callGemini(true);
+    if (geminiResp.status === 400) geminiResp = await callGemini(false);
 
     if (!geminiResp.ok) {
       const errText = await geminiResp.text();
@@ -163,7 +199,7 @@ Rules:
     const geminiData = await geminiResp.json() as Record<string, unknown>;
 
     // ── 3. Parse Gemini JSON ──────────────────────────────────────────────────
-    let foodItems: GeminiFoodItem[] = [];
+    let foodItems: IdentifiedFood[] = [];
     try {
       const candidates = geminiData.candidates as Array<Record<string, unknown>> | undefined;
       const content = candidates?.[0]?.content as Record<string, unknown> | undefined;
@@ -171,18 +207,7 @@ Rules:
       const text = (parts?.[0]?.text as string | undefined)?.trim() ?? "";
 
       if (!text) return { success: false, items: [], error: "No response from vision API." };
-
-      // Strip markdown code fences if Gemini adds them despite instructions
-      const jsonText = text
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
-
-      const parsed = JSON.parse(jsonText) as unknown;
-      if (!Array.isArray(parsed)) {
-        return { success: false, items: [], error: "Unexpected response format from vision API." };
-      }
-      foodItems = parsed as GeminiFoodItem[];
+      foodItems = parseIdentifiedFoods(text);
     } catch {
       return { success: false, items: [], error: "Failed to parse vision API response." };
     }
@@ -195,32 +220,18 @@ Rules:
       };
     }
 
-    // ── 4. Parallel Edamam lookups ────────────────────────────────────────────
-    const nutritionResults = await Promise.all(
-      foodItems.map(item =>
-        lookupEdamam(item.foodName, item.preparation, item.grams, edamamAppId, edamamAppKey),
-      ),
-    );
+    // ── 4. Edamam lookups (parallel across foods) ─────────────────────────────
+    const items = await Promise.all(foodItems.map((item) => lookupNutrition(item, edamamAppId, edamamAppKey)));
 
     // Foods recognised but NO nutrition found for any of them: not an
     // estimate of 0 kcal — an honest failure, with the provider's reason.
-    if (!nutritionResults.some((r) => r.matched)) {
-      const reasons = [...new Set(nutritionResults.map((r) => r.failure ?? "unknown"))].join(",");
+    if (!items.some((r) => r.edamamMatched)) {
+      const reasons = [...new Set(items.map((r) => r.failure ?? "unknown"))].join(",");
       console.log(`analyzeImageAtUrl: nutrition lookup failed for all ${foodItems.length} items (${reasons})`);
       return { success: false, items: [], error: `nutrition_unavailable:${reasons}` };
     }
 
-    const items: AnalyzedFoodItem[] = foodItems.map((item, i) => ({
-      foodName: item.foodName,
-      grams: item.grams,
-      calories: nutritionResults[i].calories,
-      protein: nutritionResults[i].protein,
-      carbs: nutritionResults[i].carbs,
-      fat: nutritionResults[i].fat,
-      edamamMatched: nutritionResults[i].matched,
-    }));
-
-    return { success: true, items };
+    return { success: true, items: items.map(({ failure: _f, ...item }) => item) };
 }
 
 export const analyzeMealPhoto = action({
@@ -281,6 +292,11 @@ export const analyzeMealPhotoLog = internalAction({
         carbs: Math.max(0, Math.round(i.carbs * 10) / 10),
         fat: Math.max(0, Math.round(i.fat * 10) / 10),
         matched: i.edamamMatched,
+        preparationState: i.preparationState,
+        confidence: i.confidence,
+        matchedFood: i.matchedFood?.slice(0, 120),
+        preparationMatched: i.preparationMatched,
+        preparationAssumed: i.preparationAssumed,
       })),
     });
   },

@@ -86,6 +86,13 @@ const itemValidator = v.object({
   carbs: v.number(),
   fat: v.number(),
   matched: v.boolean(),
+  // Semantic matching (convex/nutrition/foodMatch.ts). Optional: rows
+  // analysed before it have none.
+  preparationState: v.optional(v.string()),
+  confidence: v.optional(v.string()),
+  matchedFood: v.optional(v.string()),
+  preparationMatched: v.optional(v.boolean()),
+  preparationAssumed: v.optional(v.boolean()),
 });
 
 /** Stores the analysis and deletes the photo — it isn't kept. */
