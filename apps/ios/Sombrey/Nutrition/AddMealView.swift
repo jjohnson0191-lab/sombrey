@@ -1,19 +1,24 @@
 import SwiftUI
 import ConvexMobile
 
-/// Nutrition › Search Foods. The user searches (`foodSearch:search` —
-/// Sombrey's own foods, then live Edamam results through the backend; no
-/// credentials here), picks a food, sets the portion (grams or a serving
-/// measure), sees what it adds, and logs it only when they tap Log food:
-/// a Sombrey food through `nutritionLogs:logFood`, an Edamam food as a
-/// snapshot through `nutritionLogs:logExternalFood` (never copied into
-/// `foods`). Each confirmation carries one entry id, so a retry or double
-/// tap can't log twice.
+/// Nutrition › Search Foods.
 ///
-/// Requests are human-driven only: nothing is searched under
-/// `FoodSearchLogic.minQueryLength` characters, typing is debounced, a newer
-/// query cancels the pending one, and a failed search is retried only when
-/// the user asks.
+/// The Sombrey Food Library first: `foods:search` — a Convex query over the
+/// canonical `foods` table (imported approved datasets such as USDA
+/// FoodData Central, plus foods created in Sombrey), relevance-ranked and
+/// paginated on the server; no provider is called and the phone only ever
+/// holds the page it shows. Edamam's live database is a separate, explicit
+/// step ("Search Edamam") through `foodSearch:search` — never on its own.
+///
+/// The user picks a food, sets the portion (grams, a household measure, or
+/// servings), sees what it adds, and logs it only when they tap Log food: a
+/// library food through `nutritionLogs:logFood` (by grams or servings, with
+/// a snapshot so history never changes), an Edamam food through
+/// `nutritionLogs:logExternalFood` (never copied into `foods`). Each
+/// confirmation carries one entry id, so a retry or double tap logs once.
+///
+/// Nothing is searched under `FoodSearchLogic.minQueryLength` characters,
+/// typing is debounced, and a newer query replaces the pending one.
 struct AddMealView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -22,11 +27,18 @@ struct AddMealView: View {
 
     @State private var stage: Stage = .search
     @State private var query = ""
-    @State private var result: FoodSearchResultDTO?
-    @State private var searching = false
-    @State private var searchFailed = false
-    @State private var retryToken = 0
     @FocusState private var fieldFocused: Bool
+
+    // Library search (a live Convex subscription for the settled query).
+    @State private var library = ConvexQuery<LibrarySearchPageDTO>()
+    @State private var searched: String?
+    @State private var limit = FoodSearchLogic.libraryPageSize
+    @State private var retryToken = 0
+
+    // Edamam — only when the user asks, for the query shown.
+    @State private var edamam: FoodSearchResultDTO?
+    @State private var edamamLoading = false
+    @State private var edamamFailed = false
 
     var body: some View {
         EnvironmentView(scene: .aiCoach) {
@@ -45,14 +57,14 @@ struct AddMealView: View {
                 }
             }
         }
-        // One search per settled query: SwiftUI cancels the previous task
-        // when the query changes, so an obsolete search never lands.
-        .task(id: SearchKey(query: FoodSearchLogic.searchable(query), retry: retryToken)) {
-            await runSearch()
+        // One subscription per settled query: SwiftUI cancels the pending
+        // task when the query changes, so an obsolete search never starts.
+        .task(id: SearchKey(query: FoodSearchLogic.searchable(query), limit: limit, retry: retryToken)) {
+            await searchLibrary()
         }
     }
 
-    private struct SearchKey: Equatable { let query: String?; let retry: Int }
+    private struct SearchKey: Equatable { let query: String?; let limit: Int; let retry: Int }
 
     // MARK: Bar
 
@@ -96,7 +108,8 @@ struct AddMealView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    resultsContent
+                    libraryContent
+                    edamamContent
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
@@ -104,6 +117,10 @@ struct AddMealView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .onAppear { fieldFocused = true }
+    }
+
+    private var libraryState: FoodSearchLogic.LibraryState {
+        FoodSearchLogic.libraryState(query: query, searched: searched, failed: library.errorMessage != nil, page: library.value)
     }
 
     private var searchField: some View {
@@ -121,7 +138,7 @@ struct AddMealView: View {
                 .focused($fieldFocused)
                 .accessibilityLabel("Search foods")
                 .accessibilityIdentifier("foodSearch.field")
-            if searching {
+            if libraryState == .loading {
                 ProgressView().controlSize(.small).tint(StudioColor.inkSoft)
             } else if !query.isEmpty {
                 Button { query = "" } label: {
@@ -141,30 +158,13 @@ struct AddMealView: View {
     }
 
     @ViewBuilder
-    private var resultsContent: some View {
-        let searchable = FoodSearchLogic.searchable(query)
-        if searchable == nil {
-            notice(query.trimmingCharacters(in: .whitespaces).isEmpty ? .idle : .tooShort)
-        } else if searchFailed {
-            notice(.failed)
-        } else if let r = result, r.query == searchable {
-            if let n = FoodSearchLogic.notice(for: r) {
-                notice(n)
-            } else {
-                if !r.sombrey.isEmpty {
-                    section("SOMBREY FOODS", r.sombrey.map(FoodChoice.sombrey))
-                }
-                if !r.edamam.isEmpty {
-                    section("FOOD DATABASE", r.edamam.map(FoodChoice.edamam))
-                }
-                if let n = FoodSearchLogic.edamamNote(for: r) {
-                    notice(n)
-                }
-            }
-            if !r.edamam.isEmpty {
-                EdamamAttribution()
-            }
-        } else {
+    private var libraryContent: some View {
+        switch libraryState {
+        case .idle:
+            notice(.idle)
+        case .tooShort:
+            notice(.tooShort)
+        case .loading:
             HStack(spacing: 10) {
                 ProgressView().tint(StudioColor.inkSoft)
                 Text("Searching…")
@@ -173,6 +173,62 @@ struct AddMealView: View {
             }
             .frame(minHeight: 44)
             .accessibilityElement(children: .combine)
+        case .failed:
+            notice(.libraryFailed)
+        case .empty:
+            notice(.libraryNoResults)
+        case .results:
+            if let page = library.value {
+                section("SOMBREY FOOD LIBRARY", page.page.map(FoodChoice.library))
+                if FoodSearchLogic.canShowMore(page, limit: limit) {
+                    Button { limit = min(FoodSearchLogic.libraryMaxResults, limit + FoodSearchLogic.libraryPageSize) } label: {
+                        Text("Show more").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.outlineCTA)
+                } else if !page.isDone {
+                    Text("Showing the \(page.page.count) closest matches — add a word to narrow the search.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if page.page.contains(where: { $0.source?.hasPrefix("usda_fdc") == true }) {
+                    Text("Library data includes USDA FoodData Central.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                }
+            }
+        }
+    }
+
+    /// Edamam's database: offered once the library has answered, searched
+    /// only when the user taps — one request, through the backend.
+    @ViewBuilder
+    private var edamamContent: some View {
+        if let q = FoodSearchLogic.searchable(query), libraryState == .results || libraryState == .empty || libraryState == .failed {
+            if let r = edamam, r.query == q {
+                if let n = FoodSearchLogic.notice(for: r) {
+                    notice(n, retry: { searchEdamam(q) })
+                } else {
+                    section("EDAMAM FOOD DATABASE", r.edamam.map(FoodChoice.edamam))
+                    EdamamAttribution()
+                }
+            } else if edamamLoading {
+                HStack(spacing: 10) {
+                    ProgressView().tint(StudioColor.inkSoft)
+                    Text("Searching Edamam…")
+                        .font(StudioFont.body(13))
+                        .foregroundStyle(StudioColor.inkSoft)
+                }
+                .frame(minHeight: 44)
+            } else if edamamFailed {
+                notice(.failed, retry: { searchEdamam(q) })
+            } else {
+                Button { searchEdamam(q) } label: {
+                    Text("Search Edamam for “\(q)”").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.outlineCTA)
+                .accessibilityIdentifier("foodSearch.edamam")
+            }
         }
     }
 
@@ -189,7 +245,7 @@ struct AddMealView: View {
         }
     }
 
-    private func notice(_ n: FoodSearchLogic.Notice) -> some View {
+    private func notice(_ n: FoodSearchLogic.Notice, retry: (() -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(n.title)
@@ -202,7 +258,7 @@ struct AddMealView: View {
             }
             .accessibilityElement(children: .combine)
             if n.canRetry {
-                Button { searchFailed = false; result = nil; retryToken += 1 } label: {
+                Button { if let retry { retry() } else { retryToken += 1 } } label: {
                     Text("Try again").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.outlineCTA)
@@ -254,28 +310,45 @@ struct AddMealView: View {
         withAnimation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion)) { stage = .search }
     }
 
-    /// Debounced, cancellable, one request per settled query.
-    private func runSearch() async {
-        searchFailed = false
+    /// Debounced: subscribes to the library search for the settled query.
+    private func searchLibrary() async {
         guard let q = FoodSearchLogic.searchable(query) else {
-            searching = false
+            library.stop()
+            searched = nil
+            limit = FoodSearchLogic.libraryPageSize
             return
         }
-        // Already showing this query's results (e.g. typed back to it).
-        if result?.query == q { searching = false; return }
-        try? await Task.sleep(nanoseconds: FoodSearchLogic.debounceNanoseconds)
-        guard !Task.isCancelled else { return }
-        searching = true
-        do {
-            let r: FoodSearchResultDTO = try await ConvexClientProvider.client.action("foodSearch:search", with: ["query": q])
-            // The query moved on while this was in flight: drop it.
-            guard !Task.isCancelled, FoodSearchLogic.searchable(query) == q else { return }
-            result = r
-        } catch {
-            guard !Task.isCancelled, FoodSearchLogic.searchable(query) == q else { return }
-            searchFailed = true
+        // A new query starts from the first page and a fresh Edamam offer.
+        if searched != q {
+            if limit != FoodSearchLogic.libraryPageSize { limit = FoodSearchLogic.libraryPageSize; return }
+            edamam = nil
+            edamamFailed = false
+            try? await Task.sleep(nanoseconds: FoodSearchLogic.debounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            // A fresh subscription: the previous query's page is never shown for this one.
+            library = ConvexQuery<LibrarySearchPageDTO>()
         }
-        searching = false
+        searched = q
+        library.subscribe(to: "foods:search", with: [
+            "query": q,
+            "paginationOpts": PaginationOptsArg(numItems: Double(limit), cursor: nil),
+        ])
+    }
+
+    /// The user asked for Edamam's results for this query: one request.
+    private func searchEdamam(_ q: String) {
+        guard !edamamLoading else { return }
+        edamamLoading = true
+        edamamFailed = false
+        Task {
+            do {
+                let r: FoodSearchResultDTO = try await ConvexClientProvider.client.action("foodSearch:search", with: ["query": q])
+                if FoodSearchLogic.searchable(query) == q { edamam = r }
+            } catch {
+                if FoodSearchLogic.searchable(query) == q { edamamFailed = true }
+            }
+            edamamLoading = false
+        }
     }
 }
 
@@ -333,14 +406,14 @@ struct FoodSearchRow: View {
 
     private var kcal: Double {
         switch choice {
-        case .sombrey(let f): return f.calories
+        case .library(let f): return f.per100g?.calories ?? f.calories
         case .edamam(let f): return f.per100g.calories
         }
     }
 
     private var detail: String {
         switch choice {
-        case .sombrey(let f): return "Sombrey · per \(f.servingSize) \(f.servingUnit)".trimmingCharacters(in: .whitespaces)
+        case .library(let f): return FoodSearchLogic.summary(f)
         case .edamam(let f): return FoodSearchLogic.summary(f)
         }
     }
@@ -348,7 +421,9 @@ struct FoodSearchRow: View {
     private var macros: String {
         let g = { (v: Double?) in v.map { "\(FoodSearchLogic.number(($0 * 10).rounded() / 10))g" } ?? "—" }
         switch choice {
-        case .sombrey(let f): return "P \(g(f.protein)) · C \(g(f.carbs)) · F \(g(f.fats))"
+        case .library(let f):
+            if let p = f.per100g { return "P \(g(p.protein)) · C \(g(p.carbs)) · F \(g(p.fat))" }
+            return "P \(g(f.protein)) · C \(g(f.carbs)) · F \(g(f.fats))"
         case .edamam(let f): return "P \(g(f.per100g.protein)) · C \(g(f.per100g.carbs)) · F \(g(f.per100g.fat))"
         }
     }
@@ -471,7 +546,7 @@ struct FoodPortionView: View {
             guard !configured else { return }
             configured = true
             switch choice {
-            case .sombrey: unit = .serving; amount = 1
+            case .library(let f): (unit, amount) = FoodSearchLogic.defaultUnit(for: f)
             case .edamam(let f): (unit, amount) = FoodSearchLogic.defaultUnit(for: f)
             }
         }
@@ -487,8 +562,8 @@ struct FoodPortionView: View {
                     .tracking(1.6)
                     .foregroundStyle(StudioColor.inkSoft)
                 Spacer()
-                if case .edamam(let f) = choice {
-                    unitMenu(f)
+                if availableUnits.count > 1 {
+                    unitMenu(availableUnits)
                 }
             }
             HStack(spacing: 14) {
@@ -514,15 +589,27 @@ struct FoodPortionView: View {
                 Text("≈ \(FoodSearchLogic.number(g)) g")
                     .font(StudioFont.body(11))
                     .foregroundStyle(StudioColor.inkFaint)
+            } else if case .serving = unit, case .library(let f) = choice {
+                Text("1 serving = \(f.servingSize == "1" ? f.servingUnit : "\(f.servingSize) \(f.servingUnit)")\(f.servingGrams.map { " (\(FoodSearchLogic.number($0)) g)" } ?? "")")
+                    .font(StudioFont.body(11))
+                    .foregroundStyle(StudioColor.inkFaint)
             }
         }
     }
 
-    private func unitMenu(_ f: ExternalFoodDTO) -> some View {
+    /// Grams and the source's household measures for a food with per-100 g
+    /// values; servings for one that only has per-serving values.
+    private var availableUnits: [FoodSearchLogic.Unit] {
+        switch choice {
+        case .library(let f): return FoodSearchLogic.units(for: f)
+        case .edamam(let f): return [.grams] + f.measures.map { .measure(label: $0.label, grams: $0.grams) }
+        }
+    }
+
+    private func unitMenu(_ units: [FoodSearchLogic.Unit]) -> some View {
         Menu {
-            Button("Grams") { setUnit(.grams) }
-            ForEach(f.measures, id: \.self) { m in
-                Button("\(m.label) (\(FoodSearchLogic.number(m.grams)) g)") { setUnit(.measure(label: m.label, grams: m.grams)) }
+            ForEach(units, id: \.self) { u in
+                Button(menuLabel(u)) { setUnit(u) }
             }
         } label: {
             HStack(spacing: 4) {
@@ -537,6 +624,14 @@ struct FoodPortionView: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel("Unit: \(unitName)")
+    }
+
+    private func menuLabel(_ u: FoodSearchLogic.Unit) -> String {
+        switch u {
+        case .grams: return "Grams"
+        case .measure(let label, let g): return "\(label) (\(FoodSearchLogic.number(g)) g)"
+        case .serving: return "Servings"
+        }
     }
 
     private func setUnit(_ new: FoodSearchLogic.Unit) {
@@ -593,7 +688,10 @@ struct FoodPortionView: View {
 
     private var nutrition: FoodSearchLogic.Nutrition {
         switch choice {
-        case .sombrey(let f): return FoodSearchLogic.nutrition(f, servings: amount)
+        case .library(let f):
+            if case .serving = unit { return FoodSearchLogic.nutrition(f, servings: amount) }
+            guard let p = f.per100g, let g = FoodSearchLogic.grams(amount: amount, unit: unit) else { return .zero }
+            return FoodSearchLogic.nutrition(p, grams: g)
         case .edamam(let f):
             guard let g = FoodSearchLogic.grams(amount: amount, unit: unit) else { return .zero }
             return FoodSearchLogic.nutrition(f.per100g, grams: g)
@@ -606,14 +704,16 @@ struct FoodPortionView: View {
     }
 
     private var source: String {
-        if case .sombrey = choice { return "Sombrey food" }
-        return "Food database"
+        if case .library = choice { return "Sombrey food library" }
+        return "Edamam food database"
     }
 
     private var basisNote: String {
         switch choice {
-        case .sombrey(let f):
-            return "From Sombrey's food library — per serving of \(f.servingSize) \(f.servingUnit)."
+        case .library(let f):
+            let origin = f.source?.hasPrefix("usda_fdc") == true ? "USDA FoodData Central" : "Sombrey's food library"
+            if f.per100g != nil, unit != .serving { return "Nutrition from \(origin), calculated from its per-100 g values." }
+            return "Nutrition from \(origin) — per serving of \(f.servingSize == "1" ? f.servingUnit : "\(f.servingSize) \(f.servingUnit)")."
         case .edamam:
             let base = "Nutrition from Edamam, scaled from its per-100 g values."
             guard !missing.isEmpty else { return base }
@@ -648,14 +748,21 @@ struct FoodPortionView: View {
         Task {
             do {
                 switch choice {
-                case .sombrey(let f):
-                    let _: String = try await ConvexClientProvider.client.mutation("nutritionLogs:logFood", with: [
+                case .library(let f):
+                    var args: [String: ConvexEncodable?] = [
                         "date": NutritionDate.todayUTCMidnightMillis,
                         "foodId": f.id,
                         "servings": amount,
                         "mealType": meal,
                         "entryId": entryId,
-                    ])
+                    ]
+                    // By weight: the server takes per-100 g × grams (servings 1).
+                    if unit != .serving, let grams = FoodSearchLogic.grams(amount: amount, unit: unit) {
+                        args["servings"] = 1.0
+                        args["grams"] = grams
+                        args["portion"] = FoodSearchLogic.portionLabel(amount: amount, unit: unit)
+                    }
+                    let _: String = try await ConvexClientProvider.client.mutation("nutritionLogs:logFood", with: args)
                 case .edamam(let f):
                     guard let grams = FoodSearchLogic.grams(amount: amount, unit: unit) else { logging = false; return }
                     let _: ExternalLogResult = try await ConvexClientProvider.client.mutation("nutritionLogs:logExternalFood", with: [

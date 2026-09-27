@@ -17,6 +17,7 @@ import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import type { EdamamGate } from "./nutrition/edamamLookup";
 import { PHOTO_MEAL_CATEGORY } from "./foods";
+import { librarySearchTerm } from "./nutrition/librarySearch";
 import {
   MAX_SOMBREY_RESULTS, normalizeQuery, searchEdamam, withoutSombreyDuplicates,
   type EdamamSearchStatus, type ExternalFood,
@@ -52,7 +53,9 @@ export const sombreyMatches = internalQuery({
     if (!identity) return null;
     const user = await ctx.db.query("users").withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier)).unique();
     if (!user) return null;
-    const hits = await ctx.db.query("foods").withSearchIndex("search_name", (q) => q.search("name", args.query)).take(40);
+    const term = librarySearchTerm(args.query);
+    if (!term) return { userId: user._id, foods: [] };
+    const hits = await ctx.db.query("foods").withSearchIndex("search_name", (q) => q.search("searchName", term)).take(40);
     const foods = hits
       .filter((f) => !f.isArchived && (f.category !== PHOTO_MEAL_CATEGORY || f.createdBy === user._id))
       .slice(0, MAX_SOMBREY_RESULTS)

@@ -4,7 +4,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { hasRole } from "./lib/roles.js";
-import { MEAL_TYPES, buildExternalSnapshot, entryNutrition, validEntryId, type ExternalSnapshot } from "./nutrition/logEntry";
+import { MEAL_TYPES, buildExternalSnapshot, entryNutrition, foodSnapshot, validEntryId, type ExternalSnapshot, type FoodSnapshot } from "./nutrition/logEntry";
 
 /**
  * Returns today's nutrition progress: calories/protein consumed vs AI plan targets,
@@ -144,7 +144,9 @@ export const getByDate = query({
     // its own name and nutrition — displayed without asking the provider.
     const foodsWithDetails = await Promise.all(
       log.foods.map(async (f) => {
-        if (f.source !== undefined) {
+        // A snapshot (every entry logged from the Food Library on, and every
+        // Edamam entry): the values confirmed then, per serving.
+        if (f.calories !== undefined) {
           return {
             ...f,
             foodName: f.name || "Unknown",
@@ -183,6 +185,10 @@ export const logFood = mutation({
     // Optional idempotency key (the native app sends one per confirmation):
     // an entry already logged with it isn't logged again.
     entryId: v.optional(v.string()),
+    // Optional: log by weight (the food's per-100 g values × grams; servings
+    // is then 1). `portion` is the app's label for a household measure.
+    grams: v.optional(v.number()),
+    portion: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -223,17 +229,14 @@ export const logFood = mutation({
       });
     }
 
-    if (!Number.isFinite(args.servings) || args.servings <= 0 || args.servings > 100) {
-      throw new ConvexError({ code: "INVALID", message: "Servings must be between 0 and 100." });
-    }
     if (args.entryId !== undefined && !validEntryId(args.entryId)) {
       throw new ConvexError({ code: "INVALID", message: "Invalid entry id" });
     }
-
-    // Macros: food.protein/carbs/fats/calories are per-serving values; multiply by
-    // the number of servings consumed. (The per-100g fields are used only by the
-    // coach meal-plan system which applies its own ×(grams/100) formula.)
-    return appendNutritionEntry(ctx, targetUserId, args.date, food, args.servings, args.mealType, args.entryId);
+    // Macros: by serving, the food's per-serving values × servings; by grams,
+    // its per-100 g values × grams. Either way a snapshot is stored.
+    const checked = foodSnapshot(food, args.grams !== undefined ? { grams: args.grams, portionLabel: args.portion } : { servings: args.servings });
+    if ("error" in checked) throw new ConvexError({ code: "INVALID", message: checked.error });
+    return appendEntry(ctx, targetUserId, args.date, args.mealType, args.entryId, { food, snapshot: checked.snapshot });
   },
 });
 
@@ -387,7 +390,9 @@ export async function appendNutritionEntry(
   mealType: string,
   entryId?: string,
 ): Promise<Id<"nutritionLogs">> {
-  return appendEntry(ctx, userId, date, mealType, entryId, { food, servings });
+  const checked = foodSnapshot(food, { servings });
+  if ("error" in checked) throw new ConvexError({ code: "INVALID", message: checked.error });
+  return appendEntry(ctx, userId, date, mealType, entryId, { food, snapshot: checked.snapshot });
 }
 
 /** The one append: a Sombrey food × servings, or an external snapshot.
@@ -399,14 +404,14 @@ async function appendEntry(
   date: number,
   mealType: string,
   givenEntryId: string | undefined,
-  item: { food: Doc<"foods">; servings: number } | { snapshot: ExternalSnapshot },
+  item: { food: Doc<"foods">; snapshot: FoodSnapshot } | { snapshot: ExternalSnapshot },
 ): Promise<Id<"nutritionLogs">> {
   // A stable entry ID so removal does not rely on array position.
   const entryId = givenEntryId ?? crypto.randomUUID();
   const entry = "food" in item
-    ? { foodId: item.food._id, servings: item.servings, mealType, entryId }
+    ? { foodId: item.food._id, ...item.snapshot, mealType, entryId }
     : { ...item.snapshot, servings: 1, mealType, entryId };
-  const n = entryNutrition(entry, "food" in item ? item.food : null);
+  const n = entryNutrition(entry, null);
   const existingLog = await ctx.db
     .query("nutritionLogs")
     .withIndex("by_user_and_date", (q) => q.eq("userId", userId).eq("date", date))

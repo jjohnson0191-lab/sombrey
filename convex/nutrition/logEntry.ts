@@ -1,10 +1,18 @@
 // A nutrition log entry (convex/nutritionLogs.ts) is one of:
-//   • a Sombrey-owned food: `foodId` + `servings` — nutrition read from `foods`;
+//   • a Sombrey-owned food: `foodId` + `servings`, and — from the Food Library
+//     on — a snapshot of its name and nutrition taken when the user confirmed,
+//     so editing or re-importing the food later never rewrites history.
+//     (Entries logged before snapshots existed are still read from `foods`.)
 //   • an external snapshot (Search Foods › Edamam): the nutrition the user
 //     confirmed, for the whole portion, kept on the entry itself so the day
 //     still adds up, displays and can be removed without asking Edamam again.
 //     Only what the log needs is kept: name, portion, kcal/protein/carbs/fat,
 //     the provider and its food id — never the Edamam response.
+//
+// A snapshot's calories/protein/carbs/fats are per ONE of the entry's
+// `servings` (an external or gram-based entry has servings = 1), so the day's
+// contribution is always snapshot × servings — the same arithmetic the web
+// app already does with getByDate's per-serving values.
 //
 // Pure — no I/O — so the rules are tested directly (tests/nutrition).
 
@@ -82,11 +90,11 @@ export type LogEntryLike = {
 };
 type FoodLike = { calories: number; protein: number; carbs: number; fats: number };
 
-/** What one entry adds to the day. A snapshot carries its own nutrition; a
- * Sombrey food is per serving × servings; a food that no longer exists adds
- * nothing (as before). */
+/** What one entry adds to the day. A snapshot carries its own nutrition
+ * (whatever the food row says now); an older entry without one is the food's
+ * per-serving values × servings; a food that no longer exists adds nothing. */
 export function entryNutrition(entry: LogEntryLike, food: FoodLike | null): FoodLike {
-  if (entry.source !== undefined) {
+  if (entry.calories !== undefined) {
     const n = (v: number | undefined) => (typeof v === "number" && Number.isFinite(v) ? v * entry.servings : 0);
     return { calories: n(entry.calories), protein: n(entry.protein), carbs: n(entry.carbs), fats: n(entry.fats) };
   }
@@ -98,4 +106,54 @@ export function entryNutrition(entry: LogEntryLike, food: FoodLike | null): Food
  * confirmation, so a retried or double-tapped confirm logs once. */
 export function validEntryId(id: unknown): id is string {
   return typeof id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(id);
+}
+
+// ─── Sombrey foods ────────────────────────────────────────────────────────────
+
+type FoodForLog = FoodLike & {
+  name: string;
+  servingSize: string;
+  servingUnit: string;
+  caloriesPer100g?: number;
+  proteinPer100g?: number;
+  carbsPer100g?: number;
+  fatsPer100g?: number;
+};
+
+export type FoodSnapshot = { name: string; portion: string; calories: number; protein: number; carbs: number; fats: number; servings: number };
+
+const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
+
+/** The snapshot for a Sombrey food at confirmation:
+ *   • by servings — the food's per-serving values, × servings in the day;
+ *   • by grams — its per-100 g values × grams (servings = 1). Only a food with
+ *     all four per-100 g values can be logged by grams; nothing is estimated.
+ * `portionLabel` is the app's wording for a household measure ("2 × cup").
+ */
+export function foodSnapshot(food: FoodForLog, q: { servings: number } | { grams: number; portionLabel?: string }): { snapshot: FoodSnapshot } | { error: string } {
+  if ("grams" in q) {
+    if (typeof q.grams !== "number" || !Number.isFinite(q.grams) || q.grams <= 0 || q.grams > MAX_PORTION_GRAMS) {
+      return { error: `The portion must be between 0 and ${MAX_PORTION_GRAMS} g.` };
+    }
+    const p = [food.caloriesPer100g, food.proteinPer100g, food.carbsPer100g, food.fatsPer100g];
+    if (p.some((x) => typeof x !== "number" || !Number.isFinite(x) || x < 0)) return { error: "This food has no per-100 g values — log it by serving." };
+    const scaled = scalePer100g({ calories: food.caloriesPer100g!, protein: food.proteinPer100g, carbs: food.carbsPer100g, fat: food.fatsPer100g }, q.grams);
+    const label = typeof q.portionLabel === "string" && q.portionLabel.trim() && q.portionLabel.trim().length <= 60 ? q.portionLabel.trim() : `${fmt(q.grams)} g`;
+    return { snapshot: { name: food.name, portion: label, ...scaled, servings: 1 } };
+  }
+  if (typeof q.servings !== "number" || !Number.isFinite(q.servings) || q.servings <= 0 || q.servings > 100) {
+    return { error: "Servings must be between 0 and 100." };
+  }
+  const unit = food.servingSize.trim() === "1" || !food.servingSize.trim() ? food.servingUnit : `${food.servingSize} ${food.servingUnit}`;
+  return {
+    snapshot: {
+      name: food.name,
+      portion: `${fmt(q.servings)} × ${unit}`.slice(0, 60),
+      calories: food.calories,
+      protein: food.protein,
+      carbs: food.carbs,
+      fats: food.fats,
+      servings: q.servings,
+    },
+  };
 }

@@ -356,10 +356,33 @@ export default defineSchema({
     proteinPer100g: v.optional(v.number()),
     carbsPer100g: v.optional(v.number()),
     fatsPer100g: v.optional(v.number()),
+    // ── Sombrey Food Library (convex/nutrition/foodLibrary.ts) ──────────────
+    // All optional: foods created by hand before (and after) keep working.
+    // Normalised name the search index reads (lower case, accents folded).
+    searchName: v.optional(v.string()),
+    brand: v.optional(v.string()),
+    kind: v.optional(v.union(v.literal("generic"), v.literal("branded"))),
+    // Only when the source's own description states it (raw, dry, cooked…).
+    preparationState: v.optional(v.string()),
+    // Gram weight of the default serving (servingSize × servingUnit).
+    servingGrams: v.optional(v.number()),
+    // Household portions from the source, each with its gram weight.
+    portions: v.optional(v.array(v.object({ label: v.string(), grams: v.number() }))),
+    // Where an imported food came from: dataset, its own id, its release.
+    // Absent on foods created in Sombrey.
+    source: v.optional(v.string()),
+    sourceId: v.optional(v.string()),
+    sourceVersion: v.optional(v.string()),
+    // Fingerprint of the imported content — an unchanged re-import is a no-op.
+    sourceHash: v.optional(v.string()),
+    // Questionable-but-kept values, for review (e.g. energy_macro_mismatch).
+    qualityFlags: v.optional(v.array(v.string())),
   }).index("by_creator", ["createdBy"])
     .index("by_archived", ["isArchived"])
-    // Search Foods (convex/foodSearch.ts): Sombrey-owned foods by name.
-    .searchIndex("search_name", { searchField: "name" }),
+    // Idempotent imports; also "foods created in Sombrey" (source undefined).
+    .index("by_source_and_sourceId", ["source", "sourceId"])
+    // Search Foods: relevance-ranked full-text search over the library.
+    .searchIndex("search_name", { searchField: "searchName", filterFields: ["source"] }),
 
   mealPlans: defineTable({
     userId: v.id("users"),

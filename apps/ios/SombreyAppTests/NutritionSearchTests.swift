@@ -43,9 +43,60 @@ struct NutritionSearchTests {
         #expect(FoodSearchLogic.portionLabel(amount: 150, unit: .grams) == "150 g")
     }
 
-    @Test func sombreyFoodsArePerServingTimesServings() {
-        let rice = SombreyFoodDTO(id: "f1", name: "Rice", calories: 200, protein: 4, carbs: 44, fats: 0.5, servingSize: "1", servingUnit: "cup")
-        #expect(FoodSearchLogic.nutrition(rice, servings: 1.5) == .init(calories: 300, protein: 6, carbs: 66, fat: 0.8))
+    @Test func libraryFoodsByServingArePerServingTimesServings() {
+        let shake = LibraryFoodDTO(id: "f1", name: "Coach's shake", calories: 200, protein: 4, carbs: 44, fats: 0.5, servingSize: "1", servingUnit: "shake")
+        #expect(FoodSearchLogic.nutrition(shake, servings: 1.5) == .init(calories: 300, protein: 6, carbs: 66, fat: 0.8))
+        // Only per-serving values → counted in servings, nothing else offered.
+        #expect(FoodSearchLogic.defaultUnit(for: shake).0 == .serving)
+        #expect(FoodSearchLogic.units(for: shake) == [.serving])
+    }
+
+    private let usdaRice = LibraryFoodDTO(
+        id: "r1", name: "Rice, white, long-grain, regular, enriched, cooked", category: "Cereal Grains and Pasta", preparationState: "cooked",
+        calories: 205, protein: 4.3, carbs: 44.6, fats: 0.4, servingSize: "1", servingUnit: "1 cup", servingGrams: 158,
+        per100g: .init(calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3), portions: [.init(label: "1 cup", grams: 158)], source: "usda_fdc_sr_legacy"
+    )
+
+    @Test func libraryFoodsWithPer100gTakeGramsAndTheirHouseholdMeasures() {
+        #expect(FoodSearchLogic.defaultUnit(for: usdaRice).0 == .measure(label: "1 cup", grams: 158))
+        #expect(FoodSearchLogic.units(for: usdaRice) == [.grams, .measure(label: "1 cup", grams: 158)])
+        // 250 g of cooked rice from its per-100 g values.
+        #expect(FoodSearchLogic.nutrition(usdaRice.per100g!, grams: 250) == .init(calories: 325, protein: 6.8, carbs: 70.5, fat: 0.8))
+        // 2 cups = 316 g.
+        let cups = FoodSearchLogic.grams(amount: 2, unit: .measure(label: "1 cup", grams: 158))
+        #expect(cups == 316)
+        #expect(FoodSearchLogic.nutrition(usdaRice.per100g!, grams: cups!).calories == 411)
+        #expect(FoodSearchLogic.summary(usdaRice) == "USDA · per 100 g")
+        #expect(FoodSearchLogic.sourceLabel(nil) == "Sombrey")
+    }
+
+    @Test func libraryPagesDecodeAndPaginationSendsAnExplicitNullCursor() throws {
+        let json = #"{"page":[{"id":"r1","name":"Rice, white, cooked","category":"Cereal Grains and Pasta","calories":205,"protein":4.3,"carbs":44.6,"fats":0.4,"servingSize":"1","servingUnit":"1 cup","servingGrams":158,"per100g":{"calories":130,"protein":2.7,"carbs":28.2,"fat":0.3},"portions":[{"label":"1 cup","grams":158}],"source":"usda_fdc_sr_legacy"},{"id":"m1","name":"Coach's shake","calories":300,"protein":30,"carbs":20,"fats":10,"servingSize":"1","servingUnit":"shake","portions":[]}],"isDone":false,"continueCursor":"abc","tooShort":false,"minLength":2}"#
+        let page = try JSONDecoder().decode(LibrarySearchPageDTO.self, from: Data(json.utf8))
+        #expect(page.page.count == 2)
+        #expect(page.page[0].per100g?.calories == 130)
+        #expect(page.page[1].per100g == nil)
+        #expect(page.page[1].source == nil)
+        #expect(!page.isDone)
+        let arg = String(decoding: try JSONEncoder().encode(PaginationOptsArg(numItems: 20, cursor: nil)), as: UTF8.self)
+        #expect(arg.contains("\"cursor\":null"))
+    }
+
+    @Test func librarySearchStates() {
+        let empty = LibrarySearchPageDTO(page: [], isDone: true, continueCursor: "")
+        let some = LibrarySearchPageDTO(page: [usdaRice], isDone: false, continueCursor: "c")
+        #expect(FoodSearchLogic.libraryState(query: "", searched: nil, failed: false, page: nil) == .idle)
+        #expect(FoodSearchLogic.libraryState(query: "r", searched: nil, failed: false, page: nil) == .tooShort)
+        #expect(FoodSearchLogic.libraryState(query: "rice", searched: nil, failed: false, page: nil) == .loading)
+        #expect(FoodSearchLogic.libraryState(query: "rice", searched: "rice", failed: false, page: nil) == .loading)
+        #expect(FoodSearchLogic.libraryState(query: "rice", searched: "rice", failed: true, page: nil) == .failed)
+        #expect(FoodSearchLogic.libraryState(query: "zzqx", searched: "zzqx", failed: false, page: empty) == .empty)
+        #expect(FoodSearchLogic.libraryState(query: "rice", searched: "rice", failed: false, page: some) == .results)
+        // Typed on: the old page isn't this query's.
+        #expect(FoodSearchLogic.libraryState(query: "rice b", searched: "rice", failed: false, page: some) == .loading)
+        #expect(FoodSearchLogic.canShowMore(some, limit: 20))
+        #expect(!FoodSearchLogic.canShowMore(some, limit: FoodSearchLogic.libraryMaxResults))
+        #expect(!FoodSearchLogic.canShowMore(empty, limit: 20))
     }
 
     @Test func invalidQuantitiesCannotBeLoggedOrProduceNaN() {
@@ -85,7 +136,6 @@ struct NutritionSearchTests {
         #expect(r.edamam.first?.per100g.carbs == nil)
         #expect(r.edamam.first?.brand == "Acme")
         #expect(FoodSearchLogic.notice(for: r) == nil)
-        #expect(FoodSearchLogic.edamamNote(for: r) == nil)
     }
 
     @Test func everySearchOutcomeHasItsOwnState() {
@@ -98,11 +148,10 @@ struct NutritionSearchTests {
         #expect(FoodSearchLogic.notice(for: result(edamam: "error")) == .failed)
         #expect(FoodSearchLogic.notice(for: result("unauthenticated", edamam: "skipped")) == .signedOut)
         #expect(FoodSearchLogic.notice(for: result("too_short", edamam: "skipped")) == .tooShort)
-        // Sombrey foods still shown when Edamam is busy — with a note why the rest is missing.
+        // Edamam's own state, whatever the library found.
         let own = SombreyFoodDTO(id: "f", name: "Rice", calories: 1, protein: 0, carbs: 0, fats: 0, servingSize: "1", servingUnit: "cup")
-        let partial = result(edamam: "rate_limited", sombrey: [own])
-        #expect(FoodSearchLogic.notice(for: partial) == nil)
-        #expect(FoodSearchLogic.edamamNote(for: partial) == .rateLimited)
+        #expect(FoodSearchLogic.notice(for: result(edamam: "rate_limited", sombrey: [own])) == .rateLimited)
+        #expect(FoodSearchLogic.Notice.libraryFailed.canRetry)
         // Retry is offered only where it can help — and it's always the user's tap.
         #expect(FoodSearchLogic.Notice.rateLimited.canRetry)
         #expect(FoodSearchLogic.Notice.failed.canRetry)
