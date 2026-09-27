@@ -93,6 +93,7 @@ const itemValidator = v.object({
   matchedFood: v.optional(v.string()),
   preparationMatched: v.optional(v.boolean()),
   preparationAssumed: v.optional(v.boolean()),
+  lookupIssue: v.optional(v.string()),
 });
 
 /** Stores the analysis and deletes the photo — it isn't kept. */

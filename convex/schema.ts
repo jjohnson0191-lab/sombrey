@@ -628,6 +628,8 @@ export default defineSchema({
       matchedFood: v.optional(v.string()),
       preparationMatched: v.optional(v.boolean()),
       preparationAssumed: v.optional(v.boolean()),
+      // Why no nutrition was found: rate_limited | budget | no_safe_match | http_… (never a key).
+      lookupIssue: v.optional(v.string()),
     }))),
     aiError: v.optional(v.string()),
     confirmedAt: v.optional(v.number()),
@@ -1711,4 +1713,13 @@ export default defineSchema({
     goodSleep: v.boolean(),
     wearableStatus: v.boolean(),
   }).index("by_user", ["userId"]),
+
+  // Deployment-wide request budget for a rate-limited provider (one row per
+  // provider) — convex/edamamLimiter.ts. Edamam: 50 hits/min per app.
+  providerRateLimits: defineTable({
+    provider: v.string(),
+    tokens: v.number(),
+    updatedAt: v.number(),
+    cooldownUntil: v.optional(v.number()),
+  }).index("by_provider", ["provider"]),
 });

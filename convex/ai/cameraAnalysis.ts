@@ -15,32 +15,12 @@
  */
 import { action, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
+import type { ActionCtx } from "../_generated/server";
+import { EdamamSession, lookupAll, type AnalyzedFoodItem, type EdamamGate } from "../nutrition/edamamLookup";
 import { v, ConvexError } from "convex/values";
-import {
-  CONFIDENCE_LEVELS, PREPARATION_STATES, chooseCandidate, matchQueries, parseIdentifiedFoods, scaleCandidate,
-  type Candidate, type Confidence, type IdentifiedFood, type MatchChoice, type PreparationState,
-} from "../nutrition/foodMatch";
+import { CONFIDENCE_LEVELS, PREPARATION_STATES, parseIdentifiedFoods, type IdentifiedFood } from "../nutrition/foodMatch";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export type AnalyzedFoodItem = {
-  foodName: string;
-  grams: number;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  edamamMatched: boolean;
-  /** As Gemini saw it (controlled set), and how sure it was. */
-  preparationState: PreparationState;
-  confidence: Confidence;
-  /** The Edamam entry the nutrition came from. */
-  matchedFood?: string;
-  /** That entry's label states the preparation (see nutrition/foodMatch.ts). */
-  preparationMatched: boolean;
-  /** The state was unknown and a staple was matched as cooked. */
-  preparationAssumed: boolean;
-};
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 type AnalyzeResult = {
   success: boolean;
@@ -48,85 +28,13 @@ type AnalyzeResult = {
   error?: string;
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** One Edamam parser query → its candidates (`parsed` first, then hints). */
-async function edamamCandidates(query: string, appId: string, appKey: string): Promise<{ candidates: Candidate[]; failure?: string }> {
-  const url =
-    `https://api.edamam.com/api/food-database/v2/parser` +
-    `?ingr=${encodeURIComponent(query)}` +
-    `&app_id=${appId}&app_key=${appKey}` +
-    `&nutrition-type=cooking`;
-  try {
-    const resp = await fetch(url);
-    // The HTTP status (never the key) is kept so a failing provider is
-    // diagnosable instead of silently reading as "no match".
-    if (!resp.ok) {
-      // Edamam's own reason (credentials never included: the app id is
-      // redacted from the echo, the key isn't in responses).
-      const raw = (await resp.text().catch(() => "")).split(appId).join("[app_id]");
-      let message = "";
-      try { message = String((JSON.parse(raw) as { message?: unknown }).message ?? "").slice(0, 120); } catch { /* HTML error page */ }
-      return { candidates: [], failure: `http_${resp.status}${message ? ` ${message}` : ""}` };
-    }
-    const data = await resp.json() as { parsed?: Array<{ food?: unknown }>; hints?: Array<{ food?: unknown }> };
-    const candidates: Candidate[] = [];
-    for (const entry of [...(data.parsed ?? []), ...(data.hints ?? [])]) {
-      const food = entry.food as { label?: unknown; category?: unknown; nutrients?: Record<string, unknown> } | undefined;
-      const n = food?.nutrients;
-      if (typeof food?.label !== "string" || !n || typeof n.ENERC_KCAL !== "number") continue;
-      candidates.push({
-        label: food.label,
-        category: typeof food.category === "string" ? food.category : undefined,
-        kcal: n.ENERC_KCAL,
-        protein: Number(n.PROCNT ?? 0),
-        carbs: Number(n.CHOCDF ?? 0),
-        fat: Number(n.FAT ?? 0),
-      });
-    }
-    return candidates.length ? { candidates } : { candidates, failure: "no_hints" };
-  } catch {
-    return { candidates: [], failure: "network" };
-  }
-}
-
-/** Nutrition for one identified food, matched on identity AND preparation
- * state (nutrition/foodMatch.ts). Queries run most-specific first and stop
- * at the first entry whose label states the right preparation; an entry
- * that contradicts it is never used — no match beats a wrong one. */
-async function lookupNutrition(food: IdentifiedFood, appId: string, appKey: string): Promise<AnalyzedFoodItem & { failure?: string }> {
-  const plan = matchQueries(food);
-  const pool: Candidate[] = [];
-  const failures: string[] = [];
-  let choice: MatchChoice | null = null;
-  for (const query of plan.queries) {
-    const r = await edamamCandidates(query, appId, appKey);
-    if (r.failure) failures.push(r.failure);
-    if (r.failure?.startsWith("http_") || r.failure === "network") break; // provider down: don't hammer it
-    pool.push(...r.candidates);
-    choice = chooseCandidate(plan.name, plan.state, pool);
-    if (choice && (choice.preparationMatched || plan.state === "unknown")) break;
-  }
-  const base = {
-    foodName: food.foodName,
-    grams: food.grams,
-    preparationState: food.preparationState,
-    confidence: food.confidence,
-    preparationAssumed: plan.assumed,
-  };
-  if (!choice) {
-    return { ...base, calories: 0, protein: 0, carbs: 0, fat: 0, edamamMatched: false, preparationMatched: false, failure: failures[0] ?? "no_safe_match" };
-  }
-  return { ...base, ...scaleCandidate(choice.candidate, food.grams), edamamMatched: true, matchedFood: choice.candidate.label, preparationMatched: choice.preparationMatched };
-}
-
 // ─── Action ───────────────────────────────────────────────────────────────────
 
 /** The analysis itself — shared by the legacy public action and the
  * owner-checked Nutrition flow below. Sends the image to Google Gemini
  * (food identification + gram estimates) and each food NAME to Edamam
  * (nutrition per portion). Nothing else about the user is sent. */
-export async function analyzeImageAtUrl(imageUrl: string, geminiKey: string, edamamAppId: string, edamamAppKey: string): Promise<AnalyzeResult> {
+export async function analyzeImageAtUrl(imageUrl: string, geminiKey: string, edamamAppId: string, edamamAppKey: string, gate: EdamamGate): Promise<AnalyzeResult> {
     // ── 1. Get image from Convex storage ─────────────────────────────────────
 
     const imageResp = await fetch(imageUrl);
@@ -220,18 +128,33 @@ Include ALL visible foods, including sauces, dressings, oils and sides. If you c
       };
     }
 
-    // ── 4. Edamam lookups (parallel across foods) ─────────────────────────────
-    const items = await Promise.all(foodItems.map((item) => lookupNutrition(item, edamamAppId, edamamAppKey)));
+    // ── 4. Edamam lookups (budgeted, deduplicated, rate-limited) ──────────────
+    const session = new EdamamSession(edamamAppId, edamamAppKey, gate);
+    const items = await lookupAll(foodItems, session);
+    console.log(`analyzeImageAtUrl: ${foodItems.length} foods, ${session.budget.hits} Edamam hits`);
 
     // Foods recognised but NO nutrition found for any of them: not an
     // estimate of 0 kcal — an honest failure, with the provider's reason.
     if (!items.some((r) => r.edamamMatched)) {
-      const reasons = [...new Set(items.map((r) => r.failure ?? "unknown"))].join(",");
+      const reasons = [...new Set(items.map((r) => r.lookupIssue ?? "unknown"))].join(",");
       console.log(`analyzeImageAtUrl: nutrition lookup failed for all ${foodItems.length} items (${reasons})`);
       return { success: false, items: [], error: `nutrition_unavailable:${reasons}` };
     }
 
-    return { success: true, items: items.map(({ failure: _f, ...item }) => item) };
+    return { success: true, items };
+}
+
+/** The gate backed by the deployment-wide limiter. */
+function edamamGate(ctx: ActionCtx): EdamamGate {
+  return {
+    acquire: async () => {
+      const r = await ctx.runMutation(internal.edamamLimiter.reserveHit, {});
+      if (!r.ok) return false;
+      if (r.waitMs > 0) await new Promise((res) => setTimeout(res, r.waitMs));
+      return true;
+    },
+    rateLimited: async () => { await ctx.runMutation(internal.edamamLimiter.rateLimited, {}); },
+  };
 }
 
 export const analyzeMealPhoto = action({
@@ -251,7 +174,7 @@ export const analyzeMealPhoto = action({
     }
     const imageUrl = await ctx.storage.getUrl(args.storageId);
     if (!imageUrl) return { success: false, items: [], error: "Image not found in storage." };
-    return analyzeImageAtUrl(imageUrl, geminiKey, edamamAppId, edamamAppKey);
+    return analyzeImageAtUrl(imageUrl, geminiKey, edamamAppId, edamamAppKey, edamamGate(ctx));
   },
 });
 
@@ -274,7 +197,7 @@ export const analyzeMealPhotoLog = internalAction({
       const imageUrl = await ctx.storage.getUrl(row.storageId);
       try {
         result = imageUrl
-          ? await analyzeImageAtUrl(imageUrl, geminiKey, edamamAppId, edamamAppKey)
+          ? await analyzeImageAtUrl(imageUrl, geminiKey, edamamAppId, edamamAppKey, edamamGate(ctx))
           : { success: false, items: [], error: "Image not found." };
       } catch {
         result = { success: false, items: [], error: "Analysis failed." };
@@ -297,6 +220,7 @@ export const analyzeMealPhotoLog = internalAction({
         matchedFood: i.matchedFood?.slice(0, 120),
         preparationMatched: i.preparationMatched,
         preparationAssumed: i.preparationAssumed,
+        lookupIssue: i.lookupIssue,
       })),
     });
   },

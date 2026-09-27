@@ -79,18 +79,22 @@ test("a different dish is never the food", () => {
   assert.equal(pick("egg", "fried", [c("Fried Egg Taco", 170), c("Fried Egg Blt", 253)]), null);
 });
 
-test("queries always carry a known state; unknown staples are matched as cooked and marked assumed", () => {
-  assert.deepEqual(matchQueries({ foodName: "pasta", preparationState: "cooked" }), { name: "pasta", queries: ["cooked pasta", "pasta, cooked", "pasta"], state: "cooked", assumed: false });
-  assert.deepEqual(matchQueries({ foodName: "pasta", preparationState: "boiled" }).queries, ["boiled pasta", "cooked pasta", "pasta, cooked", "pasta"]);
-  assert.deepEqual(matchQueries({ foodName: "oats", preparationState: "dry" }).queries, ["oats", "dry oats", "uncooked oats"]);
+test("at most two queries, a known state always in the first; unknown staples matched as cooked and marked assumed", () => {
+  assert.deepEqual(matchQueries({ foodName: "pasta", preparationState: "cooked" }), { name: "pasta", queries: ["cooked pasta", "pasta, cooked"], state: "cooked", assumed: false });
+  assert.deepEqual(matchQueries({ foodName: "pasta", preparationState: "boiled" }).queries, ["boiled pasta", "cooked pasta"]);
+  assert.deepEqual(matchQueries({ foodName: "oats", preparationState: "dry" }).queries, ["oats", "dry oats"]);
+  assert.deepEqual(matchQueries({ foodName: "broccoli", preparationState: "raw" }).queries, ["broccoli", "raw broccoli"]);
   const u = matchQueries({ foodName: "rice", preparationState: "unknown" });
   assert.equal(u.state, "cooked");
   assert.equal(u.assumed, true);
-  // Unknown non-staple: nothing assumed, nothing forced.
+  // Unknown non-staple: one query, nothing assumed, nothing forced.
   assert.deepEqual(matchQueries({ foodName: "salmon", preparationState: "unknown" }), { name: "salmon", queries: ["salmon"], state: "unknown", assumed: false });
   // State folded into the name is used once, and the specific one wins.
-  assert.deepEqual(matchQueries({ foodName: "fried rice", preparationState: "cooked" }), { name: "rice", queries: ["fried rice", "cooked rice", "rice, cooked", "rice"], state: "fried", assumed: false });
+  assert.deepEqual(matchQueries({ foodName: "fried rice", preparationState: "cooked" }), { name: "rice", queries: ["fried rice", "cooked rice"], state: "fried", assumed: false });
   assert.equal(matchQueries({ foodName: "cooked rice", preparationState: "unknown" }).assumed, false);
+  for (const s of ["raw", "dry", "cooked", "fried", "baked", "grilled", "boiled", "steamed", "roasted", "unknown"] as const) {
+    assert.ok(matchQueries({ foodName: "chicken breast", preparationState: s }).queries.length <= 2, s);
+  }
 });
 
 test("preparation wording is normalised, never guessed", () => {

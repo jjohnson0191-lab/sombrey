@@ -117,9 +117,8 @@ const stateWords = (ws: string[]) => ({
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-/** The Edamam queries for a food, most specific first. A known state is
- * always part of the query; the bare name comes last and only widens the
- * candidate pool (its candidates are still judged by label). */
+/** The Edamam queries for a food, most informative first. A known state is
+ * always part of the query; every candidate returned is judged by label. */
 export function matchQueries(food: Pick<IdentifiedFood, "foodName" | "preparationState">): { name: string; queries: string[]; state: PreparationState; assumed: boolean } {
   const name = food.foodName.trim().toLowerCase();
   // Strip a state word the model folded into the name ("cooked rice"), so
@@ -134,14 +133,15 @@ export function matchQueries(food: Pick<IdentifiedFood, "foodName" | "preparatio
   // A water-absorbing staple of unknown state on a plate is served cooked:
   // matched as cooked and marked as an assumption — never silently dry.
   if (state === "unknown" && isStateSensitiveStaple(bare)) state = "cooked";
+  // At most TWO queries (Edamam: 50 hits/min for the whole app). The first
+  // is the most informative; its whole candidate set is judged by label, and
+  // the second is only made when no entry there states the right state.
   const q: string[] = [];
   if (state === "unknown") q.push(bare);
   else if (state === "raw") q.push(bare, `raw ${bare}`);
-  else if (state === "dry") q.push(bare, `dry ${bare}`, `uncooked ${bare}`);
-  else {
-    if (state !== "cooked") q.push(`${state} ${bare}`);
-    q.push(`cooked ${bare}`, `${bare}, cooked`, bare);
-  }
+  else if (state === "dry") q.push(bare, `dry ${bare}`);
+  else if (state === "cooked") q.push(`cooked ${bare}`, `${bare}, cooked`);
+  else q.push(`${state} ${bare}`, `cooked ${bare}`);
   return { name: bare, queries: [...new Set(q)], state, assumed: food.preparationState === "unknown" && named === undefined && state !== "unknown" };
 }
 
