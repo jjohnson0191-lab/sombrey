@@ -19,9 +19,10 @@ export function validateConfirmedMeal(m: { name: string; calories: number; prote
 }
 
 /** Why an analysis produced no estimate, in the app's terms. */
-export function analysisReason(aiError: string | undefined): "not_configured" | "no_food" | "failed" | undefined {
+export function analysisReason(aiError: string | undefined): "not_configured" | "no_food" | "nutrition_unavailable" | "failed" | undefined {
   if (!aiError) return undefined;
   if (aiError === "not_configured") return "not_configured";
+  if (aiError.startsWith("nutrition_unavailable")) return "nutrition_unavailable";
   if (aiError === "no_food" || aiError.startsWith("No food")) return "no_food";
   return "failed";
 }

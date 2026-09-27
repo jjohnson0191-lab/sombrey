@@ -24,3 +24,7 @@ test("analysis failures are distinguished for the app", () => {
   assert.equal(analysisReason("No food items detected. Try a clearer photo or enter macros manually."), "no_food");
   assert.equal(analysisReason("Vision API error (500): …"), "failed");
 });
+
+test("foods recognised but no nutrition found is its own failure, not a 0 kcal estimate", () => {
+  assert.equal(analysisReason("nutrition_unavailable:http_401"), "nutrition_unavailable");
+});

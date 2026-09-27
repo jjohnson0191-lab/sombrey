@@ -56,7 +56,7 @@ async function lookupEdamam(
   grams: number,
   appId: string,
   appKey: string,
-): Promise<{ calories: number; protein: number; carbs: number; fat: number; matched: boolean }> {
+): Promise<{ calories: number; protein: number; carbs: number; fat: number; matched: boolean; failure?: string }> {
   const query = preparation ? `${preparation} ${foodName}` : foodName;
   const url =
     `https://api.edamam.com/api/food-database/v2/parser` +
@@ -66,11 +66,20 @@ async function lookupEdamam(
 
   try {
     const resp = await fetch(url);
-    if (!resp.ok) return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false };
+    // The HTTP status (never the key) is kept so a failing provider is
+    // diagnosable instead of silently reading as "no match".
+    if (!resp.ok) {
+      // Edamam's own reason (credentials never included: the app id is
+      // redacted from the echo, the key isn't in responses).
+      const raw = (await resp.text().catch(() => "")).split(appId).join("[app_id]");
+      let message = "";
+      try { message = String((JSON.parse(raw) as { message?: unknown }).message ?? "").slice(0, 120); } catch { /* HTML error page */ }
+      return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false, failure: `http_${resp.status}${message ? ` ${message}` : ""}` };
+    }
 
     const data = await resp.json() as Record<string, unknown>;
     const hints = data.hints as Array<Record<string, unknown>> | undefined;
-    if (!hints || hints.length === 0) return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false };
+    if (!hints || hints.length === 0) return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false, failure: "no_hints" };
 
     const food = (hints[0] as Record<string, unknown>).food as Record<string, unknown>;
     const nutrients = food.nutrients as EdamamNutrients | undefined;
@@ -87,7 +96,7 @@ async function lookupEdamam(
     };
   } catch {
     // Edamam lookup failed — caller will display zeros for user to edit
-    return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false };
+    return { calories: 0, protein: 0, carbs: 0, fat: 0, matched: false, failure: "network" };
   }
 }
 
@@ -192,6 +201,14 @@ Rules:
         lookupEdamam(item.foodName, item.preparation, item.grams, edamamAppId, edamamAppKey),
       ),
     );
+
+    // Foods recognised but NO nutrition found for any of them: not an
+    // estimate of 0 kcal — an honest failure, with the provider's reason.
+    if (!nutritionResults.some((r) => r.matched)) {
+      const reasons = [...new Set(nutritionResults.map((r) => r.failure ?? "unknown"))].join(",");
+      console.log(`analyzeImageAtUrl: nutrition lookup failed for all ${foodItems.length} items (${reasons})`);
+      return { success: false, items: [], error: `nutrition_unavailable:${reasons}` };
+    }
 
     const items: AnalyzedFoodItem[] = foodItems.map((item, i) => ({
       foodName: item.foodName,
