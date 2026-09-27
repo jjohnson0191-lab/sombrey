@@ -5,13 +5,12 @@ import ConvexMobile
 /// buried in a chat: it's its own instrument, one key over from the Coach.
 ///
 /// Everything is real: today's intake (`nutritionLogs:getTodayProgress`,
-/// `nutritionLogs:getByDate`), meals the user logs through Sombrey's own
-/// food search (`AddMealView` → `foods:list`), meal times
-/// (`mealSchedules`) and the meal-reminder preference. Targets are shown
-/// only when they're genuinely the user's (`hasRealTargets`) — the
-/// backend's legacy default targets are never presented as theirs.
-/// External food data (e.g. a food database provider) stays behind
-/// Sombrey's own `foods` model and never appears as a destination.
+/// `nutritionLogs:getByDate`), meals the user logs through Search Foods
+/// (`AddMealView` → `foodSearch:search`: Sombrey's own foods plus live
+/// Edamam results via the backend), meal times (`mealSchedules`) and the
+/// meal-reminder preference. Targets are shown only when they're genuinely
+/// the user's (`hasRealTargets`) — the backend's legacy default targets
+/// are never presented as theirs.
 struct NutritionPanel: View {
     @State private var progress = ConvexQuery<NutritionProgress?>()
     @State private var dayLog = ConvexQuery<NutritionDayLog?>()
@@ -100,12 +99,12 @@ struct NutritionPanel: View {
                             Text(entry.foodName)
                                 .font(StudioFont.body(14, weight: .semibold))
                                 .foregroundStyle(StudioColor.ink)
-                            Text("\(entry.mealType.capitalized) · \(Int(entry.servings)) serving(s)")
+                            Text("\(entry.mealType.capitalized) · \(entry.portion ?? FoodSearchLogic.portionLabel(amount: entry.servings, unit: .serving))")
                                 .font(StudioFont.body(11))
                                 .foregroundStyle(StudioColor.inkSoft)
                         }
                         Spacer()
-                        Text("\(Int(entry.calories)) kcal")
+                        Text("\(Int((entry.calories * entry.servings).rounded())) kcal")
                             .font(StudioFont.hero(15, weight: .semibold))
                             .foregroundStyle(StudioColor.ink)
                             .monospacedDigit()

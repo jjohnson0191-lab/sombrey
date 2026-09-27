@@ -267,6 +267,9 @@ test("no consumer-facing string in the iOS app names or hints at the provider", 
     if (/Diagnostics/.test(file)) continue;
     const source = readFileSync(file, "utf8");
     for (const [, literal] of source.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)) {
+      // The one exception: Edamam's attribution badge (Nutrition › Search
+      // Foods), which Edamam's terms require to be shown — and read out.
+      if (literal === "Powered by Edamam") continue;
       if (forbidden.test(literal)) offenders.push(`${file.replace(root, "")}: "${literal}"`);
     }
   }

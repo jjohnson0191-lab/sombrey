@@ -357,7 +357,9 @@ export default defineSchema({
     carbsPer100g: v.optional(v.number()),
     fatsPer100g: v.optional(v.number()),
   }).index("by_creator", ["createdBy"])
-    .index("by_archived", ["isArchived"]),
+    .index("by_archived", ["isArchived"])
+    // Search Foods (convex/foodSearch.ts): Sombrey-owned foods by name.
+    .searchIndex("search_name", { searchField: "name" }),
 
   mealPlans: defineTable({
     userId: v.id("users"),
@@ -390,12 +392,25 @@ export default defineSchema({
     userId: v.id("users"),
     date: v.number(),
     foods: v.array(v.object({
-      foodId: v.id("foods"),
+      // A Sombrey-owned food (nutrition read from `foods`, × servings) —
+      // absent on an external snapshot (convex/nutrition/logEntry.ts).
+      foodId: v.optional(v.id("foods")),
       servings: v.number(),
       mealType: v.string(),
       // Stable per-entry ID for safe removal without relying on array index.
       // Added in batch-2 fix; older log entries may not have this field.
       entryId: v.optional(v.string()),
+      // External snapshot (Search Foods › Edamam): the nutrition the user
+      // confirmed for the whole portion (servings = 1). Only what the log
+      // needs — never the provider's response, never copied into `foods`.
+      name: v.optional(v.string()),
+      portion: v.optional(v.string()),
+      calories: v.optional(v.number()),
+      protein: v.optional(v.number()),
+      carbs: v.optional(v.number()),
+      fats: v.optional(v.number()),
+      source: v.optional(v.literal("edamam")),
+      externalId: v.optional(v.string()),
     })),
     totalCalories: v.number(),
     totalProtein: v.number(),

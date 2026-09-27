@@ -27,10 +27,12 @@ export const WORST_CASE_PER_MINUTE = BUCKET.capacity + BUCKET.refillPerMs * 60_0
 export const MAX_HITS_PER_ANALYSIS = 20;
 
 export type BucketState = { tokens: number; updatedAt: number; cooldownUntil?: number };
+/** A bucket's rules (BUCKET, or a caller's stricter wait — see edamamLimiter.ts). */
+export type BucketRules = { capacity: number; refillPerMs: number; maxWaitMs: number; cooldownMs: number };
 
 /** Reserve one hit. `waitMs` is when it may be made; a reservation that
  * would wait longer than `maxWaitMs` (or falls in a cooldown) isn't taken. */
-export function reserve(state: BucketState | null, now: number, b: typeof BUCKET = BUCKET): { ok: boolean; waitMs: number; next: BucketState } {
+export function reserve(state: BucketState | null, now: number, b: BucketRules = BUCKET): { ok: boolean; waitMs: number; next: BucketState } {
   const prev = state ?? { tokens: b.capacity, updatedAt: now };
   if (prev.cooldownUntil !== undefined && now < prev.cooldownUntil) {
     return { ok: false, waitMs: prev.cooldownUntil - now, next: prev };
@@ -43,7 +45,7 @@ export function reserve(state: BucketState | null, now: number, b: typeof BUCKET
 }
 
 /** Edamam said 429: stop everyone for the cooldown and drain the bucket. */
-export function cooldown(now: number, b: typeof BUCKET = BUCKET): BucketState {
+export function cooldown(now: number, b: BucketRules = BUCKET): BucketState {
   return { tokens: 0, updatedAt: now + b.cooldownMs, cooldownUntil: now + b.cooldownMs };
 }
 

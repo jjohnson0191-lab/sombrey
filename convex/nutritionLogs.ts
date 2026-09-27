@@ -4,6 +4,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { hasRole } from "./lib/roles.js";
+import { MEAL_TYPES, buildExternalSnapshot, entryNutrition, validEntryId, type ExternalSnapshot } from "./nutrition/logEntry";
 
 /**
  * Returns today's nutrition progress: calories/protein consumed vs AI plan targets,
@@ -139,10 +140,21 @@ export const getByDate = query({
       return null;
     }
 
-    // Get food details
+    // Get food details. An external snapshot (Search Foods › Edamam) carries
+    // its own name and nutrition — displayed without asking the provider.
     const foodsWithDetails = await Promise.all(
       log.foods.map(async (f) => {
-        const food = await ctx.db.get(f.foodId);
+        if (f.source !== undefined) {
+          return {
+            ...f,
+            foodName: f.name || "Unknown",
+            protein: f.protein ?? 0,
+            carbs: f.carbs ?? 0,
+            fats: f.fats ?? 0,
+            calories: f.calories ?? 0,
+          };
+        }
+        const food = f.foodId ? await ctx.db.get(f.foodId) : null;
         return {
           ...f,
           foodName: food?.name || "Unknown",
@@ -168,6 +180,9 @@ export const logFood = mutation({
     foodId: v.id("foods"),
     servings: v.number(),
     mealType: v.string(),
+    // Optional idempotency key (the native app sends one per confirmation):
+    // an entry already logged with it isn't logged again.
+    entryId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -208,10 +223,17 @@ export const logFood = mutation({
       });
     }
 
+    if (!Number.isFinite(args.servings) || args.servings <= 0 || args.servings > 100) {
+      throw new ConvexError({ code: "INVALID", message: "Servings must be between 0 and 100." });
+    }
+    if (args.entryId !== undefined && !validEntryId(args.entryId)) {
+      throw new ConvexError({ code: "INVALID", message: "Invalid entry id" });
+    }
+
     // Macros: food.protein/carbs/fats/calories are per-serving values; multiply by
     // the number of servings consumed. (The per-100g fields are used only by the
     // coach meal-plan system which applies its own ×(grams/100) formula.)
-    return appendNutritionEntry(ctx, targetUserId, args.date, food, args.servings, args.mealType);
+    return appendNutritionEntry(ctx, targetUserId, args.date, food, args.servings, args.mealType, args.entryId);
   },
 });
 
@@ -294,14 +316,13 @@ export const removeFood = mutation({
     let totalFats = 0;
 
     for (const entry of newFoods) {
-      const food = await ctx.db.get(entry.foodId);
-      if (food) {
-        totalCalories += food.calories * entry.servings;
-        totalProtein += food.protein * entry.servings;
-        totalCarbs += food.carbs * entry.servings;
-        totalFats += food.fats * entry.servings;
-      }
-      // If the food record was deleted, omit its contribution from totals.
+      // A snapshot counts its own values; a deleted food record adds nothing.
+      const food = entry.foodId ? await ctx.db.get(entry.foodId) : null;
+      const n = entryNutrition(entry, food);
+      totalCalories += n.calories;
+      totalProtein += n.protein;
+      totalCarbs += n.carbs;
+      totalFats += n.fats;
     }
 
     await ctx.db.patch(log._id, {
@@ -316,6 +337,44 @@ export const removeFood = mutation({
 
 
 
+/** Search Foods › an Edamam food the user confirmed: logged as a snapshot
+ * on the day's log (convex/nutrition/logEntry.ts) — never copied into
+ * `foods`. The server scales Edamam's per-100 g values by the grams, so the
+ * logged numbers are consistent. Idempotent on `entryId`. */
+export const logExternalFood = mutation({
+  args: {
+    date: v.number(),
+    mealType: v.string(),
+    entryId: v.string(),
+    name: v.string(),
+    externalId: v.string(),
+    portion: v.string(),
+    grams: v.number(),
+    per100g: v.object({
+      calories: v.number(),
+      protein: v.union(v.number(), v.null()),
+      carbs: v.union(v.number(), v.null()),
+      fat: v.union(v.number(), v.null()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError({ code: "UNAUTHENTICATED", message: "User not logged in" });
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    if (!user) throw new ConvexError({ code: "NOT_FOUND", message: "User not found" });
+    if (!validEntryId(args.entryId)) throw new ConvexError({ code: "INVALID", message: "Invalid entry id" });
+    if (!(MEAL_TYPES as readonly string[]).includes(args.mealType)) throw new ConvexError({ code: "INVALID", message: "Unknown meal" });
+    if (!Number.isFinite(args.date)) throw new ConvexError({ code: "INVALID", message: "Invalid date" });
+    const built = buildExternalSnapshot(args);
+    if ("error" in built) throw new ConvexError({ code: "INVALID", message: built.error });
+    const logId = await appendEntry(ctx, user._id, args.date, args.mealType, args.entryId, { snapshot: built.snapshot });
+    return { logId, calories: built.snapshot.calories, protein: built.snapshot.protein, carbs: built.snapshot.carbs, fats: built.snapshot.fats };
+  },
+});
+
 /** Appends one food to the user's day log (creating the day if needed) and
  * updates the day's totals — the single path every logged food takes
  * (search, and the AI Macro Calculator's confirmed meal). */
@@ -326,34 +385,50 @@ export async function appendNutritionEntry(
   food: Doc<"foods">,
   servings: number,
   mealType: string,
+  entryId?: string,
 ): Promise<Id<"nutritionLogs">> {
-  const protein = food.protein * servings;
-  const carbs = food.carbs * servings;
-  const fats = food.fats * servings;
-  const calories = food.calories * servings;
+  return appendEntry(ctx, userId, date, mealType, entryId, { food, servings });
+}
+
+/** The one append: a Sombrey food × servings, or an external snapshot.
+ * With a caller-supplied `entryId` it's idempotent — an entry already on
+ * the day with that id is not appended again. */
+async function appendEntry(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  date: number,
+  mealType: string,
+  givenEntryId: string | undefined,
+  item: { food: Doc<"foods">; servings: number } | { snapshot: ExternalSnapshot },
+): Promise<Id<"nutritionLogs">> {
   // A stable entry ID so removal does not rely on array position.
-  const entryId = crypto.randomUUID();
+  const entryId = givenEntryId ?? crypto.randomUUID();
+  const entry = "food" in item
+    ? { foodId: item.food._id, servings: item.servings, mealType, entryId }
+    : { ...item.snapshot, servings: 1, mealType, entryId };
+  const n = entryNutrition(entry, "food" in item ? item.food : null);
   const existingLog = await ctx.db
     .query("nutritionLogs")
     .withIndex("by_user_and_date", (q) => q.eq("userId", userId).eq("date", date))
     .first();
   if (existingLog) {
+    if (givenEntryId !== undefined && existingLog.foods.some((f) => f.entryId === givenEntryId)) return existingLog._id;
     await ctx.db.patch(existingLog._id, {
-      foods: [...existingLog.foods, { foodId: food._id, servings, mealType, entryId }],
-      totalProtein: existingLog.totalProtein + protein,
-      totalCarbs: existingLog.totalCarbs + carbs,
-      totalFats: existingLog.totalFats + fats,
-      totalCalories: existingLog.totalCalories + calories,
+      foods: [...existingLog.foods, entry],
+      totalProtein: existingLog.totalProtein + n.protein,
+      totalCarbs: existingLog.totalCarbs + n.carbs,
+      totalFats: existingLog.totalFats + n.fats,
+      totalCalories: existingLog.totalCalories + n.calories,
     });
     return existingLog._id;
   }
   return await ctx.db.insert("nutritionLogs", {
     userId,
     date,
-    foods: [{ foodId: food._id, servings, mealType, entryId }],
-    totalProtein: protein,
-    totalCarbs: carbs,
-    totalFats: fats,
-    totalCalories: calories,
+    foods: [entry],
+    totalProtein: n.protein,
+    totalCarbs: n.carbs,
+    totalFats: n.fats,
+    totalCalories: n.calories,
   });
 }

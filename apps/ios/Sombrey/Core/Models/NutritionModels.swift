@@ -25,10 +25,14 @@ struct NutritionProgress: Decodable {
 }
 
 /// One entry from `getByDate`'s `foodsWithDetails` array — a real logged
-/// food, never client-synthesized.
+/// food, never client-synthesized. Either a Sombrey food (`foodId`, values
+/// per serving) or an external snapshot (`source` "edamam", no `foodId`,
+/// values for the whole `portion`, servings 1).
 struct NutritionEntry: Decodable, Identifiable {
     let entryId: String
-    let foodId: String
+    let foodId: String?
+    var source: String? = nil
+    var portion: String? = nil
     let servings: Double
     let mealType: String
     let foodName: String
