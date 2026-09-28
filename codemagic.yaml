@@ -207,3 +207,93 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  # ── Development / test build of the SAME Sombrey app ─────────────────────
+  # Same app, target, scheme, bundle ID (com.sombrey.app) and signing as
+  # sombrey-native-ios — the only difference is the backend: this build's
+  # Convex deployment is the DEVELOPMENT one (adamant-chicken-676), injected
+  # through the existing Secrets.xcconfig → SOMBREY_CONVEX_URL → Info.plist
+  # (SombreyConvexDeploymentURL) path read by ConvexClientProvider. The app
+  # shows "· DEV adamant-chicken-676" beside its version in Settings.
+  #
+  # Manual start only (no triggering). It never runs Convex CLI commands, so
+  # it can't deploy or touch production data. It uploads to TestFlight for
+  # internal testing — not an App Store release.
+  sombrey-body-scan-5a-dev:
+    name: Sombrey Body Scan 5A Dev (dev backend)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: "Sombrey Codemagic"
+
+    environment:
+      ios_signing:
+        provisioning_profiles:
+          - Sombrey_Native_App_Store
+        certificates:
+          - sombrey_distribution
+      groups:
+        - sombrey_native_ios
+      vars:
+        XCODE_PROJECT: "apps/ios/SombreyApp.xcodeproj"
+        XCODE_SCHEME: "SombreyApp"
+        BUNDLE_ID: "com.sombrey.app"
+        # The development deployment. xcconfig treats "//" as a comment, so
+        # it's written as https:/$()/… below.
+        DEV_CONVEX_HOST: "adamant-chicken-676.convex.cloud"
+      xcode: latest
+
+    scripts:
+      - name: Toolchain (Xcode / Swift versions)
+        script: |
+          xcodebuild -version
+          swift --version
+
+      - name: Write Secrets.xcconfig (Clerk key + DEVELOPMENT Convex URL)
+        script: |
+          {
+            echo "CLERK_PUBLISHABLE_KEY = $CLERK_PUBLISHABLE_KEY"
+            echo "SOMBREY_CONVEX_URL = https:/\$()/$DEV_CONVEX_HOST"
+          } > apps/ios/Secrets.xcconfig
+          grep -c "^CLERK_PUBLISHABLE_KEY = " apps/ios/Secrets.xcconfig
+          grep "^SOMBREY_CONVEX_URL" apps/ios/Secrets.xcconfig
+
+      - name: Resolve Swift package dependencies
+        script: |
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
+
+      - name: Set up iOS code signing
+        script: |
+          xcode-project use-profiles --project "$XCODE_PROJECT"
+
+      - name: Confirm the build setting resolves to the dev deployment
+        script: |
+          xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -configuration Release \
+            | grep -E "SOMBREY_CONVEX_URL|PRODUCT_BUNDLE_IDENTIFIER|CURRENT_PROJECT_VERSION|SWIFT_VERSION"
+
+      - name: Build the .ipa
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+      - name: Verify the compiled app targets the DEVELOPMENT backend (fails otherwise)
+        script: |
+          IPA=$(ls build/ios/ipa/*.ipa | head -1)
+          unzip -p "$IPA" 'Payload/*.app/Info.plist' > /tmp/SombreyInfo.plist
+          URL=$(/usr/libexec/PlistBuddy -c "Print :SombreyConvexDeploymentURL" /tmp/SombreyInfo.plist)
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" /tmp/SombreyInfo.plist)
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" /tmp/SombreyInfo.plist)
+          echo "Compiled app: $VERSION ($BUILD) → Convex $URL"
+          test "$URL" = "https://$DEV_CONVEX_HOST"
+          echo "DEV BUILD — Sombrey Body Scan 5A validation. Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

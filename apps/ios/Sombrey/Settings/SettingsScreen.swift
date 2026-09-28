@@ -440,12 +440,17 @@ private struct SettingsPlaceholderPage: View {
     }
 }
 
-/// The installed app's version and build, e.g. "1.0 (29)".
+/// The installed app's version and build, e.g. "1.0 (29)". A build that
+/// talks to a non-production backend says so ("· DEV <deployment>"), so a
+/// test build can never be mistaken for the released app.
 enum AppVersion {
     static var text: String {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
-        return "\(version) (\(build))"
+        let base = "\(version) (\(build))"
+        guard ConvexClientProvider.deploymentUrl != ConvexClientProvider.productionUrl else { return base }
+        let host = URL(string: ConvexClientProvider.deploymentUrl)?.host?.replacingOccurrences(of: ".convex.cloud", with: "") ?? "?"
+        return "\(base) · DEV \(host)"
     }
 }

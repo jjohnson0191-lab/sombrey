@@ -60,5 +60,8 @@ weight is appended to the weight history (`measurements`, source manual); every 
 snapshot, so later edits never rewrite earlier scans.
 
 ## Dev builds
-`SOMBREY_CONVEX_URL` (build setting → Info.plist `SombreyConvexDeploymentURL`) points a build at a
-non-production Convex deployment; empty/invalid = production.
+`SOMBREY_CONVEX_URL` (set in `apps/ios/Secrets.xcconfig` → Info.plist `SombreyConvexDeploymentURL`)
+points a build at a non-production Convex deployment; unset/empty/invalid = production. The Codemagic
+workflow `sombrey-body-scan-5a-dev` (manual start) builds the same app against the development
+deployment, verifies the compiled Info.plist, and uploads to TestFlight for internal testing. Such a
+build shows "· DEV <deployment>" beside its version in Settings › About Sombrey.
