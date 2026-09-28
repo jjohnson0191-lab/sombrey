@@ -661,22 +661,22 @@ struct BodyDetailsForm: View {
     }
 
     private func save() {
-        var args: [String: ConvexEncodable?] = [:]
+        var update = BodyProfileUpdate()
         if missing.contains("height") {
             guard let h = BodyDetailsInput.number(height), (100...250).contains(h) else { problem = "Enter a height between 100 and 250 cm."; return }
-            args["heightCm"] = h
+            update.heightCm = h
         }
         if missing.contains("weight") {
             guard let w = BodyDetailsInput.number(weight), (20...400).contains(w) else { problem = "Enter a weight between 20 and 400 kg."; return }
-            args["weightKg"] = w
+            update.weightKg = w
         }
-        if missing.contains("sex") { args["sex"] = sex }
-        if missing.contains("age") { args["dateOfBirth"] = BodyDetailsInput.isoDate(birthDate) }
+        if missing.contains("sex") { update.sex = sex }
+        if missing.contains("age") { update.dateOfBirth = BodyDetailsInput.isoDate(birthDate) }
         saving = true
         problem = nil
         Task {
             do {
-                try await ConvexClientProvider.client.mutation("bodyScans:updateProfile", with: args)
+                try await update.send()
                 saving = false
                 onSaved()
             } catch {
@@ -684,6 +684,28 @@ struct BodyDetailsForm: View {
                 problem = "Couldn't save your details. Check your connection and try again."
             }
         }
+    }
+}
+
+/// A validated profile change (plain Sendable values). The Convex argument
+/// dictionary is built inside `send()` — it isn't Sendable, so it must not
+/// cross into a Task from outside (Swift 6 strict concurrency).
+struct BodyProfileUpdate: Sendable, Equatable {
+    var heightCm: Double?
+    var weightKg: Double?
+    var sex: String?
+    var dateOfBirth: String?
+
+    var isEmpty: Bool { heightCm == nil && weightKg == nil && sex == nil && dateOfBirth == nil }
+
+    @MainActor
+    func send() async throws {
+        var args: [String: ConvexEncodable?] = [:]
+        if let heightCm { args["heightCm"] = heightCm }
+        if let weightKg { args["weightKg"] = weightKg }
+        if let sex { args["sex"] = sex }
+        if let dateOfBirth { args["dateOfBirth"] = dateOfBirth }
+        try await ConvexClientProvider.client.mutation("bodyScans:updateProfile", with: args)
     }
 }
 

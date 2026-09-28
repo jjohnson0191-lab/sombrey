@@ -124,23 +124,23 @@ struct BodyDetailsEditor: View {
 
     /// Sends only what changed.
     private func save() {
-        var args: [String: ConvexEncodable?] = [:]
+        var update = BodyProfileUpdate()
         if !height.isEmpty {
             guard let h = BodyDetailsInput.number(height), (100...250).contains(h) else { problem = "Enter a height between 100 and 250 cm."; return }
-            if h != context?.heightCm { args["heightCm"] = h }
+            if h != context?.heightCm { update.heightCm = h }
         }
         if !weight.isEmpty {
             guard let w = BodyDetailsInput.number(weight), (20...400).contains(w) else { problem = "Enter a weight between 20 and 400 kg."; return }
-            if w != context?.weightKg { args["weightKg"] = w }
+            if w != context?.weightKg { update.weightKg = w }
         }
-        if sex != context?.sex { args["sex"] = sex }
-        if setBirthDate { args["dateOfBirth"] = BodyDetailsInput.isoDate(birthDate) }
-        guard !args.isEmpty else { onDone(); return }
+        if sex != context?.sex { update.sex = sex }
+        if setBirthDate { update.dateOfBirth = BodyDetailsInput.isoDate(birthDate) }
+        guard !update.isEmpty else { onDone(); return }
         saving = true
         problem = nil
         Task {
             do {
-                try await ConvexClientProvider.client.mutation("bodyScans:updateProfile", with: args)
+                try await update.send()
                 saving = false
                 onDone()
             } catch {
