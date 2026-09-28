@@ -1,4 +1,5 @@
 import SwiftUI
+import ConvexMobile
 
 /// Settings › Profile › Body details — height, weight, sex, date of birth.
 /// The same values the Body Scan asks for once (bodyScans:profile /

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ConvexMobile
 
 // Sombrey Body Scan — Phase 5A: the guided, private capture.
 //
