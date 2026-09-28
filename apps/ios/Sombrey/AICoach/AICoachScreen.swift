@@ -18,7 +18,7 @@ struct SombreyScreen: View {
     /// While the keyboard is up the tab bar is hidden behind it, so the
     /// room the container keeps for the bar is given back to the chamber.
     @State private var keyboardShown = false
-    @State private var photos = ConvexQuery<[ProgressPhotoDTO]>()
+    @State private var scans = ConvexQuery<[BodyScanDTO]>()
     @State private var showingBodyScan = false
     @State private var bodyScanResults = false
 
@@ -62,20 +62,20 @@ struct SombreyScreen: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
-        .task { photos.subscribe(to: "progressPhotos:list") }
+        .task { scans.subscribe(to: "bodyScans:list") }
         .fullScreenCover(isPresented: $showingBodyScan) {
             BodyScanFlow(startWithResults: bodyScanResults)
         }
     }
 
     private var coach: some View {
-        let scans = BodyScan.group(photos.value ?? [])
+        let scans = self.scans.value ?? []
         return VStack(spacing: 12) {
             SombreyConversationSurface(conversation: appState.coach)
                 .frame(maxHeight: .infinity)
             if !keyboardShown {
                 BodyScanEntry(scans: scans) {
-                    bodyScanResults = !scans.isEmpty
+                    bodyScanResults = scans.contains { $0.status == "complete" }
                     showingBodyScan = true
                 }
                 .transition(.opacity)

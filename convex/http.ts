@@ -110,5 +110,37 @@ http.route({
   }),
 });
 
+/**
+ * Body Scan images — the ONLY way a body-scan image leaves storage.
+ *
+ *   GET /body-scan-image?scanId=<uuid>&view=front|side|back
+ *   Authorization: Bearer <the app's Clerk "convex" JWT>
+ *
+ * The caller must be signed in, and the scan must be theirs — checked on
+ * every request (convex/bodyScans.ts: imageForOwner). No storage URL is
+ * ever minted for these images, so there's no bearer link to leak. A scan
+ * that doesn't exist and another user's scan get the same 404. Responses
+ * are never cached by intermediaries or on disk.
+ */
+http.route({
+  path: "/body-scan-image",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const noStore = { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" };
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return new Response("Unauthorized", { status: 401, headers: noStore });
+    const url = new URL(request.url);
+    const storageId = await ctx.runQuery(internal.bodyScans.imageForOwner, {
+      tokenIdentifier: identity.tokenIdentifier,
+      scanId: url.searchParams.get("scanId") ?? "",
+      view: url.searchParams.get("view") ?? "",
+    });
+    if (!storageId) return new Response("Not found", { status: 404, headers: noStore });
+    const blob = await ctx.storage.get(storageId);
+    if (!blob) return new Response("Not found", { status: 404, headers: noStore });
+    return new Response(blob, { status: 200, headers: { ...noStore, "Content-Type": "image/jpeg" } });
+  }),
+});
+
 // REQUIRED: must be the default export
 export default http;

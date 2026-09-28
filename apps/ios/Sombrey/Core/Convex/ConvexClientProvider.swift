@@ -24,7 +24,28 @@ enum ConvexClientProvider {
     /// against both deployments' `CLERK_FRONTEND_API_URL` and the app's
     /// own Clerk publishable key), so this points the native app at the
     /// production deployment its own functions actually live on.
-    static let deploymentUrl = "https://vibrant-malamute-973.convex.cloud"
+    static let productionUrl = "https://vibrant-malamute-973.convex.cloud"
+
+    /// The deployment this build talks to: production unless the build sets
+    /// `SOMBREY_CONVEX_URL` (Info.plist `SombreyConvexDeploymentURL`) to
+    /// another Convex deployment — e.g. a dev build for physical testing of
+    /// unreleased backend work. Anything that isn't an https *.convex.cloud
+    /// URL is ignored, so a misconfigured build still reaches production.
+    static let deploymentUrl: String = resolveDeploymentUrl(Bundle.main.object(forInfoDictionaryKey: "SombreyConvexDeploymentURL") as? String)
+
+    nonisolated static func resolveDeploymentUrl(_ configured: String?) -> String {
+        guard let s = configured?.trimmingCharacters(in: .whitespaces), let url = URL(string: s),
+              url.scheme == "https", let host = url.host, host.hasSuffix(".convex.cloud"), url.path.isEmpty || url.path == "/" else {
+            return productionUrl
+        }
+        return "https://\(host)"
+    }
+
+    /// The same deployment's HTTP-actions host (`*.convex.site`) — used for
+    /// the authenticated Body Scan image endpoint.
+    static var siteUrl: URL {
+        URL(string: deploymentUrl.replacingOccurrences(of: ".convex.cloud", with: ".convex.site"))!
+    }
 
     /// `@MainActor`: needed for the global `static let` itself under
     /// Swift 6's strict concurrency checking (see the `Sendable`
@@ -100,6 +121,13 @@ final class ClerkConvexAuthProvider: AuthProvider {
 
     func extractIdToken(from authResult: String) -> String {
         authResult
+    }
+
+    /// The signed-in user's Convex token, for the few requests that go to
+    /// Sombrey's own HTTP endpoints instead of the Convex client (the Body
+    /// Scan image endpoint checks it on every request). Never logged.
+    static func convexToken() async throws -> String {
+        try await ClerkConvexAuthProvider().currentToken()
     }
 
     /// Non-optional, throwing: no session or no token is a genuine

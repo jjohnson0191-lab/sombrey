@@ -75,6 +75,12 @@ export default defineSchema({
     // decides it. See convex/strain/time.ts.
     timeZone: v.optional(v.string()),
     timeZoneUpdatedAt: v.optional(v.number()),
+    // Profile sex (Body Scan context, nutrition, coaching). The web
+    // questionnaire's premiumOnboarding.sex is read when this is unset.
+    sex: v.optional(v.union(v.literal("male"), v.literal("female"), v.literal("other"))),
+    // Body Scan consent: which version of the explanation the user accepted.
+    bodyScanConsentVersion: v.optional(v.string()),
+    bodyScanConsentAt: v.optional(v.number()),
   }).index("by_token", ["tokenIdentifier"])
     .index("by_coach", ["coachId"])
     .index("by_payment_status", ["paymentStatus"]),
@@ -471,6 +477,64 @@ export default defineSchema({
     scanId: v.optional(v.string()),
   }).index("by_user", ["userId"])
     .index("by_user_and_date", ["userId", "date"]),
+
+  // ── Sombrey Body Scan (Phase 5A: capture foundation) ────────────────────
+  // One row per scan — a private, longitudinal record. Scans are never
+  // overwritten: each new scan is its own row. See convex/bodyScans.ts and
+  // convex/bodyScan/rules.ts. No measurement is stored in 5A.
+  bodyScans: defineTable({
+    userId: v.id("users"),
+    scanId: v.string(),                    // client UUID — idempotency key
+    status: v.union(v.literal("capturing"), v.literal("complete")),
+    protocolVersion: v.string(),           // capture protocol (views, pose, camera)
+    consentVersion: v.string(),            // consent text the user accepted
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+    capture: v.object({
+      deviceModel: v.string(),
+      osVersion: v.string(),
+      appVersion: v.string(),
+      camera: v.literal("front"),
+      imageMaxPixel: v.number(),
+      jpegQuality: v.number(),
+    }),
+    // The user's own recorded context when the scan was taken (profile,
+    // weight log) — a snapshot, never rewritten by later profile edits.
+    context: v.object({
+      heightCm: v.optional(v.number()),
+      weightKg: v.optional(v.number()),
+      weightSource: v.optional(v.string()),
+      weightRecordedAt: v.optional(v.number()),
+      sex: v.optional(v.union(v.literal("male"), v.literal("female"), v.literal("other"))),
+      ageYears: v.optional(v.number()),
+    }),
+    // Reserved for Phase 5B+: which model processed the scan, when. Model
+    // outputs (with ranges, confidence and provenance) attach here later.
+    analysis: v.optional(v.object({
+      modelVersion: v.string(),
+      processedAt: v.number(),
+    })),
+  }).index("by_user_and_scanId", ["userId", "scanId"])
+    .index("by_user_and_created", ["userId", "createdAt"]),
+
+  // One row per captured view. A retake replaces the row (and deletes the
+  // old image). The storage id never leaves the server: images are served
+  // only through the authenticated /body-scan-image endpoint (convex/http.ts).
+  bodyScanImages: defineTable({
+    userId: v.id("users"),
+    scanDocId: v.id("bodyScans"),
+    view: v.union(v.literal("front"), v.literal("side"), v.literal("back")),
+    storageId: v.id("_storage"),
+    width: v.number(),
+    height: v.number(),
+    bytes: v.number(),
+    qualityScore: v.number(),              // 0–1, from the on-device gates
+    issues: v.array(v.string()),           // closed set (rules.QUALITY_ISSUES)
+    capturedAt: v.number(),
+    createdAt: v.number(),
+  }).index("by_scan_and_view", ["scanDocId", "view"])
+    .index("by_storage", ["storageId"])
+    .index("by_user", ["userId"]),
 
   measurements: defineTable({
     userId: v.id("users"),

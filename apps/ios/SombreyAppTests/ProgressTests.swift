@@ -310,19 +310,6 @@ struct SombreyToolsTests {
         #expect(dto.status == "done" && dto.items.count == 1 && dto.reason == nil)
     }
 
-    @Test func bodyScansGroupByScanAndIgnorePlainProgressPhotos() {
-        let photos = [
-            ProgressPhotoDTO(id: "1", date: 2_000, view: "side", scanId: "b", url: nil),
-            ProgressPhotoDTO(id: "2", date: 2_000, view: "front", scanId: "b", url: nil),
-            ProgressPhotoDTO(id: "3", date: 1_000, view: "front", scanId: "a", url: nil),
-            ProgressPhotoDTO(id: "4", date: 3_000, view: "front", scanId: nil, url: nil),   // an ordinary progress photo
-        ]
-        let scans = BodyScan.group(photos)
-        #expect(scans.map(\.id) == ["b", "a"])
-        #expect(scans[0].photos.map(\.view) == ["front", "side"])
-        #expect(scans[0].photo("back") == nil)
-    }
-
     @Test @MainActor func sombreyModesUseTheSameKeysAsTrain() {
         // Both are the one shared control; only the options differ.
         let coach = StudioModePills(options: [StudioModeOption(value: AppState.AISection.coach, label: "COACH", accessibilityLabel: "Sombrey Coach")], selection: .constant(.coach))

@@ -41,6 +41,7 @@ struct SettingsScreen: View {
 
                 settingsGroup("PROFILE") {
                     ProfileSection()
+                    BodyDetailsSection()
                 }
 
                 settingsGroup("ACCOUNT") {
