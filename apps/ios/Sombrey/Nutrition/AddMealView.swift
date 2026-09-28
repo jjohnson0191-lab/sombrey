@@ -8,7 +8,9 @@ import ConvexMobile
 /// FoodData Central, plus foods created in Sombrey), relevance-ranked and
 /// paginated on the server; no provider is called and the phone only ever
 /// holds the page it shows. Edamam's live database is a separate, explicit
-/// step ("Search Edamam") through `foodSearch:search` — never on its own.
+/// step ("Search additional foods") through `foodSearch:search` — never on
+/// its own, and never presented as part of the Sombrey library: its results
+/// sit under their own heading with the provider's required attribution.
 ///
 /// The user picks a food, sets the portion (grams, a household measure, or
 /// servings), sees what it adds, and logs it only when they tap Log food: a
@@ -191,10 +193,11 @@ struct AddMealView: View {
                         .foregroundStyle(StudioColor.inkFaint)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if page.page.contains(where: { $0.source?.hasPrefix("usda_fdc") == true }) {
-                    Text("Library data includes USDA FoodData Central.")
+                if let credit = FoodSearchLogic.libraryCredit(page.page.map(\.source)) {
+                    Text(credit)
                         .font(StudioFont.body(11))
                         .foregroundStyle(StudioColor.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -209,13 +212,17 @@ struct AddMealView: View {
                 if let n = FoodSearchLogic.notice(for: r) {
                     notice(n, retry: { searchEdamam(q) })
                 } else {
-                    section("EDAMAM FOOD DATABASE", r.edamam.map(FoodChoice.edamam))
+                    section("ADDITIONAL FOODS", r.edamam.map(FoodChoice.edamam))
+                    Text("From an external food database — not part of the Sombrey library. Check a result before you log it.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
                     EdamamAttribution()
                 }
             } else if edamamLoading {
                 HStack(spacing: 10) {
                     ProgressView().tint(StudioColor.inkSoft)
-                    Text("Searching Edamam…")
+                    Text("Searching additional foods…")
                         .font(StudioFont.body(13))
                         .foregroundStyle(StudioColor.inkSoft)
                 }
@@ -223,11 +230,18 @@ struct AddMealView: View {
             } else if edamamFailed {
                 notice(.failed, retry: { searchEdamam(q) })
             } else {
-                Button { searchEdamam(q) } label: {
-                    Text("Search Edamam for “\(q)”").frame(maxWidth: .infinity)
+                VStack(spacing: 6) {
+                    Button { searchEdamam(q) } label: {
+                        Text("Search additional foods").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.outlineCTA)
+                    .accessibilityHint("Searches an external food database for “\(q)”, beyond the Sombrey library")
+                    .accessibilityIdentifier("foodSearch.edamam")
+                    Text("Looks beyond the Sombrey library in an external food database.")
+                        .font(StudioFont.body(11))
+                        .foregroundStyle(StudioColor.inkFaint)
+                        .multilineTextAlignment(.center)
                 }
-                .buttonStyle(.outlineCTA)
-                .accessibilityIdentifier("foodSearch.edamam")
             }
         }
     }
@@ -362,6 +376,7 @@ struct FoodSearchRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .center, spacing: 12) {
+                FoodThumbnail(imageURL: imageURL, glyph: FoodSearchLogic.fallbackGlyph(name: choice.name, category: category))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(choice.name)
                         .font(StudioFont.body(15, weight: .medium))
@@ -402,6 +417,18 @@ struct FoodSearchRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(choice.name), \(detail), \(Int(kcal.rounded())) calories")
         .accessibilityHint("Opens this food to choose a portion")
+    }
+
+    private var imageURL: URL? {
+        if case .library(let f) = choice, let s = f.image?.url { return URL(string: s) }
+        return nil
+    }
+
+    private var category: String? {
+        switch choice {
+        case .library(let f): return f.category
+        case .edamam(let f): return f.category
+        }
     }
 
     private var kcal: Double {
@@ -705,7 +732,7 @@ struct FoodPortionView: View {
 
     private var source: String {
         if case .library = choice { return "Sombrey food library" }
-        return "Edamam food database"
+        return "Additional food"
     }
 
     private var basisNote: String {
@@ -831,5 +858,44 @@ struct EdamamAttribution: View {
             .padding(.top, 2)
             .accessibilityLabel("Powered by Edamam")
             .accessibilityIdentifier("foodSearch.edamamAttribution")
+    }
+}
+
+// MARK: - Food image
+
+/// A food's picture in the result list: its licensed image when it has one,
+/// otherwise — and whenever the image can't load — Sombrey's own quiet
+/// treatment: a glass tile with a glyph for the kind of food. Never a broken
+/// image, never a stock photo standing in for the actual food.
+struct FoodThumbnail: View {
+    let imageURL: URL?
+    let glyph: String
+    var size: CGFloat = 44
+
+    var body: some View {
+        ZStack {
+            fallback
+            if let imageURL {
+                AsyncImage(url: imageURL, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    }
+                    // .empty / .failure: the fallback underneath stays visible.
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.7), lineWidth: 1) }
+        .accessibilityHidden(true)
+    }
+
+    private var fallback: some View {
+        ZStack {
+            LinearGradient(colors: [Color.white.opacity(0.62), Color.white.opacity(0.3)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: glyph)
+                .font(.system(size: size * 0.4, weight: .regular))
+                .foregroundStyle(StudioColor.nutrition.opacity(0.85))
+        }
     }
 }

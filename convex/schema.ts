@@ -377,6 +377,24 @@ export default defineSchema({
     sourceHash: v.optional(v.string()),
     // Questionable-but-kept values, for review (e.g. energy_macro_mismatch).
     qualityFlags: v.optional(v.array(v.string())),
+    // The record's own page at its source, when it has one.
+    sourceUrl: v.optional(v.string()),
+    // Normalisation rules it was written with (absent = the first import).
+    importVersion: v.optional(v.number()),
+    // Other names the SOURCE gives this food (searchable via searchName).
+    aliases: v.optional(v.array(v.string())),
+    // Other approved sources holding the same food (their duplicates weren't
+    // stored; this record's values come from the higher-priority source).
+    alsoIn: v.optional(v.array(v.object({ source: v.string(), sourceId: v.string() }))),
+    // A licensed image: dataset-provided, licensed external, or Sombrey-owned.
+    // Never shown without its licence; the app falls back when it can't load.
+    image: v.optional(v.object({
+      url: v.string(),
+      source: v.union(v.literal("dataset"), v.literal("licensed"), v.literal("sombrey")),
+      license: v.string(),
+      attribution: v.optional(v.string()),
+      sourceUrl: v.optional(v.string()),
+    })),
   }).index("by_creator", ["createdBy"])
     .index("by_archived", ["isArchived"])
     // Idempotent imports; also "foods created in Sombrey" (source undefined).

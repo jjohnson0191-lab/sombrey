@@ -2,6 +2,7 @@
 // what text is searched. Pure — tested in tests/nutrition/foodLibrary.test.ts.
 
 import { searchNameOf } from "./foodLibrary.ts";
+import { queryVariants } from "./foodSynonyms.ts";
 
 export const LIBRARY_SEARCH_MIN_LENGTH = 2;
 /** Convex full-text search reads at most 16 terms. */
@@ -44,7 +45,8 @@ const sameWord = (a: string, b: string) => a === b || a + "s" === b || b + "s" =
  * words (the index matches whole words, the last one as a prefix). Ranking
  * still uses the query itself. */
 export function indexTerm(term: string): string {
-  const words = term.split(" ").filter(Boolean);
+  // Every name of the searched food (foodSynonyms.ts), then singulars.
+  const words = [...new Set(queryVariants(term).flatMap((v) => v.split(" ")).filter(Boolean))];
   const extra: string[] = [];
   for (const w of words) {
     if (w.length > 3 && w.endsWith("es")) extra.push(w.slice(0, -2), w.slice(0, -1));
@@ -53,7 +55,7 @@ export function indexTerm(term: string): string {
   return [...words, ...extra.filter((w) => !words.includes(w))].slice(0, 16).join(" ");
 }
 
-export type RankableFood = { name: string; category?: string; source?: string };
+export type RankableFood = { name: string; category?: string; source?: string; aliases?: string[] };
 
 function leadWords(name: string): string[] {
   const parts = name.split(",").map((p) => searchNameOf(p)).filter(Boolean);
@@ -61,7 +63,18 @@ function leadWords(name: string): string[] {
   return lead.split(" ").filter(Boolean);
 }
 
+/** The best score over every name of the searched food (foodSynonyms.ts)
+ * and every name the food itself carries (its dataset's aliases). */
 export function rankScore(term: string, food: RankableFood): number {
+  const names = [food.name, ...(food.aliases ?? [])];
+  let best = -Infinity;
+  for (const variant of queryVariants(term)) {
+    for (const name of names) best = Math.max(best, scoreOne(variant, { ...food, name }));
+  }
+  return best === -Infinity ? 0 : best;
+}
+
+function scoreOne(term: string, food: RankableFood): number {
   const words = term.split(" ").filter(Boolean);
   if (!words.length) return 0;
   const lead = leadWords(food.name);

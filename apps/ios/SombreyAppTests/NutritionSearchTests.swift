@@ -66,8 +66,21 @@ struct NutritionSearchTests {
         let cups = FoodSearchLogic.grams(amount: 2, unit: .measure(label: "1 cup", grams: 158))
         #expect(cups == 316)
         #expect(FoodSearchLogic.nutrition(usdaRice.per100g!, grams: cups!).calories == 411)
-        #expect(FoodSearchLogic.summary(usdaRice) == "USDA · per 100 g")
+        #expect(FoodSearchLogic.summary(usdaRice) == "USDA · per 100 g · cooked")
         #expect(FoodSearchLogic.sourceLabel(nil) == "Sombrey")
+        #expect(FoodSearchLogic.sourceLabel("uk_cofid") == "UK")
+    }
+
+    @Test func fallbackPicturesAndCreditsNeverNeedAnImage() {
+        #expect(FoodSearchLogic.fallbackGlyph(name: "Fish, salmon, raw", category: "Finfish and Shellfish Products") == "fish")
+        #expect(FoodSearchLogic.fallbackGlyph(name: "Lentils, boiled", category: nil) == "basket")
+        #expect(FoodSearchLogic.fallbackGlyph(name: "Something unusual", category: nil) == "fork.knife")
+        #expect(FoodSearchLogic.libraryCredit([nil]) == nil)
+        #expect(FoodSearchLogic.libraryCredit(["usda_fdc_sr_legacy"]) == "Library data: USDA FoodData Central.")
+        #expect(FoodSearchLogic.libraryCredit(["uk_cofid"])?.contains("Open Government Licence v3.0") == true)
+        let json = #"{"id":"x","name":"Rice","calories":1,"protein":0,"carbs":0,"fats":0,"servingSize":"1","servingUnit":"g","image":{"url":"https://img.example/r.webp","license":"CC BY 4.0","attribution":"A. Photographer"}}"#
+        let food = try? JSONDecoder().decode(LibraryFoodDTO.self, from: Data(json.utf8))
+        #expect(food?.image?.license == "CC BY 4.0")
     }
 
     @Test func libraryPagesDecodeAndPaginationSendsAnExplicitNullCursor() throws {

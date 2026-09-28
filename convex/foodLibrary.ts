@@ -82,3 +82,28 @@ export const stats = internalQuery({
     return { count: page.page.length, flagged, done: page.isDone, cursor: page.continueCursor, known: args.source in LIBRARY_SOURCES };
   },
 });
+
+/** Records this import dropped as duplicates of a higher-priority source's
+ * record: if an earlier run stored them, they're archived (not deleted —
+ * entries already logged keep their snapshot) so search shows the food once.
+ * A later run that keeps one again restores it (upsertAction). */
+export const archiveDuplicates = internalMutation({
+  args: { records: v.array(v.object({ source: v.string(), sourceId: v.string(), keptAs: v.string() })), dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    if (args.records.length > MAX_BATCH) throw new Error(`Batch too large (${args.records.length} > ${MAX_BATCH})`);
+    let archived = 0;
+    for (const r of args.records) {
+      const existing = await ctx.db
+        .query("foods")
+        .withIndex("by_source_and_sourceId", (q) => q.eq("source", r.source).eq("sourceId", r.sourceId))
+        .unique();
+      if (!existing || existing.isArchived) continue;
+      archived++;
+      if (args.dryRun) continue;
+      const flags = new Set(existing.qualityFlags ?? []);
+      flags.add("superseded_duplicate");
+      await ctx.db.patch(existing._id, { isArchived: true, qualityFlags: [...flags], lastModifiedAt: new Date().toISOString() });
+    }
+    return { archived };
+  },
+});

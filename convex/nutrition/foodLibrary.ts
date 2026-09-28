@@ -19,12 +19,46 @@ import type { PreparationState } from "./foodMatch.ts";
 
 // ─── Sources ──────────────────────────────────────────────────────────────────
 
-/** Approved datasets. Adding one (e.g. a Sri Lankan food composition table)
- * = an adapter that yields LibraryCandidates + an entry here. */
+/** Datasets Sombrey is licensed to STORE. Adding one (e.g. a Sri Lankan food
+ * composition table, once its owners grant permission) = an adapter that
+ * yields LibraryCandidates + an entry here with its licence and the
+ * attribution it requires. `priority` decides which record is kept when two
+ * sources hold the same food (lower wins): the most reliable analysis first.
+ * A dataset whose licence isn't cleared is not listed — the importer and the
+ * server refuse any source not here. */
 export const LIBRARY_SOURCES = {
-  usda_fdc_foundation: { label: "USDA FoodData Central — Foundation Foods", license: "CC0 1.0 (public domain)", priority: 1 },
-  usda_fdc_sr_legacy: { label: "USDA FoodData Central — SR Legacy", license: "CC0 1.0 (public domain)", priority: 2 },
+  usda_fdc_foundation: {
+    label: "USDA FoodData Central — Foundation Foods",
+    license: "CC0 1.0 (public domain)",
+    url: "https://fdc.nal.usda.gov/download-datasets",
+    attribution: "U.S. Department of Agriculture, Agricultural Research Service. FoodData Central. fdc.nal.usda.gov.",
+    priority: 1,
+  },
+  uk_cofid: {
+    label: "McCance and Widdowson's The Composition of Foods Integrated Dataset (CoFID)",
+    license: "Open Government Licence v3.0",
+    url: "https://www.gov.uk/government/publications/composition-of-foods-integrated-dataset-cofid",
+    attribution: "Contains public sector information licensed under the Open Government Licence v3.0 (Public Health England, McCance and Widdowson's CoFID 2021).",
+    // After USDA: the library's existing USDA records are never superseded;
+    // CoFID adds the foods USDA doesn't have (and records where it agrees).
+    priority: 3,
+  },
+  usda_fdc_sr_legacy: {
+    label: "USDA FoodData Central — SR Legacy",
+    license: "CC0 1.0 (public domain)",
+    url: "https://fdc.nal.usda.gov/download-datasets",
+    attribution: "U.S. Department of Agriculture, Agricultural Research Service. FoodData Central. fdc.nal.usda.gov.",
+    priority: 2,
+  },
 } as const;
+
+/** Bumped when normalisation rules change (stored on each written record). */
+export const IMPORT_VERSION = 2;
+
+/** Where an image may come from, in order of preference. */
+export const IMAGE_SOURCES = ["dataset", "licensed", "sombrey"] as const;
+export type ImageSource = (typeof IMAGE_SOURCES)[number];
+export type ImageRef = { url: string; source: ImageSource; license: string; attribution?: string; sourceUrl?: string };
 export type LibrarySource = keyof typeof LIBRARY_SOURCES;
 export const isLibrarySource = (s: unknown): s is LibrarySource => typeof s === "string" && s in LIBRARY_SOURCES;
 
@@ -41,9 +75,13 @@ export type LibraryCandidate = {
   brand?: string;
   /** "generic" unless the dataset marks a branded product. */
   kind?: "generic" | "branded";
-  /** Nutrition for `basisGrams` grams (normally 100) of the food as described. */
+  /** Nutrition for `basisGrams` of the food as described (normally 100 g).
+   * A dataset that states values per volume sets `basisUnit: "ml"` — such a
+   * record is rejected: turning ml into grams needs a density the dataset
+   * doesn't give, and Sombrey won't invent one. */
   nutrients: {
     basisGrams: number;
+    basisUnit?: "g" | "ml";
     energy?: { value: number; unit: "kcal" | "kJ" };
     protein?: number;   // g
     carbs?: number;     // g (total, by difference where the dataset uses that)
@@ -56,6 +94,15 @@ export type LibraryCandidate = {
   /** What the adapter noticed about the source values (e.g. which of the
    * dataset's energy or carbohydrate definitions was used). */
   flags?: string[];
+  /** Other names the DATASET itself gives this food (never invented). */
+  aliases?: string[];
+  /** The record's own page at the source, when it has one. */
+  sourceUrl?: string;
+  /** An image the dataset provides under its licence. */
+  image?: ImageRef;
+  /** Set by the importer (never an adapter): other approved sources whose
+   * copy of this food was dropped as a duplicate. */
+  alsoIn?: Array<{ source: string; sourceId: string }>;
 };
 
 export type LibraryRecord = {
@@ -73,6 +120,12 @@ export type LibraryRecord = {
   serving: { label: string; grams: number };
   qualityFlags: string[];
   crossRef?: string;
+  aliases: string[];
+  sourceUrl?: string;
+  image?: ImageRef;
+  /** Other sources that hold this same food (dropped as duplicates) — kept
+   * as provenance on the record that was kept. */
+  alsoIn: Array<{ source: LibrarySource; sourceId: string }>;
 };
 
 export type Rejection = { sourceId: string; name: string; reason: string };
@@ -152,6 +205,8 @@ export function validateCandidate(c: LibraryCandidate): { record: LibraryRecord 
   if (searchName.length < 2) return reject("missing_name");
 
   const n = c.nutrients;
+  if (n?.basisUnit === "ml") return reject("per_100ml_no_density");
+  if (n?.basisUnit !== undefined && n.basisUnit !== "g") return reject("bad_basis");
   if (!n || !finite(n.basisGrams) || n.basisGrams <= 0) return reject("bad_basis");
   if (!n.energy || !finite(n.energy.value)) return reject("missing_energy");
   if (n.energy.unit !== "kcal" && n.energy.unit !== "kJ") return reject("bad_energy_unit");
@@ -208,13 +263,37 @@ export function validateCandidate(c: LibraryCandidate): { record: LibraryRecord 
 
   const preparationState = preparationOf(name);
   const kind = c.kind === "branded" ? "branded" : "generic";
+
+  // Aliases: the dataset's own other names, tidied; a duplicate of the name
+  // (or of another alias) is dropped, anything odd is dropped and flagged.
+  const aliases: string[] = [];
+  const aliasKeys = new Set([searchName]);
+  let badAlias = false;
+  for (const a of c.aliases ?? []) {
+    const alias = typeof a === "string" ? displayNameOf(a) : "";
+    const key = searchNameOf(alias);
+    if (!alias || alias.length > 120 || key.length < 2) { badAlias = true; continue; }
+    if (aliasKeys.has(key)) continue;
+    aliasKeys.add(key);
+    aliases.push(alias);
+  }
+  if (badAlias) qualityFlags.push("alias_dropped");
+
+  // Image: only a well-formed https reference with its source and licence.
+  let image: ImageRef | undefined;
+  if (c.image !== undefined) {
+    const ok = validImageRef(c.image);
+    if (ok) image = ok; else qualityFlags.push("image_dropped");
+  }
+  const sourceUrl = typeof c.sourceUrl === "string" && isHttpsUrl(c.sourceUrl) ? c.sourceUrl : undefined;
   return {
     record: {
       source: c.source,
       sourceId,
       sourceVersion: c.sourceVersion.trim(),
       name,
-      searchName,
+      // The index reads the name and the dataset's own aliases together.
+      searchName: aliases.length ? [searchName, ...aliases.slice(0, 12).map(searchNameOf)].join(" ") : searchName,
       category: typeof c.category === "string" && c.category.trim() ? c.category.trim().slice(0, 80) : undefined,
       brand: typeof c.brand === "string" && c.brand.trim() ? c.brand.trim().slice(0, 80) : undefined,
       kind,
@@ -224,8 +303,32 @@ export function validateCandidate(c: LibraryCandidate): { record: LibraryRecord 
       serving,
       qualityFlags,
       crossRef: typeof c.crossRef === "string" && c.crossRef.trim() ? c.crossRef.trim() : undefined,
+      aliases: aliases.slice(0, 12),
+      sourceUrl,
+      image,
+      alsoIn: (Array.isArray(c.alsoIn) ? c.alsoIn : [])
+        .filter((x) => isLibrarySource(x?.source) && typeof x.sourceId === "string" && x.sourceId.trim().length > 0 && x.sourceId.length <= 64)
+        .slice(0, 8)
+        .map((x) => ({ source: x.source as LibrarySource, sourceId: x.sourceId.trim() })),
     },
   };
+}
+
+function isHttpsUrl(u: string): boolean {
+  if (u.length > 500 || /\s/.test(u)) return false;
+  try { return new URL(u).protocol === "https:"; } catch { return false; }
+}
+
+/** An image reference that can be shown and credited, or null. The app never
+ * shows a reference without a licence, and falls back when it fails to load. */
+export function validImageRef(img: unknown): ImageRef | null {
+  const i = img as Partial<ImageRef> | null;
+  if (!i || typeof i.url !== "string" || !isHttpsUrl(i.url)) return null;
+  if (!(IMAGE_SOURCES as readonly string[]).includes(i.source as string)) return null;
+  if (typeof i.license !== "string" || !i.license.trim() || i.license.length > 80) return null;
+  if (i.attribution !== undefined && (typeof i.attribution !== "string" || i.attribution.length > 200)) return null;
+  if (i.sourceUrl !== undefined && (typeof i.sourceUrl !== "string" || !isHttpsUrl(i.sourceUrl))) return null;
+  return { url: i.url, source: i.source as ImageSource, license: i.license.trim(), attribution: i.attribution?.trim() || undefined, sourceUrl: i.sourceUrl };
 }
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
@@ -244,7 +347,9 @@ export function deduplicate(records: LibraryRecord[]): { kept: LibraryRecord[]; 
   const duplicates: Array<{ dropped: LibraryRecord; keptAs: LibraryRecord; by: "cross_ref" | "name" }> = [];
   for (const r of ordered) {
     const idKey = `${r.source}:${r.sourceId}`;
-    const nameKey = `${r.kind}|${r.brand ?? ""}|${r.searchName}`;
+    // The food's own name (not its aliases) and stated preparation: "rice,
+    // raw" and "rice, boiled" are different foods and never merge.
+    const nameKey = `${r.kind}|${r.brand ?? ""}|${r.preparationState ?? ""}|${searchNameOf(r.name)}`;
     if (byId.has(idKey)) continue; // literally the same row twice
     byId.add(idKey);
     const refMatch = r.crossRef ? byRef.get(r.crossRef) : undefined;
@@ -252,6 +357,11 @@ export function deduplicate(records: LibraryRecord[]): { kept: LibraryRecord[]; 
     if (refMatch || nameMatch) {
       const keptAs = (refMatch ?? nameMatch)!;
       duplicates.push({ dropped: r, keptAs, by: refMatch ? "cross_ref" : "name" });
+      // Provenance: the kept record says the other source holds it too. Its
+      // values are never replaced — the higher-priority source's stand.
+      if (r.source !== keptAs.source && !keptAs.alsoIn.some((x) => x.source === r.source && x.sourceId === r.sourceId)) {
+        keptAs.alsoIn = [...keptAs.alsoIn, { source: r.source, sourceId: r.sourceId }];
+      }
       // The dropped record's identities now point at the kept one, so a
       // later copy of the dropped record is caught too.
       if (r.crossRef && !byRef.has(r.crossRef)) byRef.set(r.crossRef, keptAs);
@@ -270,7 +380,17 @@ export function deduplicate(records: LibraryRecord[]): { kept: LibraryRecord[]; 
 /** A stable fingerprint of what's stored for a record — an unchanged record
  * isn't rewritten when the import runs again. (FNV-1a; not security.) */
 export function contentHash(r: LibraryRecord): string {
-  const s = JSON.stringify([r.sourceVersion, r.name, r.category ?? "", r.brand ?? "", r.kind, r.preparationState ?? "", r.per100g, r.portions, r.serving, r.qualityFlags]);
+  const core: unknown[] = [r.sourceVersion, r.name, r.category ?? "", r.brand ?? "", r.kind, r.preparationState ?? "", r.per100g, r.portions, r.serving, r.qualityFlags];
+  // Fields added later count only when a record has them, so records that
+  // don't (every USDA food so far) keep the fingerprint they were stored with
+  // and a re-import leaves them untouched.
+  const extra: Record<string, unknown> = {};
+  if (r.aliases?.length) extra.aliases = r.aliases;
+  if (r.sourceUrl) extra.sourceUrl = r.sourceUrl;
+  if (r.image) extra.image = r.image;
+  if (r.alsoIn?.length) extra.alsoIn = r.alsoIn;
+  if (Object.keys(extra).length) core.push(extra);
+  const s = JSON.stringify(core);
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -308,6 +428,11 @@ export function libraryFoodFields(r: LibraryRecord) {
     sourceId: r.sourceId,
     sourceVersion: r.sourceVersion,
     sourceHash: contentHash(r),
+    sourceUrl: r.sourceUrl,
+    importVersion: IMPORT_VERSION,
+    aliases: r.aliases.length ? r.aliases : undefined,
+    alsoIn: r.alsoIn.length ? r.alsoIn : undefined,
+    image: r.image,
     qualityFlags: r.qualityFlags.length ? r.qualityFlags : undefined,
     isCustom: false,
     isArchived: false,
@@ -316,8 +441,10 @@ export function libraryFoodFields(r: LibraryRecord) {
 
 /** What an import does with one record, given what's stored for its
  * (source, sourceId): insert it, rewrite it (content changed), or leave it. */
-export function upsertAction(existing: { sourceHash?: string } | null, r: LibraryRecord): "insert" | "update" | "unchanged" {
+export function upsertAction(existing: { sourceHash?: string; isArchived?: boolean } | null, r: LibraryRecord): "insert" | "update" | "unchanged" {
   if (!existing) return "insert";
+  // A record archived as a duplicate by an earlier run, kept by this one, comes back.
+  if (existing.isArchived) return "update";
   return existing.sourceHash === contentHash(r) ? "unchanged" : "update";
 }
 

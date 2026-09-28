@@ -172,6 +172,9 @@ export const search = query({
           : undefined,
         portions: f.portions ?? [],
         source: f.source,
+        // A licensed image, when the food has one; the app shows its own
+        // fallback otherwise (and when the image fails to load).
+        image: f.image ? { url: f.image.url, license: f.image.license, attribution: f.image.attribution } : undefined,
       })),
     };
   },

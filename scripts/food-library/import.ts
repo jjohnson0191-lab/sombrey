@@ -24,6 +24,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { deduplicate, LIBRARY_SOURCES, validateCandidate, type LibraryCandidate, type LibraryRecord, type Rejection } from "../../convex/nutrition/foodLibrary.ts";
 import { fdcCandidates } from "./sources/usdaFdc.ts";
+import { cofidCandidates } from "./sources/ukCofid.ts";
 
 type Args = { sources: Array<{ source: string; file: string; version: string }>; plan: boolean; dryRun: boolean; report?: string; batch: number; prod: boolean; confirmProd: boolean };
 
@@ -50,11 +51,17 @@ function parseArgs(argv: string[]): Args {
 
 /** Adapters for the approved sources. A new dataset = a new adapter here. */
 function loadCandidates(source: string, file: string, version: string): { candidates: LibraryCandidate[]; malformed: number } {
-  const data = JSON.parse(readFileSync(file, "utf8"));
+  // Spreadsheets (CoFID) are read through tools/xlsx_to_json.py (standard library only).
+  const text = file.endsWith(".xlsx")
+    ? execFileSync("python3", [new URL("./tools/xlsx_to_json.py", import.meta.url).pathname, file], { encoding: "utf8", maxBuffer: 512 * 1024 * 1024 })
+    : readFileSync(file, "utf8");
+  const data = JSON.parse(text);
   switch (source) {
     case "usda_fdc_foundation":
     case "usda_fdc_sr_legacy":
       return fdcCandidates(data, source, version);
+    case "uk_cofid":
+      return cofidCandidates(data, version);
     default:
       throw new Error(`No adapter for source "${source}" (approved: ${Object.keys(LIBRARY_SOURCES).join(", ")})`);
   }
@@ -62,15 +69,27 @@ function loadCandidates(source: string, file: string, version: string): { candid
 
 type BatchResult = { inserted: number; updated: number; unchanged: number; rejected: number; rejectedRecords: Array<{ sourceId: string; reason: string }> };
 
-function convexRun(fn: string, args: unknown, prod: boolean): BatchResult {
-  const out = execFileSync("npx", ["convex", "run", ...(prod ? ["--prod"] : []), fn, JSON.stringify(args)], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+function convexRun<T = BatchResult>(fn: string, args: unknown, prod: boolean): T {
+  // Batches are idempotent, so a batch that fails on the network (a laptop
+  // sleeping, a dropped connection) is simply sent again — at most 3 tries.
+  let out = "";
+  for (let attempt = 1; ; attempt++) {
+    try {
+      out = execFileSync("npx", ["convex", "run", ...(prod ? ["--prod"] : []), fn, JSON.stringify(args)], {
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      break;
+    } catch (e) {
+      if (attempt >= 3) throw e;
+      process.stderr.write(`\n  ${fn} failed (attempt ${attempt}), retrying in ${attempt * 10}s…\n`);
+      execFileSync("sleep", [String(attempt * 10)]);
+    }
+  }
   const start = out.indexOf("{");
   if (start < 0) throw new Error(`Unexpected output from ${fn}: ${out.slice(0, 200)}`);
-  return JSON.parse(out.slice(start)) as BatchResult;
+  return JSON.parse(out.slice(start)) as T;
 }
 
 function countBy<T>(xs: T[], key: (x: T) => string) {
@@ -105,6 +124,10 @@ function main() {
     }
   }
 
+  // Cross-source duplicates are only found among the sources in one run.
+  const missing = Object.keys(LIBRARY_SOURCES).filter((k) => !args.sources.some((s) => s.source === k));
+  if (missing.length) process.stderr.write(`WARNING: not importing ${missing.join(", ")} in this run — duplicates against their stored records won't be detected.\n`);
+
   // 3. Deduplicate.
   const { kept, duplicates } = deduplicate(records);
   const flagged = kept.filter((r) => r.qualityFlags.length > 0);
@@ -117,6 +140,8 @@ function main() {
     rejected: rejections.length,
     rejectedByReason: countBy(rejections, (r) => r.reason),
     rejectedExamples: rejections.filter((r) => r.name).slice(0, 25),
+    keptBySource: countBy(kept, (r) => r.source),
+    keptWithProvenanceFromOtherSources: kept.filter((r) => r.alsoIn.length > 0).length,
     deduplicated: duplicates.length,
     deduplicatedBy: countBy(duplicates, (d) => d.by),
     duplicateExamples: duplicates.slice(0, 15).map((d) => ({ dropped: `${d.dropped.source}:${d.dropped.sourceId} ${d.dropped.name}`, kept: `${d.keptAs.source}:${d.keptAs.sourceId} ${d.keptAs.name}`, by: d.by })),
@@ -131,14 +156,20 @@ function main() {
     const totals = { inserted: 0, updated: 0, unchanged: 0, rejected: 0 };
     const serverRejected: Array<{ sourceId: string; reason: string }> = [];
     for (let i = 0; i < kept.length; i += args.batch) {
-      const batch = kept.slice(i, i + args.batch).map((r) => candidateById.get(`${r.source}:${r.sourceId}`)!);
+      const batch = kept.slice(i, i + args.batch).map((r) => ({ ...candidateById.get(`${r.source}:${r.sourceId}`)!, ...(r.alsoIn.length ? { alsoIn: r.alsoIn } : {}) }));
       const r = convexRun("foodLibrary:upsertBatch", { records: batch, dryRun: args.dryRun }, args.prod);
       totals.inserted += r.inserted; totals.updated += r.updated; totals.unchanged += r.unchanged; totals.rejected += r.rejected;
       serverRejected.push(...r.rejectedRecords);
       process.stderr.write(`\r  ${Math.min(i + args.batch, kept.length)}/${kept.length} sent`);
     }
     process.stderr.write("\n");
-    report.server = { ...totals, dryRun: args.dryRun, serverRejected: serverRejected.slice(0, 25) };
+    // Duplicates an earlier run may have stored: archived, not deleted.
+    let archived = 0;
+    for (let i = 0; i < duplicates.length; i += args.batch) {
+      const batch = duplicates.slice(i, i + args.batch).map((d) => ({ source: d.dropped.source, sourceId: d.dropped.sourceId, keptAs: `${d.keptAs.source}:${d.keptAs.sourceId}` }));
+      archived += convexRun<{ archived: number }>("foodLibrary:archiveDuplicates", { records: batch, dryRun: args.dryRun }, args.prod).archived;
+    }
+    report.server = { ...totals, archivedDuplicates: archived, dryRun: args.dryRun, serverRejected: serverRejected.slice(0, 25) };
   }
   report.seconds = Math.round((Date.now() - started) / 1000);
 

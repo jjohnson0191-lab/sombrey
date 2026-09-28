@@ -35,9 +35,11 @@ struct LibraryFoodDTO: Decodable, Equatable, Hashable, Identifiable {
     var per100g: FoodPer100g? = nil
     var portions: [FoodMeasure] = []
     var source: String? = nil
+    /// A licensed image (never shown without one; see FoodThumbnail).
+    var image: FoodImageRef? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, category, brand, preparationState, calories, protein, carbs, fats, servingSize, servingUnit, servingGrams, per100g, portions, source
+        case id, name, category, brand, preparationState, calories, protein, carbs, fats, servingSize, servingUnit, servingGrams, per100g, portions, source, image
     }
 
     init(id: String, name: String, category: String? = nil, brand: String? = nil, preparationState: String? = nil,
@@ -66,7 +68,15 @@ struct LibraryFoodDTO: Decodable, Equatable, Hashable, Identifiable {
         per100g = try c.decodeIfPresent(FoodPer100g.self, forKey: .per100g)
         portions = try c.decodeIfPresent([FoodMeasure].self, forKey: .portions) ?? []
         source = try c.decodeIfPresent(String.self, forKey: .source)
+        image = try c.decodeIfPresent(FoodImageRef.self, forKey: .image)
     }
+}
+
+/// A food image reference from the library: always with its licence.
+struct FoodImageRef: Decodable, Equatable, Hashable {
+    let url: String
+    let license: String
+    var attribution: String? = nil
 }
 
 /// One page of `foods:search` (Convex pagination).
@@ -288,10 +298,40 @@ enum FoodSearchLogic {
         return out
     }
 
+    /// The credit line the library's sources require, for the sources shown.
+    static func libraryCredit(_ sources: [String?]) -> String? {
+        var parts: [String] = []
+        if sources.contains(where: { $0?.hasPrefix("usda_fdc") == true }) { parts.append("USDA FoodData Central") }
+        if sources.contains(where: { $0 == "uk_cofid" }) { parts.append("McCance and Widdowson's CoFID (contains public sector information licensed under the Open Government Licence v3.0)") }
+        guard !parts.isEmpty else { return nil }
+        return "Library data: " + parts.joined(separator: "; ") + "."
+    }
+
+    /// The fallback picture's glyph: the kind of food, from its dataset
+    /// category or name. A generic fork-and-knife when nothing fits.
+    static func fallbackGlyph(name: String, category: String?) -> String {
+        let text = "\(category ?? "") \(name)".lowercased()
+        // SF Symbols available on iOS 17 (the app's minimum).
+        let table: [(keys: [String], glyph: String)] = [
+            (["fish", "salmon", "tuna", "shellfish", "prawn", "shrimp", "crab"], "fish"),
+            (["beverage", "juice", "milk", "tea", "coffee", "drink", "water"], "cup.and.saucer"),
+            (["vegetable", "salad", "spinach", "broccoli", "cabbage", "okra", "aubergine", "carrot", "potato"], "carrot"),
+            (["fruit", "apple", "banana", "berries", "mango", "orange", "grape"], "leaf"),
+            (["egg"], "frying.pan"),
+            (["sweet", "cake", "biscuit", "dessert", "chocolate", "candies", "ice cream"], "birthday.cake"),
+            (["meat", "beef", "pork", "lamb", "chicken", "poultry", "sausage", "turkey"], "flame"),
+            (["cereal", "grain", "rice", "pasta", "bread", "flour", "oat", "noodle", "legume", "bean", "lentil", "dahl", "dal", "chickpea"], "basket"),
+        ]
+        for row in table where row.keys.contains(where: { text.contains($0) }) { return row.glyph }
+        return "fork.knife"
+    }
+
     /// Where a library food comes from, in a word.
     static func sourceLabel(_ source: String?) -> String {
         guard let source else { return "Sombrey" }
-        return source.hasPrefix("usda_fdc") ? "USDA" : "Library"
+        if source.hasPrefix("usda_fdc") { return "USDA" }
+        if source == "uk_cofid" { return "UK" }
+        return "Library"
     }
 
     /// The library row's second line: source · basis · preparation.
@@ -301,6 +341,7 @@ enum FoodSearchLogic {
             parts.append("per \(food.servingSize == "1" ? food.servingUnit : "\(food.servingSize) \(food.servingUnit)")")
         }
         if let brand = food.brand { parts.insert(brand, at: 1) }
+        if let prep = food.preparationState, prep != "unknown" { parts.append(prep) }
         return parts.joined(separator: " · ")
     }
 
@@ -356,7 +397,7 @@ enum FoodSearchLogic {
             case .unavailable: return "The food database can't be reached right now. Your Sombrey foods still appear."
             case .failed: return "Check your connection and try again."
             case .signedOut: return "Your session has ended. Sign in again to search and log foods."
-            case .libraryNoResults: return "Try a simpler name — “chicken breast” rather than a whole dish — or search Edamam's database below."
+            case .libraryNoResults: return "Try a simpler name — “chicken breast” rather than a whole dish — or search additional foods below."
             case .libraryFailed: return "Check your connection and try again."
             }
         }
