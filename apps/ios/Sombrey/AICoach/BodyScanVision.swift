@@ -33,13 +33,13 @@ enum BodyScanVision {
         let pose = VNDetectHumanBodyPoseRequest()
         try? handler.perform([segmentation, pose])
 
-        let mask = segmentation.results?.first.flatMap { mask(from: $0.pixelBuffer) }
+        let personMask: SilhouetteMask? = segmentation.results?.first.flatMap { Self.mask(from: $0.pixelBuffer) }
         // The person with the largest keypoint span is the subject.
-        let people = (pose.results ?? []).map(joints)
-        let subject = people.max { span($0) < span($1) } ?? [:]
+        let people: [[BodyJoint: JointPoint]] = (pose.results ?? []).map { Self.joints($0) }
+        let subject = people.max { Self.span($0) < Self.span($1) } ?? [:]
 
         var features = BodyScanFeatureExtractor.extract(
-            view: view, mask: mask, joints: subject, imageWidth: cg.width, imageHeight: cg.height,
+            view: view, mask: personMask, joints: subject, imageWidth: cg.width, imageHeight: cg.height,
             captureScore: captureScore, brightness: brightness, subjectStill: subjectStill
         )
         features.processingMs = (Date().timeIntervalSince(started) * 1000).rounded()
