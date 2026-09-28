@@ -225,7 +225,8 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
     }
 }
 
-/// The camera, its live assessment and auto-capture, for the capture screen.
+/// The camera, its live assessment and the hands-free self-timer, for the
+/// capture screen.
 @Observable
 @MainActor
 final class BodyScanCameraModel {
@@ -234,18 +235,22 @@ final class BodyScanCameraModel {
     private(set) var status: Status = .starting
     private(set) var assessment = QualityAssessment(issues: [.noPerson], score: 0, instruction: "Step into the frame")
     private(set) var joints: [BodyJoint: JointPoint] = [:]
-    private(set) var countdown: Int?
+    private(set) var countdown = CaptureCountdown()
     private(set) var capturing = false
     private(set) var captureFailed = false
+    /// Bumps on each gated second (3, 2, 1) — a restrained haptic tick.
+    private(set) var holdTick = 0
+    /// The gates in use (tunable on dev builds; recorded with each capture).
+    var config = BodyScanProtocolConfig.load()
     var view: BodyScanView = .front {
-        didSet { stability.reset(); cancelCountdown() }
+        didSet { cancelCountdown() }
     }
     /// Delivered on the main actor with each accepted capture.
     var onCapture: ((BodyScanView, CapturedView) -> Void)?
 
     let engine = BodyScanCaptureEngine()
-    private var stability = CaptureStability()
-    private var countdownTask: Task<Void, Never>?
+    private var lastFrame: PoseFrame?
+    private var timerTask: Task<Void, Never>?
 
     func start() async {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -273,57 +278,70 @@ final class BodyScanCameraModel {
 
     private func handle(_ frame: PoseFrame) {
         guard status == .running, !capturing else { return }
+        lastFrame = frame
         joints = frame.joints
-        assessment = BodyScanQuality.assess(frame, for: view)
-        if countdown != nil {
-            if !assessment.ready { cancelCountdown() }
-            return
-        }
-        if stability.update(ready: assessment.ready, at: Date()) { beginCountdown() }
+        assessment = BodyScanQuality.assess(frame, for: view, config: config)
+        let wasPaused = countdown.isPaused
+        countdown.observe(valid: assessment.ready)
+        if wasPaused != countdown.isPaused, countdown.isHolding { holdTick += 1 }
     }
 
-    /// 3-2-1, then capture — cancelled the moment the frame stops qualifying.
-    private func beginCountdown() {
-        countdownTask?.cancel()
-        countdownTask = Task { [weak self] in
-            for n in [3, 2, 1] {
-                guard let self, !Task.isCancelled else { return }
-                self.countdown = n
+    /// Start: the 10-second self-timer. The user walks into position; the last
+    /// three seconds must pass the gates (see CaptureCountdown).
+    func startCountdown() {
+        guard status == .running, !capturing else { return }
+        captureFailed = false
+        countdown.start()
+        timerTask?.cancel()
+        timerTask = Task { [weak self] in
+            while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled else { return }
+                self.countdown.tick(valid: self.assessment.ready)
+                if self.countdown.isHolding { self.holdTick += 1 }
+                if self.countdown.phase == .capture {
+                    await self.capture()
+                    return
+                }
+                if !self.countdown.isActive { return }
             }
-            guard let self, !Task.isCancelled, self.assessment.ready else { return }
-            self.countdown = nil
-            await self.capture()
         }
     }
 
-    private func cancelCountdown() {
-        countdownTask?.cancel()
-        countdownTask = nil
-        countdown = nil
-        stability.reset()
-    }
-
-    /// The manual shutter — only when the frame qualifies.
-    func captureNow() {
-        guard assessment.ready, !capturing else { return }
-        cancelCountdown()
-        Task { await capture() }
+    func cancelCountdown() {
+        timerTask?.cancel()
+        timerTask = nil
+        countdown.cancel()
     }
 
     private func capture() async {
+        // The countdown only reaches .capture after three valid seconds; the
+        // frame is checked once more at the shutter.
+        guard assessment.ready, let frame = lastFrame else {
+            countdown.finish()
+            captureFailed = true
+            return
+        }
         capturing = true
         captureFailed = false
         let quality = assessment
         let view = self.view
+        let conditions = CaptureConditions(
+            pitchDegrees: (frame.pitchDegrees * 10).rounded() / 10,
+            rollDegrees: (frame.rollDegrees * 10).rounded() / 10,
+            bodySpan: ((quality.measured["span"] ?? 0) * 1000).rounded() / 1000,
+            brightness: frame.brightness.map { ($0 * 1000).rounded() / 1000 },
+            protocolConfig: config.id
+        )
         let raw = await engine.capturePhoto()
         let normalized = await Task.detached { raw.flatMap { BodyScanCaptureEngine.normalize($0) } }.value
         capturing = false
-        stability.reset()
+        countdown.finish()
+        timerTask = nil
         guard let normalized else { captureFailed = true; return }
         onCapture?(view, CapturedView(
             jpeg: normalized.jpeg, width: normalized.width, height: normalized.height,
-            qualityScore: quality.score, issues: quality.issues, capturedAt: Date()
+            qualityScore: quality.score, issues: quality.issues, capturedAt: Date(), conditions: conditions
         ))
     }
 }

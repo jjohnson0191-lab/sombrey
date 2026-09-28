@@ -532,8 +532,77 @@ export default defineSchema({
     issues: v.array(v.string()),           // closed set (rules.QUALITY_ISSUES)
     capturedAt: v.number(),
     createdAt: v.number(),
+    // Conditions at the moment of capture (5A.2+): phone tilt, the body's
+    // span in the frame, light, and which gate configuration was active —
+    // so later processing can normalise for them. Absent on 5A.1 images.
+    conditions: v.optional(v.object({
+      pitchDegrees: v.number(),
+      rollDegrees: v.number(),
+      bodySpan: v.number(),
+      brightness: v.optional(v.number()),
+      protocolConfig: v.string(),
+    })),
   }).index("by_scan_and_view", ["scanDocId", "view"])
     .index("by_storage", ["storageId"])
+    .index("by_user", ["userId"]),
+
+  // Phase 5B: on-device computer-vision features for one scan, one row per
+  // CV version. Everything is scale-free (normalised by the body's own
+  // height in the image) unless `scale.kind` says metric scale existed.
+  // A newer CV version adds a row — it never rewrites an older one. These
+  // are internal engineering values: nothing here is shown as a measurement.
+  // Shape: convex/bodyScan/features.ts.
+  bodyScanFeatures: defineTable({
+    userId: v.id("users"),
+    scanDocId: v.id("bodyScans"),
+    cvVersion: v.string(),
+    processedAt: v.number(),
+    createdAt: v.number(),
+    processing: v.object({
+      deviceModel: v.string(),
+      osVersion: v.string(),
+      appVersion: v.string(),
+      components: v.array(v.string()),     // e.g. "vision.personSegmentation.accurate"
+    }),
+    scale: v.object({
+      kind: v.union(v.literal("none"), v.literal("lidar"), v.literal("arkit")),
+      metersPerUnit: v.optional(v.number()),
+    }),
+    views: v.array(v.object({
+      view: v.union(v.literal("front"), v.literal("side"), v.literal("back")),
+      imageWidth: v.number(),
+      imageHeight: v.number(),
+      processingMs: v.number(),
+      // Normalised to the image: x, y in 0–1 from the top-left.
+      keypoints: v.array(v.object({ name: v.string(), x: v.number(), y: v.number(), confidence: v.number() })),
+      silhouette: v.optional(v.object({
+        maskWidth: v.number(),
+        maskHeight: v.number(),
+        top: v.number(), bottom: v.number(), left: v.number(), right: v.number(),
+        heightFraction: v.number(),        // silhouette height ÷ image height
+        areaPerHeight2: v.number(),        // silhouette area ÷ silhouette height²
+        mainComponentFraction: v.number(),
+        keypointAgreement: v.number(),
+      })),
+      widths: v.record(v.string(), v.number()),   // silhouette width (or depth) ÷ silhouette height
+      ratios: v.record(v.string(), v.number()),
+      quality: v.record(v.string(), v.number()),  // 0–1 each
+      issues: v.array(v.string()),
+    })),
+    multiView: v.object({
+      ratios: v.record(v.string(), v.number()),
+      consistency: v.record(v.string(), v.number()),
+    }),
+    quality: v.object({
+      overallScore: v.number(),
+      framing: v.number(),
+      pose: v.number(),
+      lighting: v.number(),
+      segmentation: v.number(),
+      motion: v.number(),
+      multiViewConsistency: v.number(),
+    }),
+  }).index("by_scan_and_version", ["scanDocId", "cvVersion"])
     .index("by_user", ["userId"]),
 
   measurements: defineTable({

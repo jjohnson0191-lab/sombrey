@@ -11,7 +11,7 @@
 
 /** The capture protocol these rules describe. Stored on every scan so a
  * future model knows exactly how its images were taken. */
-export const PROTOCOL_VERSION = "5a.1";
+export const PROTOCOL_VERSION = "5a.2";
 /** The consent text version the user accepted (shown in the app). */
 export const CONSENT_VERSION = "2026-09-28";
 
@@ -26,6 +26,19 @@ export const QUALITY_ISSUES = [
   "off_centre", "tilted", "wrong_orientation", "arms_position", "low_light", "motion", "low_confidence",
 ] as const;
 export type QualityIssue = (typeof QUALITY_ISSUES)[number];
+
+/** Capture conditions recorded with each view (5a.2+). */
+export type CaptureConditions = { pitchDegrees: number; rollDegrees: number; bodySpan: number; brightness?: number; protocolConfig: string };
+
+export function validateConditions(c: CaptureConditions | undefined): string | null {
+  if (c === undefined) return null;
+  const f = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+  if (!f(c.pitchDegrees) || Math.abs(c.pitchDegrees) > 90 || !f(c.rollDegrees) || Math.abs(c.rollDegrees) > 90) return "Invalid phone tilt";
+  if (!f(c.bodySpan) || c.bodySpan < 0 || c.bodySpan > 1.5) return "Invalid body span";
+  if (c.brightness !== undefined && (!f(c.brightness) || c.brightness < 0 || c.brightness > 1)) return "Invalid brightness";
+  if (typeof c.protocolConfig !== "string" || !/^[A-Za-z0-9.:,_=-]{1,80}$/.test(c.protocolConfig)) return "Invalid protocol configuration";
+  return null;
+}
 
 /** Stored images: JPEG, portrait, long side 1024–4096 px, ≤ 8 MB. The app
  * stores 2048 px (see BodyScanImage in the app for why). */

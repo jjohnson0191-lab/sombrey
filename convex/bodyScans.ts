@@ -20,13 +20,14 @@
 // context (a snapshot) — never an estimate.
 
 import { ConvexError, v } from "convex/values";
-import { internalQuery, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   CONSENT_VERSION, PROTOCOL_VERSION, VIEWS, contextSnapshot, missingProfile, missingViews,
-  plausibleHeightCm, plausibleWeightKg, sanitizeCapture, validScanId, validateBlob, validateViewMeta,
+  plausibleHeightCm, plausibleWeightKg, sanitizeCapture, validScanId, validateBlob, validateConditions, validateViewMeta,
 } from "./bodyScan/rules";
+import { isAbandoned, validateFeatureSet, type FeatureSet } from "./bodyScan/features";
 
 const VIEW = v.union(v.literal("front"), v.literal("side"), v.literal("back"));
 const SEX = v.union(v.literal("male"), v.literal("female"), v.literal("other"));
@@ -72,6 +73,17 @@ async function deleteImageRow(ctx: MutationCtx, row: Doc<"bodyScanImages">) {
 
 async function imagesOf(ctx: QueryCtx | MutationCtx, scanDocId: Id<"bodyScans">) {
   return await ctx.db.query("bodyScanImages").withIndex("by_scan_and_view", (q) => q.eq("scanDocId", scanDocId)).collect();
+}
+
+async function featuresOf(ctx: QueryCtx | MutationCtx, scanDocId: Id<"bodyScans">) {
+  return await ctx.db.query("bodyScanFeatures").withIndex("by_scan_and_version", (q) => q.eq("scanDocId", scanDocId)).collect();
+}
+
+/** A scan and everything attached to it: images (and their blobs), features. */
+async function deleteScanDeep(ctx: MutationCtx, scan: Doc<"bodyScans">) {
+  for (const i of await imagesOf(ctx, scan._id)) await deleteImageRow(ctx, i);
+  for (const f of await featuresOf(ctx, scan._id)) await ctx.db.delete(f._id);
+  await ctx.db.delete(scan._id);
 }
 
 // ─── Profile & consent ────────────────────────────────────────────────────────
@@ -200,6 +212,13 @@ export const attachView = mutation({
     qualityScore: v.number(),
     issues: v.array(v.string()),
     capturedAt: v.number(),
+    conditions: v.optional(v.object({
+      pitchDegrees: v.number(),
+      rollDegrees: v.number(),
+      bodySpan: v.number(),
+      brightness: v.optional(v.number()),
+      protocolConfig: v.string(),
+    })),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -220,6 +239,8 @@ export const attachView = mutation({
     if (scan.status !== "capturing") return await refuse("This scan is already saved — start a new scan to capture again");
     const metaProblem = validateViewMeta({ view: args.view, width: args.width, height: args.height, qualityScore: args.qualityScore, issues: args.issues, capturedAt: args.capturedAt }, now);
     if (metaProblem) return await refuse(metaProblem);
+    const conditionsProblem = validateConditions(args.conditions);
+    if (conditionsProblem) return await refuse(conditionsProblem);
     const blob = await ctx.db.system.get(args.storageId);
     const blobProblem = validateBlob(blob, now);
     if (blobProblem || !blob) return await refuse(blobProblem ?? "Image not found");
@@ -241,6 +262,7 @@ export const attachView = mutation({
       issues: args.issues,
       capturedAt: args.capturedAt,
       createdAt: now,
+      ...(args.conditions ? { conditions: args.conditions } : {}),
     });
     return { ok: true as const, view: args.view, replaced };
   },
@@ -277,6 +299,8 @@ export const list = query({
       createdAt: s.createdAt,
       completedAt: s.completedAt ?? null,
       context: s.context,
+      // Which CV versions have processed this scan — never the values.
+      featureVersions: (await featuresOf(ctx, s._id)).map((f) => f.cvVersion),
       views: (await imagesOf(ctx, s._id))
         .sort((a, b) => VIEWS.indexOf(a.view) - VIEWS.indexOf(b.view))
         .map((i) => ({ view: i.view, width: i.width, height: i.height, qualityScore: i.qualityScore, issues: i.issues, capturedAt: i.capturedAt })),
@@ -310,8 +334,7 @@ export const discard = mutation({
     if (!validScanId(args.scanId)) return;
     const scan = await ctx.db.query("bodyScans").withIndex("by_user_and_scanId", (q) => q.eq("userId", user._id).eq("scanId", args.scanId)).unique();
     if (!scan || scan.status !== "capturing") return;
-    for (const i of await imagesOf(ctx, scan._id)) await deleteImageRow(ctx, i);
-    await ctx.db.delete(scan._id);
+    await deleteScanDeep(ctx, scan);
   },
 });
 
@@ -322,7 +345,87 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const scan = await ownScan(ctx, user._id, args.scanId);
-    for (const i of await imagesOf(ctx, scan._id)) await deleteImageRow(ctx, i);
-    await ctx.db.delete(scan._id);
+    await deleteScanDeep(ctx, scan);
+  },
+});
+
+// ─── Phase 5B: computer-vision features ───────────────────────────────────────
+
+const RECORD = v.record(v.string(), v.number());
+
+/** The phone's on-device CV results for a saved scan — structured numbers
+ * only (convex/bodyScan/features.ts). One row per CV version: re-sending the
+ * same version is a no-op, and a newer version is stored alongside, never
+ * over, an older one. */
+export const attachFeatures = mutation({
+  args: {
+    scanId: v.string(),
+    cvVersion: v.string(),
+    processedAt: v.number(),
+    processing: v.object({ deviceModel: v.string(), osVersion: v.string(), appVersion: v.string(), components: v.array(v.string()) }),
+    scale: v.object({ kind: v.union(v.literal("none"), v.literal("lidar"), v.literal("arkit")), metersPerUnit: v.optional(v.number()) }),
+    views: v.array(v.object({
+      view: VIEW,
+      imageWidth: v.number(),
+      imageHeight: v.number(),
+      processingMs: v.number(),
+      keypoints: v.array(v.object({ name: v.string(), x: v.number(), y: v.number(), confidence: v.number() })),
+      silhouette: v.optional(v.object({
+        maskWidth: v.number(), maskHeight: v.number(), top: v.number(), bottom: v.number(), left: v.number(), right: v.number(),
+        heightFraction: v.number(), areaPerHeight2: v.number(), mainComponentFraction: v.number(), keypointAgreement: v.number(),
+      })),
+      widths: RECORD,
+      ratios: RECORD,
+      quality: RECORD,
+      issues: v.array(v.string()),
+    })),
+    multiView: v.object({ ratios: RECORD, consistency: RECORD }),
+    quality: v.object({
+      overallScore: v.number(), framing: v.number(), pose: v.number(), lighting: v.number(),
+      segmentation: v.number(), motion: v.number(), multiViewConsistency: v.number(),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const scan = await ownScan(ctx, user._id, args.scanId);
+    if (scan.status !== "complete") throw new ConvexError({ code: "INVALID", message: "Save the scan before attaching features" });
+    const { scanId: _scanId, ...set } = args;
+    const problem = validateFeatureSet(set as FeatureSet, Date.now());
+    if (problem) throw new ConvexError({ code: "INVALID", message: problem });
+    // Every view described must be a view this scan actually has.
+    const views = new Set((await imagesOf(ctx, scan._id)).map((i) => i.view));
+    if (args.views.some((fv) => !views.has(fv.view))) throw new ConvexError({ code: "INVALID", message: "Features for a view the scan doesn't have" });
+    const existing = await ctx.db.query("bodyScanFeatures").withIndex("by_scan_and_version", (q) => q.eq("scanDocId", scan._id).eq("cvVersion", args.cvVersion)).first();
+    if (existing) return { stored: false, cvVersion: args.cvVersion };
+    await ctx.db.insert("bodyScanFeatures", { userId: user._id, scanDocId: scan._id, createdAt: Date.now(), ...set });
+    return { stored: true, cvVersion: args.cvVersion };
+  },
+});
+
+/** The owner's stored feature sets for one scan (all CV versions). For
+ * engineering verification and future comparison — the app doesn't show
+ * these values to the user. */
+export const features = query({
+  args: { scanId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const scan = await ownScan(ctx, user._id, args.scanId);
+    return (await featuresOf(ctx, scan._id)).map(({ _id, _creationTime, userId: _u, scanDocId: _s, ...f }) => f);
+  },
+});
+
+/** Scans left unfinished for over a day (the app was closed mid-scan): the
+ * scan, its images and their blobs are removed. Runs hourly (convex/crons.ts). */
+export const cleanupAbandoned = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    let removed = 0;
+    for (const scan of await ctx.db.query("bodyScans").take(500)) {
+      if (!isAbandoned(scan, now)) continue;
+      await deleteScanDeep(ctx, scan);
+      if (++removed >= 100) break;
+    }
+    return { removed };
   },
 });

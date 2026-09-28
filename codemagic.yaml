@@ -220,7 +220,7 @@ workflows:
   # it can't deploy or touch production data. It uploads to TestFlight for
   # internal testing — not an App Store release.
   sombrey-body-scan-5a-dev:
-    name: Sombrey Body Scan 5A Dev (dev backend)
+    name: Sombrey Body Scan Dev (5A/5B, dev backend)
     max_build_duration: 60
     instance_type: mac_mini_m2
 
@@ -272,6 +272,17 @@ workflows:
           xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -configuration Release \
             | grep -E "SOMBREY_CONVEX_URL|PRODUCT_BUNDLE_IDENTIFIER|CURRENT_PROJECT_VERSION|SWIFT_VERSION"
 
+      - name: Swift unit tests on the simulator (informational)
+        # Runs SombreyAppTests (incl. BodyScanTests). Doesn't block the build:
+        # a device-only SDK in the app target can stop a simulator build.
+        ignore_failure: true
+        script: |
+          SIM=$(xcrun simctl list devices available -j | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone')))")
+          echo "Simulator: $SIM"
+          set -o pipefail
+          xcodebuild test -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -destination "id=$SIM" \
+            -only-testing:SombreyAppTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee unit-tests.log | grep -E "Test (case|Suite)|✔|✘|passed|failed|error:" | tail -200
+
       - name: Build the .ipa
         script: |
           xcode-project build-ipa \
@@ -287,11 +298,12 @@ workflows:
           BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" /tmp/SombreyInfo.plist)
           echo "Compiled app: $VERSION ($BUILD) → Convex $URL"
           test "$URL" = "https://$DEV_CONVEX_HOST"
-          echo "DEV BUILD — Sombrey Body Scan 5A validation. Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
+          echo "DEV BUILD — Sombrey Body Scan 5A/5B validation (10-second timer, larger frame, on-device CV features). Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
 
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - unit-tests.log
 
     publishing:
       app_store_connect:

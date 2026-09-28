@@ -54,6 +54,8 @@ struct BodyScanFlow: View {
     @State private var serverScanStarted = false
     @State private var capturedTick = 0
     @State private var savedTick = 0
+    /// On-device CV per view, started as soon as the view is captured.
+    @State private var cvTasks: [BodyScanView: Task<ViewFeatures?, Never>] = [:]
 
     init(startWithResults: Bool = false) {
         _showResults = State(initialValue: startWithResults)
@@ -84,9 +86,9 @@ struct BodyScanFlow: View {
             camera.onCapture = { view, captured in
                 draft.record(view, captured)
                 capturedTick += 1
-                let next = draft.afterCapture
-                if case .capture(let v) = next { camera.view = v } else { camera.stop() }
-                stage = next
+                camera.stop()
+                startProcessing(view, captured)
+                stage = draft.afterCapture(view)
             }
         }
         .onDisappear { camera.stop() }
@@ -128,6 +130,7 @@ struct BodyScanFlow: View {
             case .consent: scroll { consent }
             case .details: scroll { BodyDetailsForm(profile: profile.value, onSaved: { advanceFromDetails() }) }
             case .prepare: scroll { prepare }
+            case .viewReview(let v): scroll { viewReview(v) }
             case .review: scroll { review }
             case .saving: saving
             case .saved, .capture: EmptyView()
@@ -211,6 +214,32 @@ struct BodyScanFlow: View {
         case "male": return "Shirtless, with shorts or fitted athletic bottoms."
         case "female": return "A sports bra, with fitted shorts or athletic leggings."
         default: return "Close-fitting athletic wear — a fitted top or sports bra, with shorts or leggings."
+        }
+    }
+
+    // MARK: One view's review
+
+    private func viewReview(_ v: BodyScanView) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header("\(v.title.uppercased()) VIEW", "Check this view", "Your whole body, head to feet, standing as asked. Use it, or retake just this view.")
+            ZStack {
+                if let c = draft.views[v], let image = UIImage(data: c.jpeg) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 420)
+            .background { SombreyGlassChamber(cornerRadius: 20) }
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .accessibilityLabel("\(v.title) view as captured")
+            VStack(spacing: 10) {
+                Button { accept(v) } label: { Text(draft.nextView == nil || draft.retaking == v ? "Use photo" : "Use photo — next view").frame(maxWidth: .infinity) }
+                    .buttonStyle(.illuminatedCTA)
+                    .accessibilityIdentifier("bodyScan.usePhoto")
+                Button { recapture(v) } label: { Text("Retake").frame(maxWidth: .infinity) }
+                    .buttonStyle(.outlineCTA)
+                    .accessibilityIdentifier("bodyScan.retakeView")
+            }
         }
     }
 
@@ -330,16 +359,47 @@ struct BodyScanFlow: View {
     private func beginCapture() {
         problem = nil
         let first = draft.nextView ?? .front
-        camera.view = first
-        stage = .capture(first)
-        Task { await camera.start() }
+        openCamera(first)
     }
 
-    private func retake(_ view: BodyScanView) {
-        draft.retake(view)
+    private func openCamera(_ view: BodyScanView) {
         camera.view = view
         stage = .capture(view)
         Task { await camera.start() }
+    }
+
+    /// From the full review: retake one view, then come back to the review.
+    private func retake(_ view: BodyScanView) {
+        cvTasks[view]?.cancel()
+        cvTasks[view] = nil
+        draft.retake(view)
+        openCamera(view)
+    }
+
+    /// From a view's own review: capture it again.
+    private func recapture(_ view: BodyScanView) {
+        cvTasks[view]?.cancel()
+        cvTasks[view] = nil
+        draft.recapture(view)
+        openCamera(view)
+    }
+
+    private func accept(_ view: BodyScanView) {
+        let next = draft.afterAccepting(view)
+        if case .capture(let v) = next { openCamera(v) } else { stage = next }
+    }
+
+    /// Phase 5B: Apple Vision on the phone, off the main thread, as soon as a
+    /// view is captured — segmentation + pose → scale-free features. The
+    /// image isn't sent anywhere for this.
+    private func startProcessing(_ view: BodyScanView, _ captured: CapturedView) {
+        cvTasks[view]?.cancel()
+        let jpeg = captured.jpeg, score = captured.qualityScore
+        let brightness = captured.conditions?.brightness
+        let still = !captured.issues.contains(.motion)
+        cvTasks[view] = Task.detached(priority: .utility) {
+            BodyScanVision.process(jpeg: jpeg, view: view, captureScore: score, brightness: brightness, subjectStill: still)?.features
+        }
     }
 
     private func cancelCapture() {
@@ -365,7 +425,7 @@ struct BodyScanFlow: View {
                     guard let c = draft.views[view] else { continue }
                     savingStep = "Saving \(view.rawValue) view"
                     let storageId = try await BodyScanUpload.upload(c.jpeg)
-                    let attached: BodyScanAttachResult = try await ConvexClientProvider.client.mutation("bodyScans:attachView", with: [
+                    var args: [String: ConvexEncodable?] = [
                         "scanId": draft.scanId,
                         "view": view.rawValue,
                         "storageId": storageId,
@@ -374,11 +434,22 @@ struct BodyScanFlow: View {
                         "qualityScore": c.qualityScore,
                         "issues": c.issues.map { $0.rawValue as ConvexEncodable? },
                         "capturedAt": c.capturedAt.timeIntervalSince1970 * 1000,
-                    ])
+                    ]
+                    // Added only when present: an explicit null isn't "absent" to Convex.
+                    if let conditions = c.conditions { args["conditions"] = ConditionsPayload(conditions) }
+                    let attached: BodyScanAttachResult = try await ConvexClientProvider.client.mutation("bodyScans:attachView", with: args)
                     guard attached.ok else { throw BodyScanSaveError.refused(view, attached.error ?? "") }
                 }
                 savingStep = "Finishing"
                 let _: BodyScanCompleteResult = try await ConvexClientProvider.client.mutation("bodyScans:complete", with: ["scanId": draft.scanId])
+                // The scan is saved. Its on-device features follow; if that
+                // fails the scan stays saved (features can be re-derived).
+                savingStep = "Finishing analysis"
+                var views: [ViewFeatures] = []
+                for v in BodyScanView.allCases { if let f = await cvTasks[v]?.value { views.append(f) } }
+                if !views.isEmpty {
+                    try? await BodyScanFeatureUpload.send(scanId: draft.scanId, set: BodyScanFeatureExtractor.combine(views))
+                }
                 busy = false
                 savedTick += 1
                 withAnimation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion)) { showResults = true }
@@ -415,12 +486,21 @@ struct BodyScanFlow: View {
 
 // MARK: - Capture screen
 
+/// Dev builds (a non-production backend) can tune the gates on the phone.
+enum BodyScanDevTools {
+    static var enabled: Bool { ConvexClientProvider.deploymentUrl != ConvexClientProvider.productionUrl }
+}
+
+/// The front camera with Sombrey's body frame, the live instruction, and the
+/// hands-free self-timer: Start → 10…4 get into position → 3-2-1 hold still
+/// (paused, with the reason, whenever the frame stops qualifying) → capture.
 struct BodyScanCaptureScreen: View {
     let camera: BodyScanCameraModel
     let view: BodyScanView
     let captured: Int
     let onCancel: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var tuning = false
 
     var body: some View {
         ZStack {
@@ -429,7 +509,7 @@ struct BodyScanCaptureScreen: View {
             case .running, .starting:
                 BodyScanPreview(session: camera.engine.session)
                     .ignoresSafeArea()
-                BodyFrameGuide(joints: camera.joints, ready: camera.assessment.ready, counting: camera.countdown != nil)
+                BodyFrameGuide(config: camera.config, joints: camera.joints, ready: camera.assessment.ready, holding: camera.countdown.isHolding)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             case .denied:
@@ -440,15 +520,19 @@ struct BodyScanCaptureScreen: View {
             chrome
         }
         .statusBarHidden()
+        .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.5), trigger: camera.holdTick)
+        .sheet(isPresented: $tuning) { BodyScanTuningView(camera: camera) }
     }
 
     private var chrome: some View {
         VStack(spacing: 0) {
             HStack {
-                Button("Cancel", action: onCancel)
-                    .font(StudioFont.body(15, weight: .medium))
-                    .foregroundStyle(StudioColor.paper)
-                    .frame(minHeight: 44)
+                Button(camera.countdown.isActive ? "Stop" : "Cancel") {
+                    if camera.countdown.isActive { camera.cancelCountdown() } else { onCancel() }
+                }
+                .font(StudioFont.body(15, weight: .medium))
+                .foregroundStyle(StudioColor.paper)
+                .frame(minHeight: 44)
                 Spacer()
                 VStack(spacing: 2) {
                     Text(view.title.uppercased())
@@ -463,7 +547,12 @@ struct BodyScanCaptureScreen: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(view.title) view, \(BodyScanView.allCases.firstIndex(of: view).map { $0 + 1 } ?? 1) of 3")
                 Spacer()
-                Color.clear.frame(width: 60, height: 44)
+                if BodyScanDevTools.enabled {
+                    Button("Tune") { tuning = true }
+                        .font(StudioFont.body(13, weight: .medium)).foregroundStyle(StudioColor.paper).frame(minWidth: 60, minHeight: 44)
+                } else {
+                    Color.clear.frame(width: 60, height: 44)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -476,40 +565,73 @@ struct BodyScanCaptureScreen: View {
                 .padding(.top, 6)
 
             Spacer()
-
-            if let n = camera.countdown {
-                Text("\(n)")
-                    .font(StudioFont.hero(88, weight: .bold))
-                    .foregroundStyle(StudioColor.paper)
-                    .contentTransition(.numericText())
-                    .accessibilityLabel("Capturing in \(n)")
-                    .transition(.opacity)
-            }
-
+            countdownDisplay
             Spacer()
 
             VStack(spacing: 14) {
-                Text(camera.capturing ? "Capturing…" : (camera.captureFailed ? "That didn't capture — hold still and try again" : camera.assessment.instruction))
+                Text(statusLine)
                     .font(StudioFont.body(15, weight: .semibold))
                     .foregroundStyle(StudioColor.ink)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal, 18)
                     .frame(minHeight: 44)
                     .background { Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .light) }
-                    .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: camera.assessment.instruction)
+                    .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: statusLine)
                     .accessibilityAddTraits(.updatesFrequently)
                     .accessibilityIdentifier("bodyScan.instruction")
-                Button { camera.captureNow() } label: {
-                    ZStack {
-                        Circle().strokeBorder(StudioColor.paper.opacity(camera.assessment.ready ? 0.95 : 0.35), lineWidth: 3).frame(width: 72, height: 72)
-                        Circle().fill(StudioColor.paper.opacity(camera.assessment.ready ? 0.9 : 0.2)).frame(width: 58, height: 58)
+                if !camera.countdown.isActive && !camera.capturing {
+                    Button { camera.startCountdown() } label: {
+                        Text("Start").frame(maxWidth: 220)
                     }
+                    .buttonStyle(.illuminatedCTA)
+                    .disabled(camera.status != .running)
+                    .accessibilityHint("Starts a 10 second timer. Place the phone, step into the frame and hold still; the photo is taken automatically.")
+                    .accessibilityIdentifier("bodyScan.startTimer")
                 }
-                .disabled(!camera.assessment.ready || camera.capturing)
-                .accessibilityLabel("Capture \(view.title.lowercased()) view")
-                .accessibilityHint(camera.assessment.ready ? "Captures now" : camera.assessment.instruction)
+                if BodyScanDevTools.enabled { diagnostics }
             }
             .padding(.bottom, 30)
         }
+    }
+
+    /// 10…4: get into position. 3-2-1: hold still (paused if not valid).
+    @ViewBuilder
+    private var countdownDisplay: some View {
+        if let n = camera.countdown.remaining, !camera.capturing {
+            VStack(spacing: 6) {
+                Text("\(n)")
+                    .font(StudioFont.hero(camera.countdown.isHolding || camera.countdown.isPaused ? 140 : 112, weight: .bold))
+                    .foregroundStyle(camera.countdown.isPaused ? StudioColor.paper.opacity(0.45) : StudioColor.paper)
+                    .monospacedDigit()
+                    .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
+                    .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: n)
+                Text(camera.countdown.isPaused ? "PAUSED" : (camera.countdown.isHolding ? "HOLD STILL" : "GET INTO POSITION"))
+                    .font(StudioFont.body(12, weight: .semibold)).tracking(2).foregroundStyle(StudioColor.paperSoft)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(camera.countdown.isPaused ? "Paused: \(camera.assessment.instruction)" : "Capturing in \(n)")
+        } else if camera.capturing {
+            Text("Capturing…").font(StudioFont.hero(28, weight: .semibold)).foregroundStyle(StudioColor.paper)
+        }
+    }
+
+    private var statusLine: String {
+        if camera.capturing { return "Hold still" }
+        if camera.captureFailed { return "That didn't capture — tap Start to try again" }
+        if camera.countdown.isPaused { return "Paused — \(camera.assessment.instruction)" }
+        if camera.countdown.isActive && !camera.countdown.isHolding { return camera.assessment.ready ? "In position — stay there" : camera.assessment.instruction }
+        if camera.countdown.isHolding { return "Hold still" }
+        return camera.assessment.ready ? "Ready — tap Start" : "Tap Start, then \(camera.assessment.instruction.lowercased())"
+    }
+
+    /// Dev builds: what the gates measure right now.
+    private var diagnostics: some View {
+        let m = camera.assessment.measured
+        let f = { (k: String) in m[k].map { String(format: "%.2f", $0) } ?? "—" }
+        return Text("span \(f("span")) · centre \(f("centre")) · facing \(f("facingRatio")) · pitch \(f("pitch"))° · roll \(f("roll"))° · light \(f("brightness"))")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(StudioColor.paperSoft)
+            .padding(.horizontal, 12)
     }
 
     private func cameraNotice(_ title: String, _ message: String, settingsLink: Bool) -> some View {
@@ -527,60 +649,139 @@ struct BodyScanCaptureScreen: View {
     }
 }
 
-/// Sombrey's body frame: where the head, shoulders and feet belong, drawn
-/// as quiet guide marks — and the user's own detected outline (shoulders,
-/// hips, knees, ankles) over it, so the frame reacts as they move. It lights
-/// only when the pose qualifies.
+/// Sombrey's body frame: a full-height figure showing exactly where the
+/// head, shoulders and feet belong — drawn from the SAME configuration the
+/// gates check, mapped through the same preview geometry — with the user's
+/// detected outline over it. It lights only when the pose qualifies.
 struct BodyFrameGuide: View {
+    let config: BodyScanProtocolConfig
     let joints: [BodyJoint: JointPoint]
     let ready: Bool
-    let counting: Bool
+    let holding: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Guide positions (fraction of the frame): head top, shoulders, feet.
-    static let headTop = 0.07, shoulders = 0.22, feet = 0.93, halfWidth = 0.19
+    /// Guide landmarks in frame coordinates (0–1), from the gate config.
+    struct Landmarks: Equatable {
+        let headTop, nose, shoulders, hips, knees, ankles, feet: Double
+        let shoulderHalfWidth, hipHalfWidth, footHalfWidth: Double
+
+        init(_ c: BodyScanProtocolConfig, aspect: Double = 0.75) {
+            let span = c.guideSpan                     // nose → ankles
+            nose = c.guideNoseY
+            ankles = c.guideAnkleY
+            let h = span / 0.87                        // ≈ standing height (nose→ankle ≈ 0.87 H)
+            headTop = max(0.005, nose - 0.07 * h)
+            shoulders = nose + 0.12 * h
+            hips = nose + 0.43 * h
+            knees = nose + 0.66 * h
+            feet = min(0.995, ankles + 0.03 * h)
+            // Widths in frame-x units (heights are in frame-y units).
+            shoulderHalfWidth = 0.13 * h / aspect
+            hipHalfWidth = 0.10 * h / aspect
+            footHalfWidth = 0.09 * h / aspect
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            let guideColor = ready ? StudioColor.accentInkDark : StudioColor.paper.opacity(0.55)
+            let g = Landmarks(config)
+            let pt: (Double, Double) -> CGPoint = { x, y in BodyScanGeometry.point(JointPoint(x: x, y: y, confidence: 1), frameAspect: 0.75, in: size) }
+            let guideColor = ready ? StudioColor.accentInkDark : StudioColor.paper.opacity(0.6)
             ZStack {
-                // Guide marks: head arc, shoulder line, feet line, side rails.
                 Path { p in
-                    let x0 = size.width * (0.5 - Self.halfWidth), x1 = size.width * (0.5 + Self.halfWidth)
-                    let yHead = size.height * Self.headTop, yShoulder = size.height * Self.shoulders, yFeet = size.height * Self.feet
-                    p.addArc(center: CGPoint(x: size.width / 2, y: yHead + size.width * 0.06), radius: size.width * 0.06, startAngle: .degrees(200), endAngle: .degrees(340), clockwise: false)
-                    p.move(to: CGPoint(x: x0, y: yShoulder)); p.addLine(to: CGPoint(x: x1, y: yShoulder))
-                    p.move(to: CGPoint(x: x0 - 12, y: yFeet)); p.addLine(to: CGPoint(x: x1 + 12, y: yFeet))
-                    for x in [x0 - 18, x1 + 18] {
-                        p.move(to: CGPoint(x: x, y: yShoulder + 20)); p.addLine(to: CGPoint(x: x, y: yFeet - 20))
-                    }
+                    // Head.
+                    let headCentre = pt(0.5, (g.headTop + g.shoulders) / 2 - 0.02)
+                    let headR = (pt(0.5, g.shoulders).y - pt(0.5, g.headTop).y) * 0.42
+                    p.addEllipse(in: CGRect(x: headCentre.x - headR * 0.8, y: pt(0.5, g.headTop).y, width: headR * 1.6, height: headR * 2))
+                    // Shoulders → arms (A-pose) and torso.
+                    let ls = pt(0.5 - g.shoulderHalfWidth, g.shoulders), rs = pt(0.5 + g.shoulderHalfWidth, g.shoulders)
+                    p.move(to: ls); p.addLine(to: rs)
+                    p.move(to: ls); p.addLine(to: pt(0.5 - g.shoulderHalfWidth * 1.45, g.hips + 0.02))
+                    p.move(to: rs); p.addLine(to: pt(0.5 + g.shoulderHalfWidth * 1.45, g.hips + 0.02))
+                    p.move(to: ls); p.addLine(to: pt(0.5 - g.hipHalfWidth, g.hips))
+                    p.move(to: rs); p.addLine(to: pt(0.5 + g.hipHalfWidth, g.hips))
+                    // Legs to the feet line.
+                    p.move(to: pt(0.5 - g.hipHalfWidth, g.hips)); p.addLine(to: pt(0.5 - g.footHalfWidth, g.feet))
+                    p.move(to: pt(0.5 + g.hipHalfWidth, g.hips)); p.addLine(to: pt(0.5 + g.footHalfWidth, g.feet))
+                    p.move(to: pt(0.5 - g.hipHalfWidth, g.hips)); p.addLine(to: pt(0.5 + g.hipHalfWidth, g.hips))
+                    // Feet line — where the feet stand.
+                    p.move(to: pt(0.5 - g.footHalfWidth * 2, g.feet)); p.addLine(to: pt(0.5 + g.footHalfWidth * 2, g.feet))
                 }
-                .stroke(guideColor, style: StrokeStyle(lineWidth: ready ? 2 : 1.2, lineCap: .round, dash: ready ? [] : [4, 6]))
-                .shadow(color: ready ? StudioColor.accent.opacity(0.45) : .clear, radius: 8)
+                .stroke(guideColor, style: StrokeStyle(lineWidth: ready ? 2.2 : 1.4, lineCap: .round, lineJoin: .round, dash: ready ? [] : [5, 7]))
+                .shadow(color: ready ? StudioColor.accent.opacity(0.45) : .clear, radius: 10)
 
                 // The user's detected outline.
                 Path { p in
-                    let pt: (BodyJoint) -> CGPoint? = { j in
-                        guard let jp = joints[j], jp.confidence >= 0.3 else { return nil }
-                        return BodyScanGeometry.point(jp, frameAspect: 0.75, in: size)
+                    let jp: (BodyJoint) -> CGPoint? = { j in
+                        guard let v = joints[j], v.confidence >= 0.3 else { return nil }
+                        return BodyScanGeometry.point(v, frameAspect: 0.75, in: size)
                     }
                     let chains: [[BodyJoint]] = [
                         [.leftShoulder, .rightShoulder], [.leftShoulder, .leftHip, .leftKnee, .leftAnkle],
                         [.rightShoulder, .rightHip, .rightKnee, .rightAnkle], [.leftHip, .rightHip],
+                        [.leftShoulder, .leftElbow, .leftWrist], [.rightShoulder, .rightElbow, .rightWrist],
                     ]
                     for chain in chains {
-                        let points = chain.compactMap(pt)
+                        let points = chain.compactMap(jp)
                         guard points.count == chain.count, let first = points.first else { continue }
                         p.move(to: first)
                         for q in points.dropFirst() { p.addLine(to: q) }
                     }
                 }
-                .stroke(StudioColor.paper.opacity(counting ? 0.9 : 0.5), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                .stroke(StudioColor.paper.opacity(holding ? 0.95 : 0.55), style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
             }
             .animation(StudioMotion.resolve(StudioMotion.release, reduceMotion: reduceMotion), value: ready)
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// Dev builds only: tune the gates on the phone during physical testing.
+/// Tuned values are recorded with every captured view ("tuned:…").
+struct BodyScanTuningView: View {
+    let camera: BodyScanCameraModel
+    @State private var c = BodyScanProtocolConfig.standard
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Distance (nose-to-ankle span of the frame)") {
+                    Stepper("Min span \(String(format: "%.2f", c.spanMin))", value: $c.spanMin, in: 0.3...0.9, step: 0.02)
+                    Stepper("Max span \(String(format: "%.2f", c.spanMax))", value: $c.spanMax, in: 0.5...0.97, step: 0.02)
+                }
+                Section("Phone") {
+                    Stepper("Max tilt \(Int(c.maxPitch))°", value: $c.maxPitch, in: 5...45, step: 1)
+                    Stepper("Max roll \(Int(c.maxRoll))°", value: $c.maxRoll, in: 2...20, step: 1)
+                }
+                Section("Light") {
+                    Stepper("Min brightness \(String(format: "%.2f", c.minBrightness))", value: $c.minBrightness, in: 0...0.6, step: 0.02)
+                }
+                Section("Now") {
+                    Text(camera.assessment.measured.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: "\n"))
+                        .font(.system(size: 12, design: .monospaced))
+                }
+                Section {
+                    Button("Reset to protocol defaults") { c = .standard }
+                    Text("Active: \(c.id)").font(.system(size: 11, design: .monospaced))
+                }
+            }
+            .navigationTitle("Capture gates (dev)")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        guard c.isSane else { return }
+                        c.save()
+                        camera.config = c
+                        dismiss()
+                    }
+                    .disabled(!c.isSane)
+                }
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            }
+        }
+        .onAppear { c = camera.config }
     }
 }
 
@@ -791,6 +992,11 @@ struct BodyScanHistoryView: View {
             Text(isBaseline ? "BASELINE" : "BODY SCAN").font(StudioFont.body(11, weight: .semibold)).tracking(1.8).foregroundStyle(StudioColor.inkSoft)
             Text(scan.date.formatted(.dateTime.day().month(.wide).year())).font(StudioFont.hero(30, weight: .semibold)).foregroundStyle(StudioColor.ink)
             Text("3 views · private to your account").font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft)
+            if BodyScanDevTools.enabled {
+                // Dev builds only: whether on-device CV features were stored (never their values).
+                Text((scan.featureVersions ?? []).isEmpty ? "DEV · no CV features stored" : "DEV · CV features stored: \((scan.featureVersions ?? []).joined(separator: ", "))")
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(StudioColor.inkFaint)
+            }
         }
         .padding(.top, 16)
     }
@@ -929,6 +1135,19 @@ struct BodyScanCaptureInfo: ConvexEncodable, Encodable {
 }
 
 struct BodyScanStartResult: Decodable { let scanId: String; let status: String }
+
+/// A view's capture conditions (tilt, body span, light, gate configuration).
+struct ConditionsPayload: Encodable, ConvexEncodable {
+    let pitchDegrees: Double
+    let rollDegrees: Double
+    let bodySpan: Double
+    let brightness: Double?
+    let protocolConfig: String
+    init(_ c: CaptureConditions) {
+        pitchDegrees = c.pitchDegrees; rollDegrees = c.rollDegrees; bodySpan = c.bodySpan
+        brightness = c.brightness; protocolConfig = c.protocolConfig
+    }
+}
 enum BodyScanSaveError: Error { case refused(BodyScanView, String) }
 /// `bodyScans:attachView`: ok, or a validation refusal (the upload was deleted).
 struct BodyScanAttachResult: Decodable {

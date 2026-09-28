@@ -19,4 +19,11 @@ crons.daily(
   internal.emails.checkInCron.processReminders,
 );
 
+/** Body Scan: unfinished scans older than a day are removed, images included. */
+crons.hourly(
+  "body scan abandoned cleanup",
+  { minuteUTC: 17 },
+  internal.bodyScans.cleanupAbandoned,
+);
+
 export default crons;
