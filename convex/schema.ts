@@ -592,6 +592,41 @@ export default defineSchema({
   }).index("by_scan_and_versions", ["scanDocId", "cvVersion", "methodVersion"])
     .index("by_user", ["userId"]),
 
+  // Body Scan Phase 5D — VALIDATION ONLY (development deployments; every
+  // function checks SOMBREY_BODYSCAN_VALIDATION). Hand-measured ground truth
+  // and per-scan capture conditions for comparing the scanner with reality.
+  // Isolated by design: never read by the profile, weight history,
+  // `measurements`, Progress, coach or AI context. Subjects are pseudonymous
+  // codes (no names); rows belong to the operator's account and are deleted
+  // with it.
+  bodyScanValidationTruth: defineTable({
+    userId: v.id("users"),              // the operator's account
+    subjectCode: v.string(),            // e.g. "S01" — never a name
+    measuredAt: v.number(),
+    measurement: v.string(),            // TRUTH_MEASUREMENTS key
+    value: v.number(),                  // canonical: cm or kg
+    unit: v.union(v.literal("cm"), v.literal("kg")),
+    protocol: v.string(),               // TRUTH_PROTOCOLS
+    operator: v.string(),               // self | assistant | clinician
+    repeat: v.number(),                 // 1–5
+    createdAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  bodyScanValidationTags: defineTable({
+    userId: v.id("users"),
+    scanDocId: v.id("bodyScans"),
+    subjectCode: v.string(),
+    session: v.string(),                // groups repeats of one set-up on one day
+    repeat: v.string(),                 // A normal · B immediate repeat · C phone repositioned
+    distanceM: v.number(),              // tape-measured camera → toes
+    phoneHeight: v.string(),
+    lighting: v.string(),
+    clothing: v.string(),
+    pose: v.string(),
+    updatedAt: v.number(),
+  }).index("by_scan", ["scanDocId"])
+    .index("by_user", ["userId"]),
+
   measurements: defineTable({
     userId: v.id("users"),
     date: v.number(),

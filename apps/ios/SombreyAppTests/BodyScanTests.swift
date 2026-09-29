@@ -521,4 +521,48 @@ struct BodyScanTests {
         #expect(note.hasPrefix("Scanner estimate differs from your saved height"))
         #expect(!note.lowercased().contains("wrong") && !note.lowercased().contains("incorrect"))
     }
+
+    // MARK: Phase 5D — validation tooling (development builds only)
+
+    @Test func validationSubjectCodesArePseudonymous() {
+        #expect(BodyScanValidationVocabulary.cleanSubjectCode("s01") == "S01")
+        #expect(BodyScanValidationVocabulary.cleanSubjectCode(" S-02 ") == "S-02")
+        #expect(BodyScanValidationVocabulary.cleanSubjectCode("John Smith") == nil, "no names")
+        #expect(BodyScanValidationVocabulary.cleanSubjectCode("") == nil)
+        #expect(BodyScanValidationVocabulary.cleanSubjectCode("ABCDEFGHIJKLM") == nil)
+        #expect(BodyScanValidationVocabulary.number("84,5") == 84.5)
+        #expect(BodyScanValidationVocabulary.number("abc") == nil)
+    }
+
+    @Test func validationUnitsAndProtocolsMatchTheServer() {
+        let byKey = Dictionary(uniqueKeysWithValues: BodyScanValidationVocabulary.measurements.map { ($0.key, $0) })
+        #expect(Set(byKey.keys) == ["height", "weight", "chest", "waist", "hips", "upperArm", "thigh", "calf", "shoulderWidth"])
+        #expect(BodyScanValidationVocabulary.units(for: byKey["weight"]!) == ["kg", "lb"])
+        #expect(BodyScanValidationVocabulary.units(for: byKey["waist"]!) == ["cm", "mm", "in"])
+        #expect(byKey["height"]!.protocols.allSatisfy { $0.hasSuffix("barefoot") })
+        #expect(BodyScanValidationVocabulary.distances == [1.0, 1.3, 1.5, 1.7, 2.0, 2.5])
+    }
+
+    @Test func validationReportDecodesAndWithheldStatisticsPrintAsNA() throws {
+        let json = """
+        {"report":{"analysisVersion":"v1","pilot":true,"scans":3,"subjects":1,"truths":2,"methodVersions":["m1"],
+          "measurements":[{"measurement":"height","scans":3,"statusCounts":{"low_confidence":3},
+            "accuracyAll":{"n":3,"pilot":true,"mae":2.1,"medianAbsolute":2,"rmse":2.3,"meanBias":1.9,"sdError":1.2,"limitsOfAgreement":[-0.45,4.25],"mape":1.18},
+            "accuracyAvailable":null,"calibration":null,"repeatability":{"groups":1,"subjects":1,"df":2,"pilot":true,"withinSd":0.9,"cvPercent":0.5,"mdc95":2.49,"icc":null},
+            "immediateRepeatMeanAbsDiff":0.5,"repositionMeanAbsDiff":1.5,"truthOperatorSd":null,"operatingCurve":[]},
+            {"measurement":"weight","scans":0,"statusCounts":{},"accuracyAll":null,"accuracyAvailable":null,"calibration":null,"repeatability":null,
+             "immediateRepeatMeanAbsDiff":null,"repositionMeanAbsDiff":null,"truthOperatorSd":null,"operatingCurve":[]}],
+          "factors":{"distanceM":[{"level":"1.0","scans":2,"metricScaleShare":1,"heightMae":null,"heightBias":null,"waistMae":null},{"level":"2.0","scans":1,"metricScaleShare":0,"heightMae":null,"heightBias":null,"waistMae":null}]},
+          "scaleFailureReasons":{"front:sparse_depth":1},"notes":["Pilot validation: engineering evidence only — no accuracy claim may be made from it."]},
+         "csv":"scanId,subject","paired":[{"scanId":"x","subject":"S01","session":"d1","repeat":"A","measurement":"height","status":"low_confidence","scanner":180.2,"uncertainty":8.1,"truth":178,"signedError":2.2,"distanceM":1.5,"depthSource":"truedepth"}]}
+        """
+        let dto = try JSONDecoder().decode(BodyScanValidationReportDTO.self, from: Data(json.utf8))
+        let text = BodyScanValidationFormat.lines(dto.report).joined(separator: "\n")
+        #expect(text.hasPrefix("PILOT VALIDATION v1 · 3 scans"))
+        #expect(text.contains("MAE 2.1") && text.contains("MDC95 2.5") && text.contains("ICC n/a"))
+        #expect(!text.contains("WEIGHT"), "a measurement with no scans isn't listed")
+        #expect(text.contains("BY DISTANCEM") && text.contains("height MAE n/a"), "withheld statistics are n/a, never 0")
+        #expect(text.contains("front:sparse_depth×1"))
+        #expect(BodyScanValidationFormat.pairedLine(dto.paired[0]) == "S01 d1 A 1.5m truedepth height: scan 180.2±8.1 [low_confidence] truth 178.0 err +2.2")
+    }
 }

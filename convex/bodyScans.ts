@@ -36,25 +36,9 @@ import {
 import { isAbandoned, validateFeatureSet, type FeatureSet } from "./bodyScan/features";
 import { MEASUREMENT_METHOD_VERSION, computeMeasurements } from "./bodyScan/measurements";
 import { VIEW, featureMultiView, featureProcessing, featureQuality, featureScale, featureView } from "./bodyScan/validators";
+import { latestMeasurements, ownScan, requireUser } from "./bodyScan/access";
 
 const SEX = v.union(v.literal("male"), v.literal("female"), v.literal("other"));
-
-async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new ConvexError({ code: "UNAUTHENTICATED", message: "Not logged in" });
-  const user = await ctx.db.query("users").withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier)).unique();
-  if (!user) throw new ConvexError({ code: "NOT_FOUND", message: "User not found" });
-  return user;
-}
-
-/** The user's own scan — or NOT_FOUND (another user's scan is reported
- * exactly like a scan that doesn't exist). */
-async function ownScan(ctx: QueryCtx | MutationCtx, userId: Id<"users">, scanId: string): Promise<Doc<"bodyScans">> {
-  if (!validScanId(scanId)) throw new ConvexError({ code: "NOT_FOUND", message: "Scan not found" });
-  const scan = await ctx.db.query("bodyScans").withIndex("by_user_and_scanId", (q) => q.eq("userId", userId).eq("scanId", scanId)).unique();
-  if (!scan) throw new ConvexError({ code: "NOT_FOUND", message: "Scan not found" });
-  return scan;
-}
 
 /** What Sombrey knows about the user right now, from their own records. */
 async function currentContext(ctx: QueryCtx | MutationCtx, user: Doc<"users">, now: number) {
@@ -95,6 +79,8 @@ async function deleteScanDeep(ctx: MutationCtx, scan: Doc<"bodyScans">) {
   for (const i of await imagesOf(ctx, scan._id)) await deleteImageRow(ctx, i);
   for (const f of await featuresOf(ctx, scan._id)) await ctx.db.delete(f._id);
   for (const m of await measurementsOf(ctx, scan._id)) await ctx.db.delete(m._id);
+  // 5D validation tag (dev only): the scan's conditions label goes with it.
+  for (const t of await ctx.db.query("bodyScanValidationTags").withIndex("by_scan", (q) => q.eq("scanDocId", scan._id)).collect()) await ctx.db.delete(t._id);
   await ctx.db.delete(scan._id);
 }
 
@@ -447,9 +433,8 @@ export const measurements = query({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const scan = await ownScan(ctx, user._id, args.scanId);
-    const rows = await measurementsOf(ctx, scan._id);
-    if (!rows.length) return null;
-    const newest = rows.reduce((a, b) => (b.cvVersion > a.cvVersion || (b.cvVersion === a.cvVersion && b.methodVersion > a.methodVersion) ? b : a));
+    const newest = await latestMeasurements(ctx, scan._id);
+    if (!newest) return null;
     const { _id, _creationTime, userId: _u, scanDocId: _s, ...m } = newest;
     return { ...m, snapshotHeightCm: scan.context.heightCm ?? null };
   },

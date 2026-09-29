@@ -369,16 +369,22 @@ export function computeMeasurements(f: FeatureSet, profileHeightCm?: number | nu
 
 // ─── Change detection (foundation for 5F) ─────────────────────────────────────
 
-export type MeasurementChange = { name: string; unit: string; a: number; b: number; delta: number; noise: number; exceedsNoise: boolean };
+export type MeasurementChange = { name: string; unit: string; a: number; b: number; delta: number; noise: number; mdc: number | null; exceedsNoise: boolean };
 
 /** Scan A → scan B on measurements both have as "available". A difference
- * only `exceedsNoise` when it's larger than the two scans' combined 95 %
- * uncertainty; smaller differences are noise, never a "change". Unvalidated. */
-export function compareMeasurements(a: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale">, b: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale">):
-  { comparable: false; reasons: string[] } | { comparable: true; validated: false; changes: MeasurementChange[] } {
+ * only `exceedsNoise` when it's larger than BOTH the two scans' combined 95 %
+ * uncertainty and — once 5D repeatability data exists — the measurement's
+ * minimum detectable change (MDC95). Scans that don't align (5D align.1:
+ * different distance, tilt or pose) aren't compared at all. Unvalidated. */
+export function compareMeasurements(
+  a: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale">,
+  b: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale">,
+  opts: { mdc?: Record<string, number>; alignment?: { comparable: boolean; reasons: string[] } } = {},
+): { comparable: false; reasons: string[] } | { comparable: true; validated: false; changes: MeasurementChange[] } {
   const reasons: string[] = [];
   if (a.methodVersion !== b.methodVersion) reasons.push("method_version_differs");
   if (a.scale.source !== b.scale.source) reasons.push("scale_source_differs");
+  if (opts.alignment && !opts.alignment.comparable) reasons.push(...opts.alignment.reasons.map((r) => `alignment:${r}`));
   if (reasons.length) return { comparable: false, reasons };
   const changes: MeasurementChange[] = [];
   for (const ma of a.measurements) {
@@ -387,7 +393,8 @@ export function compareMeasurements(a: Pick<MeasurementSet, "methodVersion" | "m
     if (ma.value === undefined || mb.value === undefined) continue;
     const delta = round(mb.value - ma.value, ma.unit === "ratio" ? 3 : 1);
     const noise = ma.unit === "ratio" ? 0 : round(Math.hypot(ma.uncertainty ?? 0, mb.uncertainty ?? 0));
-    changes.push({ name: ma.name, unit: ma.unit, a: ma.value, b: mb.value, delta, noise, exceedsNoise: ma.unit !== "ratio" && Math.abs(delta) > noise });
+    const mdc = opts.mdc?.[ma.name] ?? null;
+    changes.push({ name: ma.name, unit: ma.unit, a: ma.value, b: mb.value, delta, noise, mdc, exceedsNoise: ma.unit !== "ratio" && Math.abs(delta) > Math.max(noise, mdc ?? 0) });
   }
   return { comparable: true, validated: false, changes };
 }

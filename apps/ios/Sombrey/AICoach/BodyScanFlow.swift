@@ -997,6 +997,7 @@ struct BodyScanHistoryView: View {
     @State private var scans = ConvexQuery<[BodyScanDTO]>()
     @State private var selected: String?
     @State private var confirmingDelete: BodyScanDTO?
+    @State private var showValidation = false
 
     private var saved: [BodyScanDTO] { (scans.value ?? []).filter { $0.status == "complete" } }
 
@@ -1036,11 +1037,20 @@ struct BodyScanHistoryView: View {
                 }
                 Button { onNewScan() } label: { Text("New scan").frame(maxWidth: .infinity) }
                     .buttonStyle(.illuminatedCTA)
+                if BodyScanDevTools.enabled {
+                    // Phase 5D engineering validation — development builds only.
+                    Button("DEV · Validation") { showValidation = true }
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(StudioColor.inkSoft)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .accessibilityIdentifier("bodyScan.devValidation")
+                }
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
         }
         .task { scans.subscribe(to: "bodyScans:list") }
+        .sheet(isPresented: $showValidation) { BodyScanValidationView() }
         .confirmationDialog("Delete this scan?", isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }), titleVisibility: .visible, presenting: confirmingDelete) { scan in
             Button("Delete scan and photos", role: .destructive) { delete(scan) }
         } message: { _ in

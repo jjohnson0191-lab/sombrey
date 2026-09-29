@@ -233,3 +233,61 @@ export function compareFeatureSets(a: Comparable, b: Comparable): Comparison {
 export const ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
 export const isAbandoned = (scan: { status: string; createdAt: number }, now: number) =>
   scan.status === "capturing" && now - scan.createdAt > ABANDONED_AFTER_MS;
+
+// ─── Scan-to-scan alignment (Phase 5D, method align.1) ─────────────────────────
+//
+// Features are already normalised for camera distance and crop (every width
+// is ÷ the body's own image height). What alignment adds is a check that two
+// scans were captured comparably — the same depth source and protocol, a
+// similar distance and phone tilt, and a similar pose — before any difference
+// between them is interpreted. It never changes stored data; limits are
+// provisional until the 5D repeatability data calibrates them.
+
+export const ALIGNMENT_METHOD = "align.1";
+export const ALIGNMENT_LIMITS = {
+  /** Nose-to-ankle span of the frame (distance proxy). */
+  bodySpan: 0.1,
+  /** Phone forward/back tilt, degrees (perspective changes widths). */
+  pitchDeg: 8,
+  /** Shoulder / hip line tilt, degrees (lean, weight shift). */
+  tiltDeg: 4,
+  /** Arm length ÷ torso length (arms-in vs A-pose changes the outline). */
+  armToTorso: 0.15,
+  /** Silhouette height ÷ image height (a second distance proxy). */
+  heightFraction: 0.1,
+} as const;
+
+export type AlignmentView = {
+  view: string;
+  bodySpan?: number;
+  pitchDegrees?: number;
+  heightFraction?: number;
+  ratios: Record<string, number>;
+};
+export type AlignmentInput = { depthSource: string; protocolVersion: string; views: AlignmentView[] };
+export type Alignment = { method: string; comparable: boolean; reasons: string[]; deltas: Record<string, Record<string, number>> };
+
+export function alignScans(a: AlignmentInput, b: AlignmentInput): Alignment {
+  const reasons: string[] = [];
+  const deltas: Record<string, Record<string, number>> = {};
+  if (a.depthSource !== b.depthSource) reasons.push("depth_source_differs");
+  if (a.protocolVersion !== b.protocolVersion) reasons.push("protocol_differs");
+  for (const va of a.views) {
+    const vb = b.views.find((v) => v.view === va.view);
+    if (!vb) { reasons.push(`${va.view}:missing`); continue; }
+    const d: Record<string, number> = {};
+    const diff = (x?: number, y?: number) => (typeof x === "number" && typeof y === "number" ? Math.round((y - x) * 1000) / 1000 : undefined);
+    const span = diff(va.bodySpan, vb.bodySpan), pitch = diff(va.pitchDegrees, vb.pitchDegrees), hf = diff(va.heightFraction, vb.heightFraction);
+    if (span !== undefined) d.bodySpan = span;
+    if (pitch !== undefined) d.pitchDegrees = pitch;
+    if (hf !== undefined) d.heightFraction = hf;
+    for (const k of ["shoulderTiltDeg", "hipTiltDeg", "armToTorso"]) { const x = diff(va.ratios[k], vb.ratios[k]); if (x !== undefined) d[k] = x; }
+    if (Math.abs(span ?? 0) > ALIGNMENT_LIMITS.bodySpan || Math.abs(hf ?? 0) > ALIGNMENT_LIMITS.heightFraction) reasons.push(`${va.view}:distance_differs`);
+    if (Math.abs(pitch ?? 0) > ALIGNMENT_LIMITS.pitchDeg) reasons.push(`${va.view}:tilt_differs`);
+    if (Math.abs(d.shoulderTiltDeg ?? 0) > ALIGNMENT_LIMITS.tiltDeg || Math.abs(d.hipTiltDeg ?? 0) > ALIGNMENT_LIMITS.tiltDeg || Math.abs(d.armToTorso ?? 0) > ALIGNMENT_LIMITS.armToTorso) {
+      reasons.push(`${va.view}:pose_differs`);
+    }
+    deltas[va.view] = d;
+  }
+  return { method: ALIGNMENT_METHOD, comparable: reasons.length === 0, reasons, deltas };
+}
