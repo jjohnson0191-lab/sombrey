@@ -365,4 +365,160 @@ struct BodyScanTests {
         }
         #expect(f.widths.values.allSatisfy { $0 > 0 && $0 < 1 }, "widths are fractions of body height")
     }
+
+    // MARK: Phase 5C — metric scale from measured depth
+
+    @Test func capabilitiesComeFromHardwareAndDegradeGracefully() {
+        let faceID = BodyScanCapabilities(trueDepth: true, lidar: false)
+        #expect(faceID.frontDepth == .truedepth && !faceID.offersRearMode)
+        #expect(faceID.depthSource(for: .rear) == .none, "no LiDAR → the rear mode measures nothing")
+        let pro = BodyScanCapabilities(trueDepth: true, lidar: true)
+        #expect(pro.offersRearMode && pro.depthSource(for: .rear) == .lidar && pro.depthSource(for: .front) == .truedepth)
+        let old = BodyScanCapabilities(trueDepth: false, lidar: false)
+        #expect(old.frontDepth == .none && !old.offersRearMode)
+        #expect(old.summary(for: .front).contains("Body proportions available"))
+        #expect(!faceID.summary(for: .front).contains("Body proportions available"))
+        #expect(BodyScanCaptureMode.rear.camera == "rear" && BodyScanCaptureMode.front.camera == "front")
+    }
+
+    /// A plane z = a·x + b·y + c seen by a pinhole camera (480 × 640, f = 500, centred).
+    static func depthMap(source: BodyScanDepthSource = .truedepth, a: Double = 0, b: Double = 0, c: Double = 1.2, hole: ((Int, Int) -> Bool)? = nil) -> BodyScanDepthMap {
+        var m = [Float](repeating: .nan, count: 480 * 640)
+        for v in 0..<640 {
+            for u in 0..<480 where hole?(u, v) != true {
+                let rx = (Double(u) + 0.5 - 240) / 500, ry = (Double(v) + 0.5 - 320) / 500
+                m[v * 480 + u] = Float(c / (1 - a * rx - b * ry))
+            }
+        }
+        return BodyScanDepthMap(source: source, width: 480, height: 640, meters: m, focalPx: 500, principalX: 240, principalY: 320,
+                                intrinsics: "calibration", accuracy: "absolute", filtered: false)
+    }
+
+    /// A 480 × 640 mask: a body rectangle, rows 64..<576, columns 190..<290.
+    static func rectMask() -> SilhouetteMask {
+        var v = [UInt8](repeating: 0, count: 480 * 640)
+        for y in 64..<576 { for x in 190..<290 { v[y * 480 + x] = 255 } }
+        return SilhouetteMask(width: 480, height: 640, values: v)
+    }
+
+    static let rectJoints: [BodyJoint: JointPoint] = [
+        .leftShoulder: JointPoint(x: 0.42, y: 0.2, confidence: 1), .rightShoulder: JointPoint(x: 0.58, y: 0.2, confidence: 1),
+        .leftHip: JointPoint(x: 0.45, y: 0.5, confidence: 1), .rightHip: JointPoint(x: 0.55, y: 0.5, confidence: 1),
+    ]
+
+    @Test func depthAvailableAFlatSurfaceGivesTheExactProjectedHeight() throws {
+        let e = try BodyScanScale.evidence(view: .front, depth: Self.depthMap(), mask: Self.rectMask(), joints: Self.rectJoints).get()
+        #expect(abs(e.surfaceHeightM - 512 * 1.2 / 500) < 0.0002)
+        #expect(abs(e.distanceM - 1.2) < 0.0001 && e.planeTiltDeg < 0.001 && e.residualM < 0.0001)
+        #expect(e.validFraction == 1 && e.samples > 1000 && e.accuracy == "absolute")
+    }
+
+    @Test func aTiltedPhoneIsCorrectedByTheFittedPlane() throws {
+        let (b, c) = (0.2, 1.3)
+        let e = try BodyScanScale.evidence(view: .back, depth: Self.depthMap(b: b, c: c), mask: Self.rectMask(), joints: Self.rectJoints).get()
+        func point(_ v: Double) -> (Double, Double) { let ry = (v - 320) / 500, t = c / (1 - b * ry); return (t * ry, t) }
+        let (y0, z0) = point(64), (y1, z1) = point(576)
+        #expect(abs(e.surfaceHeightM - ((y0 - y1) * (y0 - y1) + (z0 - z1) * (z0 - z1)).squareRoot()) < 0.0002)
+        #expect(abs(e.planeTiltDeg - atan(0.2) * 180 / .pi) < 0.01)
+        #expect(abs(e.distanceM - c / (1 + b * b).squareRoot()) < 0.0002)
+    }
+
+    @Test func insufficientDepthIsReportedNeverFilled() throws {
+        // Half the torso without depth: the evidence says so (the server decides).
+        let half = try BodyScanScale.evidence(view: .front, depth: Self.depthMap(hole: { u, _ in u >= 240 }), mask: Self.rectMask(), joints: Self.rectJoints).get()
+        #expect(abs(half.validFraction - 0.5) < 0.02)
+        // No depth at all, no torso, a side view: failures, not numbers.
+        #expect(BodyScanScale.evidence(view: .front, depth: Self.depthMap(hole: { _, _ in true }), mask: Self.rectMask(), joints: Self.rectJoints) == .failure(.noDepth))
+        #expect(BodyScanScale.evidence(view: .front, depth: Self.depthMap(), mask: Self.rectMask(), joints: [:]) == .failure(.noTorso))
+        #expect(BodyScanScale.evidence(view: .side, depth: Self.depthMap(), mask: Self.rectMask(), joints: Self.rectJoints) == .failure(.notAFrontOrBackView))
+        let empty = SilhouetteMask(width: 480, height: 640, values: [UInt8](repeating: 0, count: 480 * 640))
+        #expect(BodyScanScale.evidence(view: .front, depth: Self.depthMap(), mask: empty, joints: Self.rectJoints) == .failure(.noSilhouette))
+    }
+
+    @Test func depthFromLiDARAndTrueDepthIsTheSameGeometry() throws {
+        let td = try BodyScanScale.evidence(view: .front, depth: Self.depthMap(source: .truedepth), mask: Self.rectMask(), joints: Self.rectJoints).get()
+        let li = try BodyScanScale.evidence(view: .front, depth: Self.depthMap(source: .lidar), mask: Self.rectMask(), joints: Self.rectJoints).get()
+        #expect(td.surfaceHeightM == li.surfaceHeightM, "the source changes the error model on the server, not the geometry")
+    }
+
+    @Test func sensorOrientationMapsToTheUprightPhoto() {
+        #expect(BodyScanDepthOrientation.rotateClockwise([1, 2, 3, 4, 5, 6], width: 3, height: 2) == [4, 1, 5, 2, 6, 3])
+        let p = BodyScanDepthOrientation.orient(x: 0.2, y: 0.1, exif: 6)
+        #expect(abs(p.x - 0.9) < 1e-12 && abs(p.y - 0.2) < 1e-12)
+        let q = BodyScanDepthOrientation.orient(x: 0.2, y: 0.1, exif: 1)
+        #expect(q.x == 0.2 && q.y == 0.1)
+        let r = BodyScanDepthOrientation.orient(x: 0.2, y: 0.1, exif: 8)
+        #expect(abs(r.x - 0.1) < 1e-12 && abs(r.y - 0.8) < 1e-12)
+    }
+
+    @Test func profilesAndSideLegDepthsAreScaleFree() {
+        let h = 351.0
+        let front = BodyScanFeatureExtractor.extract(view: .front, mask: Self.personMask(), joints: Self.maskJoints(), imageWidth: 1536, imageHeight: 2048, captureScore: 1, brightness: 0.5, subjectStill: true)
+        let p = front.profile ?? []
+        #expect(p.count == BodyScanFeatureExtractor.profileSamples)
+        #expect(abs(p[10] - 61 / h) < 0.001, "torso row: the torso only, arms apart aren't counted")
+        #expect(abs(p[30] - 42 / h) < 0.001, "leg row: the two legs added")
+        let side = BodyScanFeatureExtractor.extract(view: .side, mask: Self.personMask(), joints: Self.maskJoints(), imageWidth: 1536, imageHeight: 2048, captureScore: 1, brightness: 0.5, subjectStill: true)
+        #expect(abs((side.widths["thighDepth"] ?? 0) - 21 / h) < 0.001)
+        #expect(abs((side.widths["calfDepth"] ?? 0) - 21 / h) < 0.001)
+        #expect(BodyScanFeatureExtractor.version == "5c.1")
+    }
+
+    @Test func aMetricSourceIsClaimedOnlyWithEvidence() throws {
+        var front = BodyScanFeatureExtractor.extract(view: .front, mask: Self.personMask(), joints: Self.maskJoints(), imageWidth: 1536, imageHeight: 2048, captureScore: 1, brightness: 0.5, subjectStill: true)
+        #expect(BodyScanFeatureExtractor.combine([front], scaleSource: .truedepth).scaleSource == .none, "depth source but no evidence → no scale")
+        front.scaleEvidence = try BodyScanScale.evidence(view: .front, depth: Self.depthMap(), mask: Self.rectMask(), joints: Self.rectJoints).get()
+        let set = BodyScanFeatureExtractor.combine([front], scaleSource: .truedepth)
+        #expect(set.scaleSource == .truedepth && set.evidence.count == 1)
+    }
+
+    @Test func theRearModeGivesLongerToWalkRound() {
+        var c = CaptureCountdown()
+        c.start(seconds: BodyScanCameraModel.rearSeconds)
+        #expect(c.remaining == 15)
+        c.start(seconds: 1)
+        #expect(c.remaining == CaptureCountdown.holdSeconds + 1, "never shorter than the hold")
+        c.start()
+        #expect(c.remaining == CaptureCountdown.seconds)
+    }
+
+    static func measurements(_ items: [BodyScanMeasurementsDTO.Item], ok: Bool = true, source: String = "truedepth", differs: Bool = false) -> BodyScanMeasurementsDTO {
+        BodyScanMeasurementsDTO(cvVersion: "5c.1", methodVersion: "m1", computedAt: 0,
+                                scale: .init(source: source, ok: ok, views: ok ? ["front"] : [], reasons: []),
+                                measurements: items,
+                                profileComparison: .init(profileHeightCm: 179, scannerHeightCm: 171, differenceCm: -8, differs: differs),
+                                validated: false)
+    }
+    static func item(_ name: String, _ status: String, _ value: Double?, _ u: Double?, unit: String = "cm") -> BodyScanMeasurementsDTO.Item {
+        .init(name: name, kind: "length", status: status, unit: unit, value: value, uncertainty: u, confidence: 0.5, method: "m", reasons: [])
+    }
+
+    @Test func onlyAvailableMeasurementsAreShownWithoutFalsePrecision() {
+        let m = Self.measurements([
+            Self.item("height", "available", 178.43, 3.2),
+            Self.item("waistCircumference", "low_confidence", 82.4, 9.1),
+            Self.item("shoulderWidth", "available", 43.8, 0.4),
+            Self.item("trunkLegVolume", "available", 61.2, 4, unit: "L"),
+            Self.item("weight", "unavailable", nil, nil, unit: "kg"),
+        ])
+        let lines = BodyScanMeasurementPresentation.lines(m)
+        #expect(lines == [.init(label: "Height", text: "178 ± 4 cm"), .init(label: "Shoulder width", text: "44 ± 1 cm")])
+        #expect(!lines.contains { $0.label == "Waist" }, "low-confidence values are never shown")
+        #expect(!lines.contains { $0.text.contains(".") }, "whole centimetres only")
+        #expect(BodyScanMeasurementPresentation.summary(m).contains("not yet validated"))
+    }
+
+    @Test func withoutScaleOnlyProportionsAreOffered() {
+        let m = Self.measurements([Self.item("height", "unavailable", nil, nil), Self.item("waistToHip", "available", 0.85, nil, unit: "ratio")], ok: false, source: "none")
+        #expect(BodyScanMeasurementPresentation.lines(m).isEmpty)
+        #expect(BodyScanMeasurementPresentation.summary(m).contains("Body proportions available"))
+        #expect(BodyScanMeasurementPresentation.proportions(m) == ["waist-to-hip"])
+    }
+
+    @Test func aHeightGapIsNotedNeverCorrected() {
+        #expect(BodyScanMeasurementPresentation.heightNote(Self.measurements([], differs: false)) == nil)
+        let note = BodyScanMeasurementPresentation.heightNote(Self.measurements([], differs: true)) ?? ""
+        #expect(note.hasPrefix("Scanner estimate differs from your saved height"))
+        #expect(!note.lowercased().contains("wrong") && !note.lowercased().contains("incorrect"))
+    }
 }

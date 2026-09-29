@@ -3,6 +3,7 @@ import AVFoundation
 import Vision
 import CoreMotion
 import UIKit
+import ImageIO
 
 // Sombrey Body Scan — Phase 5A camera engine. Apple frameworks only:
 // AVFoundation (front camera, stills), Vision (body pose, people count),
@@ -10,6 +11,17 @@ import UIKit
 // `PoseFrame`; `BodyScanQuality` (BodyScanQuality.swift) judges it. Frames
 // never leave the phone and are never stored — only the captured still of
 // each view is, after the user reviews it.
+//
+// Phase 5C: on Face ID iPhones the front camera is opened as the TrueDepth
+// camera, and each still also carries its (unfiltered) depth map, kept in
+// memory only for the on-device scale evidence. Without TrueDepth the scan
+// works exactly as before, with no metric scale.
+
+/// One capture: the camera's photo file and, when measured, its depth.
+struct BodyScanRawCapture: Sendable {
+    let photo: Data
+    let depth: BodyScanDepthMap?
+}
 
 /// The capture pipeline on its own serial queue. `@unchecked Sendable`: all
 /// mutable state is touched only on `queue` (or, for motion, read there).
@@ -21,7 +33,11 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
     private let motion = CMMotionManager()
     private let poseRequest = VNDetectHumanBodyPoseRequest()
     private var onFrame: (@Sendable (PoseFrame) -> Void)?
-    private var photoContinuation: CheckedContinuation<Data?, Never>?
+    private var photoContinuation: CheckedContinuation<BodyScanRawCapture?, Never>?
+    /// Horizontal field of view of the active format (the intrinsics fallback).
+    private var fieldOfViewDeg: Float = 0
+    /// Whether stills carry TrueDepth depth on this device.
+    private(set) var depthEnabled = false
     private var lastProcessed = Date.distantPast
     private var previousJoints: [BodyJoint: JointPoint] = [:]
     private var configured = false
@@ -62,7 +78,9 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = .photo   // 4:3 stills — the protocol's framing
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else { throw SetupError.noCamera }
+        // TrueDepth when the device has it (the same front camera, plus depth).
+        guard let camera = AVCaptureDevice.default(.builtInTrueDepthCamera, for: .video, position: .front)
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else { throw SetupError.noCamera }
         let input = try AVCaptureDeviceInput(device: camera)
         guard session.canAddInput(input) else { throw SetupError.cannotAddInput }
         session.addInput(input)
@@ -74,6 +92,9 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
         session.addOutput(videoOutput)
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
+        if photoOutput.isDepthDataDeliverySupported { photoOutput.isDepthDataDeliveryEnabled = true }
+        depthEnabled = photoOutput.isDepthDataDeliveryEnabled
+        fieldOfViewDeg = camera.activeFormat.videoFieldOfView
 
         // Portrait frames. Analysis frames are mirrored like the preview (so
         // the guide lines up with what the user sees); stills are NOT
@@ -139,7 +160,7 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
 
     /// Vision points are normalised with the origin bottom-left; the gates
     /// use top-left.
-    private static func joints(_ o: VNHumanBodyPoseObservation) -> [BodyJoint: JointPoint] {
+    static func joints(_ o: VNHumanBodyPoseObservation) -> [BodyJoint: JointPoint] {
         guard let points = try? o.recognizedPoints(.all) else { return [:] }
         var out: [BodyJoint: JointPoint] = [:]
         for (name, joint) in jointMap {
@@ -150,13 +171,13 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
         return out
     }
 
-    private static func span(_ j: [BodyJoint: JointPoint]) -> Double {
+    static func span(_ j: [BodyJoint: JointPoint]) -> Double {
         let ys = j.values.filter { $0.confidence >= 0.3 }.map(\.y)
         guard let lo = ys.min(), let hi = ys.max() else { return 0 }
         return hi - lo
     }
 
-    private static func displacement(_ a: [BodyJoint: JointPoint], _ b: [BodyJoint: JointPoint]) -> Double {
+    static func displacement(_ a: [BodyJoint: JointPoint], _ b: [BodyJoint: JointPoint]) -> Double {
         let keys: [BodyJoint] = [.neck, .leftShoulder, .rightShoulder, .leftHip, .rightHip, .leftKnee, .rightKnee]
         let d = keys.compactMap { k -> Double? in
             guard let p = a[k], let q = b[k], p.confidence >= 0.3, q.confidence >= 0.3 else { return nil }
@@ -166,7 +187,7 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
     }
 
     /// Mean of the luma plane, sampled sparsely (every 8th pixel/row).
-    private static func meanLuma(_ pixels: CVPixelBuffer) -> Double? {
+    static func meanLuma(_ pixels: CVPixelBuffer) -> Double? {
         CVPixelBufferLockBaseAddress(pixels, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
         guard CVPixelBufferGetPlaneCount(pixels) > 0, let base = CVPixelBufferGetBaseAddressOfPlane(pixels, 0) else { return nil }
@@ -185,14 +206,20 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
 
     // MARK: Stills
 
-    /// Captures one still (JPEG as the camera produced it), or nil.
-    func capturePhoto() async -> Data? {
-        await withCheckedContinuation { (c: CheckedContinuation<Data?, Never>) in
+    /// Captures one still (JPEG as the camera produced it, plus TrueDepth
+    /// depth when available), or nil.
+    func capturePhoto() async -> BodyScanRawCapture? {
+        await withCheckedContinuation { (c: CheckedContinuation<BodyScanRawCapture?, Never>) in
             queue.async {
                 guard self.photoContinuation == nil, self.session.isRunning else { c.resume(returning: nil); return }
                 self.photoContinuation = c
                 let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
                 settings.photoQualityPrioritization = .quality
+                if self.photoOutput.isDepthDataDeliveryEnabled {
+                    settings.isDepthDataDeliveryEnabled = true
+                    settings.isDepthDataFiltered = false       // holes stay holes — never invented depth
+                    settings.embedsDepthDataInPhoto = false    // the stored photo carries no depth
+                }
                 self.photoOutput.capturePhoto(with: settings, delegate: self)
             }
         }
@@ -200,8 +227,13 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let data = error == nil ? photo.fileDataRepresentation() : nil
+        var depth: BodyScanDepthMap?
+        if error == nil, let d = photo.depthData {
+            let exif = (photo.metadata[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
+            depth = BodyScanDepthCapture.trueDepthMap(d, exifOrientation: exif, fieldOfViewDeg: fieldOfViewDeg)
+        }
         queue.async {
-            self.photoContinuation?.resume(returning: data)
+            self.photoContinuation?.resume(returning: data.map { BodyScanRawCapture(photo: $0, depth: depth) })
             self.photoContinuation = nil
         }
     }
@@ -247,10 +279,24 @@ final class BodyScanCameraModel {
     }
     /// Delivered on the main actor with each accepted capture.
     var onCapture: ((BodyScanView, CapturedView) -> Void)?
+    /// Front (standard, TrueDepth where available) or rear (LiDAR metric mode).
+    private(set) var mode: BodyScanCaptureMode = .front
 
     let engine = BodyScanCaptureEngine()
+    let lidar = BodyScanLiDAREngine()
+    private let voice = BodyScanVoiceGuide()
     private var lastFrame: PoseFrame?
     private var timerTask: Task<Void, Never>?
+    /// The rear mode: seconds to walk round to the front of the phone.
+    nonisolated static let rearSeconds = 15
+
+    /// Chosen before the camera starts; fixed for the whole scan.
+    func use(_ mode: BodyScanCaptureMode) {
+        guard mode != self.mode else { return }
+        stop()
+        self.mode = mode == .rear && !BodyScanLiDAREngine.isSupported ? .front : mode
+        status = .starting
+    }
 
     func start() async {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -262,8 +308,14 @@ final class BodyScanCameraModel {
             return
         }
         do {
-            try await engine.start { [weak self] frame in
+            let deliver: @Sendable (PoseFrame) -> Void = { [weak self] frame in
                 Task { @MainActor in self?.handle(frame) }
+            }
+            if mode == .rear {
+                try await lidar.start(onFrame: deliver)
+                voice.activate()
+            } else {
+                try await engine.start(onFrame: deliver)
             }
             status = .running
         } catch {
@@ -274,6 +326,8 @@ final class BodyScanCameraModel {
     func stop() {
         cancelCountdown()
         engine.stop()
+        lidar.stop()
+        if mode == .rear { voice.deactivate() }
     }
 
     private func handle(_ frame: PoseFrame) {
@@ -284,6 +338,10 @@ final class BodyScanCameraModel {
         let wasPaused = countdown.isPaused
         countdown.observe(valid: assessment.ready)
         if wasPaused != countdown.isPaused, countdown.isHolding { holdTick += 1 }
+        // Rear mode: the screen faces away, so the one instruction is spoken.
+        if mode == .rear, countdown.isActive, !countdown.isHolding || countdown.isPaused, !assessment.ready {
+            voice.say(countdown.isPaused ? "Paused. \(assessment.instruction)" : assessment.instruction)
+        }
     }
 
     /// Start: the 10-second self-timer. The user walks into position; the last
@@ -291,7 +349,8 @@ final class BodyScanCameraModel {
     func startCountdown() {
         guard status == .running, !capturing else { return }
         captureFailed = false
-        countdown.start()
+        countdown.start(seconds: mode == .rear ? Self.rearSeconds : CaptureCountdown.seconds)
+        if mode == .rear { voice.say("Timer started. Walk to your spot, facing the phone.", urgent: true) }
         timerTask?.cancel()
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -299,6 +358,7 @@ final class BodyScanCameraModel {
                 guard let self, !Task.isCancelled else { return }
                 self.countdown.tick(valid: self.assessment.ready)
                 if self.countdown.isHolding { self.holdTick += 1 }
+                if self.mode == .rear, self.countdown.isHolding, let n = self.countdown.remaining { self.voice.say("\(n)", urgent: true) }
                 if self.countdown.phase == .capture {
                     await self.capture()
                     return
@@ -333,15 +393,22 @@ final class BodyScanCameraModel {
             brightness: frame.brightness.map { ($0 * 1000).rounded() / 1000 },
             protocolConfig: config.id
         )
-        let raw = await engine.capturePhoto()
-        let normalized = await Task.detached { raw.flatMap { BodyScanCaptureEngine.normalize($0) } }.value
+        let raw = mode == .rear ? await lidar.capturePhoto() : await engine.capturePhoto()
+        let photo = raw?.photo
+        let normalized = await Task.detached { photo.flatMap { BodyScanCaptureEngine.normalize($0) } }.value
         capturing = false
         countdown.finish()
         timerTask = nil
-        guard let normalized else { captureFailed = true; return }
+        guard let normalized else {
+            captureFailed = true
+            if mode == .rear { voice.say("That didn't capture. Come back to the phone and tap Start.", urgent: true) }
+            return
+        }
+        if mode == .rear { voice.say("Got it. Come back to the phone.", urgent: true) }
         onCapture?(view, CapturedView(
             jpeg: normalized.jpeg, width: normalized.width, height: normalized.height,
-            qualityScore: quality.score, issues: quality.issues, capturedAt: Date(), conditions: conditions
+            qualityScore: quality.score, issues: quality.issues, capturedAt: Date(), conditions: conditions,
+            depth: raw?.depth
         ))
     }
 }

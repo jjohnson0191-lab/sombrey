@@ -15,10 +15,15 @@
 
 import { VIEWS, type View } from "./rules.ts";
 
-/** Current on-device feature pipeline (the app sends it; the server only
- * accepts known versions). */
-export const CV_VERSIONS = ["5b.1"] as const;
+/** On-device feature pipelines the server accepts (the app sends its own).
+ * 5c.1 adds side-view thigh/calf depths, height profiles and, where the
+ * phone measured depth, per-view scale evidence. */
+export const CV_VERSIONS = ["5b.1", "5c.1"] as const;
 export type CvVersion = (typeof CV_VERSIONS)[number];
+
+/** Samples in a 5c.1 view profile, top of the head → soles, evenly spaced
+ * over the silhouette height. */
+export const PROFILE_SAMPLES = 40;
 
 /** Keypoint names the pipeline emits (Apple Vision body pose, 2D). */
 export const KEYPOINTS = [
@@ -27,7 +32,35 @@ export const KEYPOINTS = [
   "root", "leftHip", "rightHip", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle",
 ] as const;
 
-export const SCALE_KINDS = ["none", "lidar", "arkit"] as const;
+/** Where metric scale came from. `none`: a plain photo — no metric values
+ * exist. `truedepth`: the front TrueDepth camera's absolute depth map
+ * (Phase 5C). `lidar` / `arkit_metric`: reserved for rear-camera capture
+ * (not built; see docs/BODY_SCAN_5C.md). */
+export const SCALE_KINDS = ["none", "truedepth", "lidar", "arkit_metric"] as const;
+export type ScaleKind = (typeof SCALE_KINDS)[number];
+
+/** What the phone measured about one view's metric scale. The depth map
+ * itself never leaves the phone — only these numbers. */
+export type ScaleEvidence = {
+  view: string;
+  depthWidth: number;
+  depthHeight: number;
+  /** Focal length in depth-map pixels. */
+  focalPx: number;
+  intrinsics: "calibration" | "field_of_view";
+  accuracy: "absolute" | "relative";
+  filtered: boolean;
+  /** Torso depth samples used / the fraction of the torso that had depth. */
+  samples: number;
+  validFraction: number;
+  /** Torso front (or back) surface: distance along its normal, tilt from the
+   * camera axis, and RMS distance of the samples from the fitted plane. */
+  distanceM: number;
+  planeTiltDeg: number;
+  residualM: number;
+  /** Silhouette top → bottom, projected onto that surface plane. */
+  surfaceHeightM: number;
+};
 
 const KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
@@ -47,13 +80,16 @@ export type FeatureView = {
   ratios: Record<string, number>;
   quality: Record<string, number>;
   issues: string[];
+  /** 5c.1: the body's width (front/back) or depth (side) at PROFILE_SAMPLES
+   * heights, ÷ silhouette height; 0 where there's no body. */
+  profile?: number[];
 };
 
 export type FeatureSet = {
   cvVersion: string;
   processedAt: number;
   processing: { deviceModel: string; osVersion: string; appVersion: string; components: string[] };
-  scale: { kind: string; metersPerUnit?: number };
+  scale: { kind: string; metersPerUnit?: number; evidence?: ScaleEvidence[] };
   views: FeatureView[];
   multiView: { ratios: Record<string, number>; consistency: Record<string, number> };
   quality: { overallScore: number; framing: number; pose: number; lighting: number; segmentation: number; motion: number; multiViewConsistency: number };
@@ -76,8 +112,17 @@ export function validateFeatureSet(f: FeatureSet, now: number): string | null {
   for (const s of [p?.deviceModel, p?.osVersion, p?.appVersion]) if (typeof s !== "string" || !s || s.length > 40) return "Invalid processing info";
   if (!Array.isArray(p.components) || p.components.length > 12 || p.components.some((c) => typeof c !== "string" || !/^[a-z0-9.]{1,60}$/i.test(c))) return "Invalid components";
   if (!(SCALE_KINDS as readonly string[]).includes(f.scale?.kind)) return "Invalid scale";
-  if (f.scale.kind === "none" && f.scale.metersPerUnit !== undefined) return "No metric scale without a scale source";
-  if (f.scale.metersPerUnit !== undefined && (!finite(f.scale.metersPerUnit) || f.scale.metersPerUnit <= 0 || f.scale.metersPerUnit > 100)) return "Invalid scale";
+  // Metric scale is never asserted directly: it's derived on the server from
+  // the phone's evidence, and only when a real scale source produced it.
+  if (f.scale.metersPerUnit !== undefined) return "Metric scale is derived from evidence, never sent";
+  const evidence = f.scale.evidence;
+  if (f.scale.kind === "none") {
+    if (evidence !== undefined) return "No metric scale without a scale source";
+  } else {
+    if (f.cvVersion === "5b.1") return "Scale evidence needs CV version 5c.1";
+    const problem = validateEvidence(evidence);
+    if (problem) return problem;
+  }
   if (!Array.isArray(f.views) || f.views.length === 0 || f.views.length > VIEWS.length) return "Invalid views";
   const seen = new Set<string>();
   for (const v of f.views) {
@@ -103,11 +148,35 @@ export function validateFeatureSet(f: FeatureSet, now: number): string | null {
     if (!validRecord(v.ratios, 40, (x) => Math.abs(x) <= 100)) return "Invalid ratios";
     if (!validRecord(v.quality, 20, (x) => x >= 0 && x <= 1)) return "Invalid quality";
     if (!Array.isArray(v.issues) || v.issues.length > 20 || v.issues.some((i) => typeof i !== "string" || !/^[a-z_]{1,40}$/.test(i))) return "Invalid issues";
+    if (v.profile !== undefined) {
+      if (f.cvVersion === "5b.1") return "Profiles need CV version 5c.1";
+      if (!Array.isArray(v.profile) || v.profile.length !== PROFILE_SAMPLES || v.profile.some((x) => !finite(x) || x < 0 || x > 2)) return "Invalid profile";
+    }
   }
   if (!validRecord(f.multiView?.ratios, 40, (x) => Math.abs(x) <= 100)) return "Invalid multi-view ratios";
   if (!validRecord(f.multiView?.consistency, 20, (x) => x >= 0 && x <= 1)) return "Invalid multi-view consistency";
   const q = f.quality;
   for (const n of [q?.overallScore, q?.framing, q?.pose, q?.lighting, q?.segmentation, q?.motion, q?.multiViewConsistency]) if (!unit(n)) return "Invalid quality";
+  return null;
+}
+
+function validateEvidence(evidence: ScaleEvidence[] | undefined): string | null {
+  if (!Array.isArray(evidence) || evidence.length === 0 || evidence.length > VIEWS.length) return "Scale evidence required for a metric scale source";
+  const seen = new Set<string>();
+  for (const e of evidence) {
+    if (!(VIEWS as readonly string[]).includes(e.view) || seen.has(e.view)) return "Invalid scale evidence";
+    seen.add(e.view);
+    for (const n of [e.depthWidth, e.depthHeight]) if (!Number.isInteger(n) || n < 16 || n > 4096) return "Invalid scale evidence";
+    if (!finite(e.focalPx) || e.focalPx <= 0 || e.focalPx > 20_000) return "Invalid scale evidence";
+    if (e.intrinsics !== "calibration" && e.intrinsics !== "field_of_view") return "Invalid scale evidence";
+    if (e.accuracy !== "absolute" && e.accuracy !== "relative") return "Invalid scale evidence";
+    if (typeof e.filtered !== "boolean") return "Invalid scale evidence";
+    if (!Number.isInteger(e.samples) || e.samples < 0 || e.samples > 1_000_000 || !unit(e.validFraction)) return "Invalid scale evidence";
+    if (!finite(e.distanceM) || e.distanceM <= 0 || e.distanceM > 10) return "Invalid scale evidence";
+    if (!finite(e.planeTiltDeg) || e.planeTiltDeg < 0 || e.planeTiltDeg > 90) return "Invalid scale evidence";
+    if (!finite(e.residualM) || e.residualM < 0 || e.residualM > 1) return "Invalid scale evidence";
+    if (!finite(e.surfaceHeightM) || e.surfaceHeightM <= 0 || e.surfaceHeightM > 4) return "Invalid scale evidence";
+  }
   return null;
 }
 

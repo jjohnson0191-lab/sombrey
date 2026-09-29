@@ -94,20 +94,33 @@ export type CaptureInfo = {
   deviceModel: string;   // e.g. "iPhone16,1"
   osVersion: string;     // e.g. "iOS 18.1"
   appVersion: string;    // e.g. "1.0 (48)"
-  camera: "front";       // 5A protocol: the front camera, the user sees themselves
+  /** "front": the standard guided capture (the user sees themselves).
+   * "rear": Phase 5C LiDAR metric capture (spoken guidance; screen faces away). */
+  camera: "front" | "rear";
+  /** Phase 5C: the depth source the phone captured with — "none" when the
+   * device has none (older builds omit it). */
+  depth?: DepthSource;
   imageMaxPixel: number; // stored long side
   jpegQuality: number;
 };
+
+export const DEPTH_SOURCES = ["none", "truedepth", "lidar"] as const;
+export type DepthSource = (typeof DEPTH_SOURCES)[number];
 
 /** Only the fields the protocol needs, bounded — nothing else is stored. */
 export function sanitizeCapture(c: unknown): CaptureInfo | null {
   const x = c as Partial<CaptureInfo> | null;
   const str = (s: unknown, max: number) => (typeof s === "string" && s.trim() && s.length <= max ? s.trim() : null);
   const deviceModel = str(x?.deviceModel, 40), osVersion = str(x?.osVersion, 40), appVersion = str(x?.appVersion, 40);
-  if (!deviceModel || !osVersion || !appVersion || x?.camera !== "front") return null;
+  if (!deviceModel || !osVersion || !appVersion || (x?.camera !== "front" && x?.camera !== "rear")) return null;
+  const depth = x.depth;
+  if (depth !== undefined && !(DEPTH_SOURCES as readonly string[]).includes(depth)) return null;
+  // The front camera's depth is TrueDepth; the rear mode exists only for LiDAR.
+  if (x.camera === "front" && depth === "lidar") return null;
+  if (x.camera === "rear" && depth !== "lidar") return null;
   if (!Number.isInteger(x.imageMaxPixel) || x.imageMaxPixel! < IMAGE_LIMITS.minLongSide || x.imageMaxPixel! > IMAGE_LIMITS.maxLongSide) return null;
   if (typeof x.jpegQuality !== "number" || x.jpegQuality < 0.5 || x.jpegQuality > 1) return null;
-  return { deviceModel, osVersion, appVersion, camera: "front", imageMaxPixel: x.imageMaxPixel!, jpegQuality: x.jpegQuality };
+  return { deviceModel, osVersion, appVersion, camera: x.camera, ...(depth ? { depth } : {}), imageMaxPixel: x.imageMaxPixel!, jpegQuality: x.jpegQuality };
 }
 
 // ─── The user's context at scan time ─────────────────────────────────────────

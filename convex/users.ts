@@ -1142,6 +1142,7 @@ export const deleteSelfAccount = mutation({
     // Body Scan: image rows (purgeDocs deletes each row's image blob), then the scans.
     await purgeDocs(ctx, await ctx.db.query("bodyScanImages").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("bodyScanFeatures").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("bodyScanMeasurements").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("bodyScans").withIndex("by_user_and_created", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("measurements").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("checkIns").withIndex("by_user", (q) => q.eq("userId", userId)).collect());

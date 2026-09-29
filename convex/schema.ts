@@ -1,4 +1,8 @@
 import { defineSchema, defineTable } from "convex/server";
+import {
+  featureMultiView, featureProcessing, featureQuality, featureScale, featureView,
+  measurement, measurementScale, profileComparison,
+} from "./bodyScan/validators";
 import { v } from "convex/values";
 
 export default defineSchema({
@@ -494,7 +498,8 @@ export default defineSchema({
       deviceModel: v.string(),
       osVersion: v.string(),
       appVersion: v.string(),
-      camera: v.literal("front"),
+      camera: v.union(v.literal("front"), v.literal("rear")),   // rear = 5C LiDAR mode
+      depth: v.optional(v.union(v.literal("none"), v.literal("truedepth"), v.literal("lidar"))),
       imageMaxPixel: v.number(),
       jpegQuality: v.number(),
     }),
@@ -558,51 +563,33 @@ export default defineSchema({
     cvVersion: v.string(),
     processedAt: v.number(),
     createdAt: v.number(),
-    processing: v.object({
-      deviceModel: v.string(),
-      osVersion: v.string(),
-      appVersion: v.string(),
-      components: v.array(v.string()),     // e.g. "vision.personSegmentation.accurate"
-    }),
-    scale: v.object({
-      kind: v.union(v.literal("none"), v.literal("lidar"), v.literal("arkit")),
-      metersPerUnit: v.optional(v.number()),
-    }),
-    views: v.array(v.object({
-      view: v.union(v.literal("front"), v.literal("side"), v.literal("back")),
-      imageWidth: v.number(),
-      imageHeight: v.number(),
-      processingMs: v.number(),
-      // Normalised to the image: x, y in 0–1 from the top-left.
-      keypoints: v.array(v.object({ name: v.string(), x: v.number(), y: v.number(), confidence: v.number() })),
-      silhouette: v.optional(v.object({
-        maskWidth: v.number(),
-        maskHeight: v.number(),
-        top: v.number(), bottom: v.number(), left: v.number(), right: v.number(),
-        heightFraction: v.number(),        // silhouette height ÷ image height
-        areaPerHeight2: v.number(),        // silhouette area ÷ silhouette height²
-        mainComponentFraction: v.number(),
-        keypointAgreement: v.number(),
-      })),
-      widths: v.record(v.string(), v.number()),   // silhouette width (or depth) ÷ silhouette height
-      ratios: v.record(v.string(), v.number()),
-      quality: v.record(v.string(), v.number()),  // 0–1 each
-      issues: v.array(v.string()),
-    })),
-    multiView: v.object({
-      ratios: v.record(v.string(), v.number()),
-      consistency: v.record(v.string(), v.number()),
-    }),
-    quality: v.object({
-      overallScore: v.number(),
-      framing: v.number(),
-      pose: v.number(),
-      lighting: v.number(),
-      segmentation: v.number(),
-      motion: v.number(),
-      multiViewConsistency: v.number(),
-    }),
+    processing: featureProcessing,
+    scale: featureScale,        // 5C: none | truedepth (+ per-view evidence) | lidar | arkit_metric
+    views: v.array(featureView),
+    multiView: featureMultiView,
+    quality: featureQuality,
   }).index("by_scan_and_version", ["scanDocId", "cvVersion"])
+    .index("by_user", ["userId"]),
+
+  // Body Scan Phase 5C: measurements derived on the server from one stored
+  // feature set by a versioned, deterministic method
+  // (convex/bodyScan/measurements.ts). One row per (scan, CV version, method
+  // version) — a newer method is stored alongside, never over, an older one.
+  // Every value carries its status, ≈95 % uncertainty, heuristic confidence,
+  // method and reasons; nothing here is validated. Deliberately NOT mirrored
+  // into `measurements` (which feeds Progress, coach dashboards and the AI
+  // coach as recorded values) until a validation study signs it off.
+  bodyScanMeasurements: defineTable({
+    userId: v.id("users"),
+    scanDocId: v.id("bodyScans"),
+    cvVersion: v.string(),
+    methodVersion: v.string(),
+    computedAt: v.number(),
+    scale: measurementScale,
+    measurements: v.array(measurement),
+    profileComparison: v.optional(profileComparison),
+    validated: v.literal(false),
+  }).index("by_scan_and_versions", ["scanDocId", "cvVersion", "methodVersion"])
     .index("by_user", ["userId"]),
 
   measurements: defineTable({

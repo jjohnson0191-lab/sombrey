@@ -76,6 +76,8 @@
 		000000000000000000000159 /* BodyScanCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000158 /* BodyScanCamera.swift */; };
 		00000000000000000000015F /* BodyScanFeatures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000015E /* BodyScanFeatures.swift */; };
 		000000000000000000000161 /* BodyScanVision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000160 /* BodyScanVision.swift */; };
+		000000000000000000000163 /* BodyScanDepth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000162 /* BodyScanDepth.swift */; };
+		000000000000000000000165 /* BodyScanLiDAR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000164 /* BodyScanLiDAR.swift */; };
 		00000000000000000000015B /* BodyDetailsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000015A /* BodyDetailsSection.swift */; };
 		00000000000000000000015D /* BodyScanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000015C /* BodyScanTests.swift */; };
 		00000000000000000000006F /* AddMealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002F /* AddMealView.swift */; };
@@ -228,6 +230,8 @@
 		000000000000000000000158 /* BodyScanCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanCamera.swift"; sourceTree = "<group>"; };
 		00000000000000000000015E /* BodyScanFeatures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanFeatures.swift"; sourceTree = "<group>"; };
 		000000000000000000000160 /* BodyScanVision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanVision.swift"; sourceTree = "<group>"; };
+		000000000000000000000162 /* BodyScanDepth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanDepth.swift"; sourceTree = "<group>"; };
+		000000000000000000000164 /* BodyScanLiDAR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanLiDAR.swift"; sourceTree = "<group>"; };
 		00000000000000000000015A /* BodyDetailsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyDetailsSection.swift"; sourceTree = "<group>"; };
 		00000000000000000000015C /* BodyScanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BodyScanTests.swift"; sourceTree = "<group>"; };
 		00000000000000000000002F /* AddMealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AddMealView.swift"; sourceTree = "<group>"; };
@@ -619,6 +623,8 @@
 			000000000000000000000158 /* BodyScanCamera.swift */,
 			00000000000000000000015E /* BodyScanFeatures.swift */,
 			000000000000000000000160 /* BodyScanVision.swift */,
+			000000000000000000000162 /* BodyScanDepth.swift */,
+			000000000000000000000164 /* BodyScanLiDAR.swift */,
 			00000000000000000000014A /* SombreyCoachSurface.swift */
 			);
 			name = "AICoach";
@@ -954,6 +960,8 @@
 				000000000000000000000159 /* BodyScanCamera.swift in Sources */,
 				00000000000000000000015F /* BodyScanFeatures.swift in Sources */,
 				000000000000000000000161 /* BodyScanVision.swift in Sources */,
+				000000000000000000000163 /* BodyScanDepth.swift in Sources */,
+				000000000000000000000165 /* BodyScanLiDAR.swift in Sources */,
 				00000000000000000000014B /* SombreyCoachSurface.swift */,
 				000000000000000000000069 /* TrainingSessionManager.swift */,
 				00000000000000000000010F /* TrainHub.swift */,
@@ -1103,7 +1111,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1134,7 +1142,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Sombrey/App/SombreyApp.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1159,7 +1167,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1185,7 +1193,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1207,7 +1215,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;
@@ -1232,7 +1240,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9H99MBY3C8;
 				ENABLE_PREVIEWS = YES;

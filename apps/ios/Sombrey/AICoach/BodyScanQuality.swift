@@ -294,7 +294,8 @@ struct CaptureCountdown: Equatable, Sendable {
         return false
     }
 
-    mutating func start() { phase = .running(Self.seconds) }
+    /// The rear (LiDAR) mode gives longer to walk round to the front of the phone.
+    mutating func start(seconds: Int = Self.seconds) { phase = .running(max(Self.holdSeconds + 1, seconds)) }
     mutating func cancel() { phase = .idle }
 
     /// Every assessed frame: pause on failure in the hold window, resume on success.
@@ -337,6 +338,9 @@ struct CapturedView: Equatable, Sendable {
     let issues: [ScanQualityIssue]
     let capturedAt: Date
     var conditions: CaptureConditions? = nil
+    /// Phase 5C: the view's measured depth (TrueDepth or LiDAR), in memory
+    /// only — never uploaded, never written to disk.
+    var depth: BodyScanDepthMap? = nil
 }
 
 /// Front → side → back, each reviewed as it's taken, with per-view retakes.

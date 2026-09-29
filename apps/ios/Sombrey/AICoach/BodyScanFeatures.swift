@@ -12,6 +12,10 @@ import Foundation
 // model. They are not shown to the user and no single feature is claimed to
 // mean anything about body fat.
 //
+// Phase 5C (cvVersion 5c.1) adds side-view thigh/calf depths and height
+// profiles (for a volume estimate); metric scale comes only from measured
+// depth (BodyScanDepth.swift), never from these values alone.
+//
 // Plain logic (Foundation only) — tested in SombreyAppTests/BodyScanTests.swift.
 
 /// A person mask: row-major, `width × height`, 0–255 (≥ 128 = person).
@@ -63,6 +67,11 @@ struct ViewFeatures: Equatable, Sendable {
     let ratios: [String: Double]
     let quality: [String: Double]
     let issues: [String]
+    /// 5c.1: width (front/back) or depth (side) at `profileSamples` heights,
+    /// top → bottom, ÷ silhouette height; 0 where there's no body.
+    var profile: [Double]? = nil
+    /// 5c.1: this view's metric-scale evidence, when depth was measured.
+    var scaleEvidence: BodyScanScaleEvidence? = nil
 }
 
 struct BodyScanFeatureSet: Equatable, Sendable {
@@ -73,12 +82,18 @@ struct BodyScanFeatureSet: Equatable, Sendable {
     let multiViewRatios: [String: Double]
     let consistency: [String: Double]
     let quality: [String: Double]   // overallScore, framing, pose, lighting, segmentation, motion, multiViewConsistency
+    /// 5C: the depth source (none = no metric scale) and its per-view evidence.
+    var scaleSource: BodyScanDepthSource = .none
+    var evidence: [BodyScanScaleEvidence] { views.compactMap(\.scaleEvidence) }
 }
 
 enum BodyScanFeatureExtractor {
     /// Bump when any rule below changes: stored separately, never overwritten.
-    static let version = "5b.1"
-    static let components = ["vision.personSegmentation.accurate", "vision.bodyPose2D", "sombrey.features.1"]
+    /// 5c.1 = 5b.1 + side thigh/calf depths + profiles (+ scale evidence).
+    static let version = "5c.1"
+    static let components = ["vision.personSegmentation.accurate", "vision.bodyPose2D", "sombrey.features.2"]
+    /// Profile samples (backend: PROFILE_SAMPLES).
+    static let profileSamples = 40
 
     private static func r4(_ v: Double) -> Double { (v * 10_000).rounded() / 10_000 }
 
@@ -106,6 +121,7 @@ enum BodyScanFeatureExtractor {
         var silhouette: ViewFeatures.Silhouette?
         var segmentationQuality = 0.0
         var framing = 0.0
+        var profile: [Double]?
 
         if let m = mask, m.width > 0, m.height > 0 {
             // The body's column: between the hips when detected, else the mask's centroid.
@@ -188,6 +204,24 @@ enum BodyScanFeatureExtractor {
                         widths[name] = r4(Double(r - l + 1) / h)
                     }
                 }
+                // Side view (5c.1): thigh and calf depth — the legs overlap from
+                // the side, so the run through each segment's midpoint is its depth.
+                if isSide {
+                    let segments: [(String, [(BodyJoint, BodyJoint)])] = [
+                        ("thighDepth", [(.leftHip, .leftKnee), (.rightHip, .rightKnee)]),
+                        ("calfDepth", [(.leftKnee, .leftAnkle), (.rightKnee, .rightAnkle)]),
+                    ]
+                    for (name, pairs) in segments {
+                        let best = pairs.compactMap { a, b -> (JointPoint, JointPoint)? in
+                            guard let pa = conf(a), let pb = conf(b) else { return nil }
+                            return (pa, pb)
+                        }.max { min($0.0.confidence, $0.1.confidence) < min($1.0.confidence, $1.1.confidence) }
+                        guard let (pa, pb) = best else { continue }
+                        let mx = Int(((pa.x + pb.x) / 2 * Double(m.width)).rounded()), my = Int(((pa.y + pb.y) / 2 * Double(m.height)).rounded())
+                        if let (l, r) = m.run(row: my, through: mx) { widths[name] = r4(Double(r - l + 1) / h) }
+                    }
+                }
+                profile = Self.profile(mask: m, top: top, bottom: bottom, centreX: centreX, h: h, isSide: isSide, joints: conf)
                 if let w = widths["waist"], let hp = widths["hip"], hp > 0 { ratios["waistToHip"] = r4(w / hp) }
                 if let s = widths["shoulder"], let w = widths["waist"], w > 0 { ratios["shoulderToWaist"] = r4(s / w) }
                 if let wd = widths["waistDepth"], let hd = widths["hipDepth"], hd > 0 { ratios["waistDepthToHipDepth"] = r4(wd / hd) }
@@ -251,7 +285,41 @@ enum BodyScanFeatureExtractor {
             "motion": subjectStill ? 1 : 0.5,
         ]
         return ViewFeatures(view: view, imageWidth: imageWidth, imageHeight: imageHeight, processingMs: 0,
-                            keypoints: keypoints, silhouette: silhouette, widths: widths, ratios: ratios, quality: quality, issues: issues)
+                            keypoints: keypoints, silhouette: silhouette, widths: widths, ratios: ratios, quality: quality, issues: issues,
+                            profile: profile)
+    }
+
+    /// The body's width (front/back) or depth (side) at evenly spaced heights.
+    /// Front/back rows where the body column falls between the legs add up the
+    /// two legs (found along hip → knee → ankle); arms apart from the body
+    /// (A-pose) are never counted.
+    static func profile(mask m: SilhouetteMask, top: Int, bottom: Int, centreX: Int, h: Double, isSide: Bool,
+                        joints conf: (BodyJoint) -> JointPoint?) -> [Double] {
+        func legX(_ chain: [BodyJoint], atY y: Double) -> Int? {
+            let pts = chain.compactMap(conf).map { (x: $0.x * Double(m.width), y: $0.y * Double(m.height)) }
+            guard pts.count >= 2, let first = pts.first, let last = pts.last, y >= first.y else { return nil }
+            if y >= last.y { return Int(last.x.rounded()) }
+            for (a, b) in zip(pts, pts.dropFirst()) where y >= a.y && y <= b.y && b.y > a.y {
+                return Int((a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)).rounded())
+            }
+            return nil
+        }
+        let search = max(1, m.width / 40)
+        return (0..<profileSamples).map { i in
+            let y = top + Int((Double(i) + 0.5) / Double(profileSamples) * Double(bottom - top + 1))
+            var px = 0
+            if !isSide, !m.isOn(centreX, y) {
+                let legs = [[BodyJoint.leftHip, .leftKnee, .leftAnkle], [.rightHip, .rightKnee, .rightAnkle]]
+                    .compactMap { legX($0, atY: Double(y)) }
+                    .compactMap { m.run(row: y, through: $0, search: search) }
+                var seen: [(Int, Int)] = []
+                for run in legs where !seen.contains(where: { $0 == run }) { seen.append(run); px += run.1 - run.0 + 1 }
+                if seen.isEmpty, let (l, r) = m.run(row: y, through: centreX, search: m.width / 20) { px = r - l + 1 }
+            } else if let (l, r) = m.run(row: y, through: centreX, search: isSide ? m.width / 20 : 0) {
+                px = r - l + 1
+            }
+            return r4(Double(px) / h)
+        }
     }
 
     // MARK: All views
@@ -259,7 +327,7 @@ enum BodyScanFeatureExtractor {
     /// Cross-view features and the scan's internal quality object. Front and
     /// side pixels are never mixed directly — only ratios, each already
     /// normalised by its own view's silhouette height, are combined.
-    static func combine(_ views: [ViewFeatures], processedAt: Date = Date()) -> BodyScanFeatureSet {
+    static func combine(_ views: [ViewFeatures], processedAt: Date = Date(), scaleSource: BodyScanDepthSource = .none) -> BodyScanFeatureSet {
         let by = Dictionary(uniqueKeysWithValues: views.map { ($0.view, $0) })
         var ratios: [String: Double] = [:]
         var consistency: [String: Double] = [:]
@@ -295,7 +363,9 @@ enum BodyScanFeatureExtractor {
         let parts = quality.values
         let overall = parts.isEmpty ? 0 : 0.5 * (parts.min() ?? 0) + 0.5 * parts.reduce(0, +) / Double(parts.count)
         quality["overallScore"] = r4(overall)
+        // A metric source is claimed only if some view actually carries evidence.
+        let source: BodyScanDepthSource = views.contains { $0.scaleEvidence != nil } ? scaleSource : .none
         return BodyScanFeatureSet(cvVersion: version, processedAt: processedAt, components: components, views: views,
-                                  multiViewRatios: ratios, consistency: consistency, quality: quality)
+                                  multiViewRatios: ratios, consistency: consistency, quality: quality, scaleSource: source)
     }
 }

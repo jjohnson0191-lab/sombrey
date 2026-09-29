@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ABANDONED_AFTER_MS, CV_VERSIONS, compareFeatureSets, isAbandoned, validateFeatureSet, type FeatureSet, type FeatureView,
+  ABANDONED_AFTER_MS, CV_VERSIONS, PROFILE_SAMPLES, compareFeatureSets, isAbandoned, validateFeatureSet,
+  type FeatureSet, type FeatureView, type ScaleEvidence,
 } from "../../convex/bodyScan/features.ts";
 import { PROTOCOL_VERSION, validateConditions } from "../../convex/bodyScan/rules.ts";
 
@@ -43,7 +44,51 @@ test("versioning: only known CV versions are stored", () => {
 test("scale: no metric factor without a real scale source", () => {
   assert.ok(validateFeatureSet(set({ scale: { kind: "none", metersPerUnit: 0.01 } }), NOW));
   assert.ok(validateFeatureSet(set({ scale: { kind: "guess" } }), NOW));
-  assert.equal(validateFeatureSet(set({ scale: { kind: "lidar", metersPerUnit: 0.002 } }), NOW), null);
+  assert.ok(validateFeatureSet(set({ scale: { kind: "lidar", metersPerUnit: 0.002 } }), NOW), "a scale factor is never accepted from the client (5C derives it from evidence)");
+  assert.ok(validateFeatureSet(set({ scale: { kind: "truedepth" } }), NOW), "a metric source needs evidence");
+});
+
+// ─── 5c.1: profiles and scale evidence ───────────────────────────────────────
+
+const evidence = (v: string, over: Partial<ScaleEvidence> = {}): ScaleEvidence => ({
+  view: v, depthWidth: 480, depthHeight: 640, focalPx: 505, intrinsics: "calibration", accuracy: "absolute", filtered: false,
+  samples: 1800, validFraction: 0.92, distanceM: 1.32, planeTiltDeg: 6, residualM: 0.012, surfaceHeightM: 1.62, ...over,
+});
+const profile = (x = 0.1) => Array.from({ length: PROFILE_SAMPLES }, () => x);
+const set5c = (over: Partial<FeatureSet> = {}) => set({
+  cvVersion: "5c.1",
+  scale: { kind: "truedepth", evidence: [evidence("front"), evidence("back")] },
+  views: [view("front", { profile: profile() }), view("side", { widths: { waistDepth: 0.13 }, profile: profile(0.08) }), view("back", { profile: profile() })],
+  ...over,
+});
+
+test("5c.1: a TrueDepth feature set with evidence and profiles is accepted", () => {
+  assert.ok(CV_VERSIONS.includes("5c.1"));
+  assert.equal(validateFeatureSet(set5c(), NOW), null);
+  assert.equal(validateFeatureSet(set5c({ scale: { kind: "none" } }), NOW), null, "5c.1 without depth (no TrueDepth) is still valid");
+});
+
+test("5c.1: scale evidence is bounded and never optional for a metric source", () => {
+  const withEv = (e: ScaleEvidence) => set5c({ scale: { kind: "truedepth", evidence: [e] } });
+  assert.ok(validateFeatureSet(set5c({ scale: { kind: "none", evidence: [evidence("front")] } }), NOW), "evidence without a source");
+  assert.ok(validateFeatureSet(set5c({ scale: { kind: "truedepth", evidence: [] } }), NOW));
+  assert.ok(validateFeatureSet(set5c({ scale: { kind: "truedepth", evidence: [evidence("front"), evidence("front")] } }), NOW), "duplicate view");
+  assert.ok(validateFeatureSet(withEv(evidence("front", { distanceM: 0 })), NOW), "zero distance");
+  assert.ok(validateFeatureSet(withEv(evidence("front", { distanceM: -1.2 })), NOW), "negative distance");
+  assert.ok(validateFeatureSet(withEv(evidence("front", { distanceM: 40 })), NOW), "extreme distance");
+  assert.ok(validateFeatureSet(withEv(evidence("front", { surfaceHeightM: 0 })), NOW), "zero height");
+  assert.ok(validateFeatureSet(withEv(evidence("front", { surfaceHeightM: 9 })), NOW), "impossible height");
+  assert.ok(validateFeatureSet(withEv(evidence("front", { focalPx: NaN })), NOW));
+  assert.ok(validateFeatureSet(withEv(evidence("front", { validFraction: 1.5 })), NOW));
+  assert.ok(validateFeatureSet(withEv(evidence("front", { accuracy: "guess" as "absolute" })), NOW));
+  assert.ok(validateFeatureSet(set({ scale: { kind: "truedepth", evidence: [evidence("front")] } }), NOW), "5b.1 can't carry evidence");
+});
+
+test("5c.1: profiles have exactly PROFILE_SAMPLES bounded values", () => {
+  assert.ok(validateFeatureSet(set5c({ views: [view("front", { profile: profile().slice(1) })] }), NOW));
+  assert.ok(validateFeatureSet(set5c({ views: [view("front", { profile: profile(-0.1) })] }), NOW), "negative width");
+  assert.ok(validateFeatureSet(set5c({ views: [view("front", { profile: profile(30) })] }), NOW), "a cm value, not a normalised one");
+  assert.ok(validateFeatureSet(set({ views: [view("front", { profile: profile() })] }), NOW), "5b.1 has no profiles");
 });
 
 test("views: at most one of each protocol view", () => {
@@ -107,7 +152,7 @@ test("comparison: only like-for-like scans, raw deltas, never 'validated'", () =
   }
   const newer = compareFeatureSets(a, { ...b, cvVersion: "5b.2" });
   assert.deepEqual(newer, { comparable: false, reasons: ["cv_version_differs"] });
-  const scaled = compareFeatureSets(a, { ...b, scale: { kind: "lidar", metersPerUnit: 0.002 }, protocolVersion: "5a.1" });
+  const scaled = compareFeatureSets(a, { ...b, scale: { kind: "truedepth" }, protocolVersion: "5a.1" });
   assert.equal(scaled.comparable, false);
   if (!scaled.comparable) assert.deepEqual(scaled.reasons.sort(), ["protocol_differs", "scale_differs"]);
 });

@@ -12,8 +12,13 @@ import ConvexMobile
 // capture automatically once the pose has held, so nobody has to walk back
 // to the phone. Scans are private to the account: images are stored only as
 // the user's own assets and loaded through the authenticated endpoint, never
-// through a URL (convex/bodyScans.ts, convex/http.ts). Nothing is measured
-// or estimated in this phase, and nothing on screen claims otherwise.
+// through a URL (convex/bodyScans.ts, convex/http.ts).
+//
+// Phase 5C: where the phone can measure distance (TrueDepth on the front, or
+// the optional LiDAR rear mode) each view also yields scale evidence, and the
+// server derives measurements with uncertainty. Only measurements that pass
+// their checks are shown — on development builds, labelled as unvalidated
+// scanner estimates. The profile's height and weight are never changed.
 
 // MARK: - Entry (Sombrey Coach)
 
@@ -56,6 +61,10 @@ struct BodyScanFlow: View {
     @State private var savedTick = 0
     /// On-device CV per view, started as soon as the view is captured.
     @State private var cvTasks: [BodyScanView: Task<ViewFeatures?, Never>] = [:]
+    /// What this device can measure (hardware; decided once).
+    @State private var capabilities = BodyScanCapabilities(trueDepth: false, lidar: false)
+    /// Front (standard) or rear (LiDAR). Fixed once a view is captured.
+    @State private var captureMode: BodyScanCaptureMode = .front
 
     init(startWithResults: Bool = false) {
         _showResults = State(initialValue: startWithResults)
@@ -78,7 +87,10 @@ struct BodyScanFlow: View {
         .animation(StudioMotion.resolve(StudioMotion.contentShift, reduceMotion: reduceMotion), value: stage)
         .sensoryFeedback(StudioHaptic.setLogged, trigger: capturedTick)
         .sensoryFeedback(.success, trigger: savedTick)
-        .task { profile.subscribe(to: "bodyScans:profile") }
+        .task {
+            capabilities = BodyScanDepthCapture.capabilities()
+            profile.subscribe(to: "bodyScans:profile")
+        }
         .onChange(of: profile.value) { _, p in
             if stage == nil, let p, !showResults { stage = firstStage(p) }
         }
@@ -196,16 +208,49 @@ struct BodyScanFlow: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background { SombreyGlassChamber(cornerRadius: 20) }
+            if capabilities.offersRearMode { modeChoice }
             VStack(alignment: .leading, spacing: 10) {
-                point("iphone", "Stand your phone upright at about waist height, against something steady.")
-                point("figure.stand", "Step back 2–3 m until the frame holds your whole body, head to feet.")
-                point("sun.max", "Face even light; a plain wall behind you works best.")
-                point("timer", "Hold still when the frame lights — Sombrey captures each view by itself.")
+                if captureMode == .rear {
+                    point("iphone", "Stand your phone upright at about waist height against something steady, with its back camera facing where you'll stand.")
+                    point("figure.stand", "Your spot is about 2 m in front of the back camera. Check the frame on screen once, then tap Start.")
+                    point("speaker.wave.2", "You'll have 15 seconds to walk to your spot. The screen faces away, so Sombrey tells you out loud what to adjust, counts down and says when it's done.")
+                    point("sun.max", "Face even light; a plain wall behind you works best.")
+                } else {
+                    point("iphone", "Stand your phone upright at about waist height, against something steady.")
+                    point("figure.stand", "Step back about 1.5 m, until the frame holds your whole body, head to feet.")
+                    point("sun.max", "Face even light; a plain wall behind you works best.")
+                    point("timer", "Tap Start, then hold still when the frame lights — Sombrey captures each view by itself.")
+                }
             }
+            Text(capabilities.summary(for: captureMode))
+                .font(StudioFont.body(12))
+                .foregroundStyle(StudioColor.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("bodyScan.capability")
             if let problem { problemText(problem) }
             Button { beginCapture() } label: { Text("Open camera").frame(maxWidth: .infinity) }
                 .buttonStyle(.illuminatedCTA)
                 .accessibilityIdentifier("bodyScan.begin")
+        }
+    }
+
+    /// LiDAR devices only: the standard front scan, or the back camera's
+    /// distance measurement. Plain words, no technical mode names.
+    private var modeChoice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("HOW TO SCAN")
+                .font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft)
+            Picker("How to scan", selection: $captureMode) {
+                Text("Front camera").tag(BodyScanCaptureMode.front)
+                Text("Back camera · measures distance").tag(BodyScanCaptureMode.rear)
+            }
+            .pickerStyle(.segmented)
+            .disabled(!draft.views.isEmpty)
+            .accessibilityIdentifier("bodyScan.mode")
+            Text(captureMode == .rear
+                 ? "The back camera's LiDAR measures how far away you are, for measurements. You won't see yourself while it scans."
+                 : "You see yourself while you scan. Measurements depend on this iPhone's front sensor.")
+                .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -363,6 +408,7 @@ struct BodyScanFlow: View {
     }
 
     private func openCamera(_ view: BodyScanView) {
+        camera.use(captureMode)
         camera.view = view
         stage = .capture(view)
         Task { await camera.start() }
@@ -394,11 +440,11 @@ struct BodyScanFlow: View {
     /// image isn't sent anywhere for this.
     private func startProcessing(_ view: BodyScanView, _ captured: CapturedView) {
         cvTasks[view]?.cancel()
-        let jpeg = captured.jpeg, score = captured.qualityScore
+        let jpeg = captured.jpeg, depth = captured.depth, score = captured.qualityScore
         let brightness = captured.conditions?.brightness
         let still = !captured.issues.contains(.motion)
         cvTasks[view] = Task.detached(priority: .utility) {
-            BodyScanVision.process(jpeg: jpeg, view: view, captureScore: score, brightness: brightness, subjectStill: still)?.features
+            BodyScanVision.process(jpeg: jpeg, depth: depth, view: view, captureScore: score, brightness: brightness, subjectStill: still)?.features
         }
     }
 
@@ -413,12 +459,17 @@ struct BodyScanFlow: View {
         problem = nil
         stage = .saving
         let draft = self.draft
+        let mode = captureMode
+        // The depth source this scan captured with: the rear mode is LiDAR by
+        // definition; the front camera records TrueDepth only if a view
+        // actually carried depth. (No evidence → no metric scale either way.)
+        let depthSource: BodyScanDepthSource = mode == .rear ? .lidar : (draft.views.values.compactMap(\.depth).first?.source ?? .none)
         Task {
             do {
                 savingStep = "Preparing"
                 let _: BodyScanStartResult = try await ConvexClientProvider.client.mutation("bodyScans:start", with: [
                     "scanId": draft.scanId,
-                    "capture": BodyScanCaptureInfo.current(),
+                    "capture": BodyScanCaptureInfo.current(mode: mode, depth: depthSource),
                 ])
                 serverScanStarted = true
                 for view in BodyScanView.allCases {
@@ -448,7 +499,7 @@ struct BodyScanFlow: View {
                 var views: [ViewFeatures] = []
                 for v in BodyScanView.allCases { if let f = await cvTasks[v]?.value { views.append(f) } }
                 if !views.isEmpty {
-                    try? await BodyScanFeatureUpload.send(scanId: draft.scanId, set: BodyScanFeatureExtractor.combine(views))
+                    try? await BodyScanFeatureUpload.send(scanId: draft.scanId, set: BodyScanFeatureExtractor.combine(views, scaleSource: depthSource))
                 }
                 busy = false
                 savedTick += 1
@@ -467,6 +518,7 @@ struct BodyScanFlow: View {
 
     private func startNewScan() {
         draft = BodyScanDraft()
+        captureMode = .front
         serverScanStarted = false
         showResults = false
         stage = profile.value.map { firstStage($0) }
@@ -507,15 +559,20 @@ struct BodyScanCaptureScreen: View {
             Color.black.ignoresSafeArea()
             switch camera.status {
             case .running, .starting:
-                BodyScanPreview(session: camera.engine.session)
-                    .ignoresSafeArea()
+                if camera.mode == .rear {
+                    BodyScanARPreview(session: camera.lidar.session).ignoresSafeArea()
+                } else {
+                    BodyScanPreview(session: camera.engine.session).ignoresSafeArea()
+                }
                 BodyFrameGuide(config: camera.config, joints: camera.joints, ready: camera.assessment.ready, holding: camera.countdown.isHolding)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             case .denied:
                 cameraNotice("Camera access is off", "Allow camera access for Sombrey in iPhone Settings to take your scan.", settingsLink: true)
             case .unavailable:
-                cameraNotice("Camera unavailable", "The front camera couldn't start. Close other camera apps and try again.", settingsLink: false)
+                cameraNotice("Camera unavailable", camera.mode == .rear
+                    ? "The back camera couldn't start. Close other camera apps and try again, or use the front camera."
+                    : "The front camera couldn't start. Close other camera apps and try again.", settingsLink: false)
             }
             chrome
         }
@@ -585,7 +642,9 @@ struct BodyScanCaptureScreen: View {
                     }
                     .buttonStyle(.illuminatedCTA)
                     .disabled(camera.status != .running)
-                    .accessibilityHint("Starts a 10 second timer. Place the phone, step into the frame and hold still; the photo is taken automatically.")
+                    .accessibilityHint(camera.mode == .rear
+                        ? "Starts a 15 second timer with spoken guidance. Walk to your spot facing the back camera and hold still; the photo is taken automatically."
+                        : "Starts a 10 second timer. Place the phone, step into the frame and hold still; the photo is taken automatically.")
                     .accessibilityIdentifier("bodyScan.startTimer")
                 }
                 if BodyScanDevTools.enabled { diagnostics }
@@ -961,8 +1020,11 @@ struct BodyScanHistoryView: View {
                     if let line = Self.contextLine(scan.context) {
                         Text(line).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
                     }
+                    if BodyScanMeasurementsView.enabled { BodyScanMeasurementsView(scanId: scan.scanId) }
                     if saved.count > 1 { earlier }
-                    Text("A private, consistent record for seeing how your body changes. Sombrey doesn't estimate body fat or measurements from these photos yet.")
+                    Text(BodyScanMeasurementsView.enabled
+                         ? "A private, consistent record for seeing how your body changes. Sombrey doesn't estimate body fat, weight or BMI from these photos."
+                         : "A private, consistent record for seeing how your body changes. Sombrey doesn't estimate body fat or measurements from these photos yet.")
                         .font(StudioFont.body(11)).foregroundStyle(StudioColor.inkFaint).fixedSize(horizontal: false, vertical: true)
                     Button("Delete this scan", role: .destructive) { confirmingDelete = scan }
                         .font(StudioFont.body(13, weight: .medium))
@@ -1037,6 +1099,71 @@ struct BodyScanHistoryView: View {
     }
 }
 
+/// Phase 5C: a scan's measurements. Shown only on development builds until a
+/// validation study signs the method off: available results as whole-cm
+/// estimates with their range, scale-free proportions by name, the height
+/// note — and, for the physical test, every result with its status and reasons.
+struct BodyScanMeasurementsView: View {
+    let scanId: String
+    @State private var result = ConvexQuery<BodyScanMeasurementsDTO?>()
+
+    static var enabled: Bool { BodyScanDevTools.enabled }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("MEASUREMENTS").font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft)
+            if let m = result.value ?? nil {
+                let lines = BodyScanMeasurementPresentation.lines(m)
+                ForEach(lines, id: \.label) { line in
+                    HStack {
+                        Text(line.label).font(StudioFont.body(14)).foregroundStyle(StudioColor.ink)
+                        Spacer()
+                        Text(line.text).font(StudioFont.body(14, weight: .semibold)).foregroundStyle(StudioColor.ink).monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Text(BodyScanMeasurementPresentation.summary(m))
+                    .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
+                let proportions = BodyScanMeasurementPresentation.proportions(m)
+                if !proportions.isEmpty {
+                    Text("Available as proportions: \(proportions.joined(separator: ", ")).")
+                        .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
+                }
+                if let note = BodyScanMeasurementPresentation.heightNote(m) {
+                    Text(note).font(StudioFont.body(12, weight: .medium)).foregroundStyle(StudioColor.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                diagnostics(m)
+            } else if result.isLoading {
+                ProgressView().tint(StudioColor.ink)
+            } else {
+                Text("Measurements appear here once the scan has been analysed on your phone.")
+                    .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { SombreyGlassChamber(cornerRadius: 20) }
+        .task(id: scanId) { result.subscribe(to: "bodyScans:measurements", with: ["scanId": scanId]) }
+    }
+
+    /// Dev builds only (the physical test): every result, whatever its status.
+    private func diagnostics(_ m: BodyScanMeasurementsDTO) -> some View {
+        let rows = m.measurements.map { x -> String in
+            let v = x.value.map { String(format: "%.1f", $0) } ?? "—"
+            let u = x.uncertainty.map { String(format: "±%.1f", $0) } ?? ""
+            return "\(x.name) \(x.status) \(v)\(u) \(x.unit) c\(String(format: "%.2f", x.confidence)) \(x.reasons.joined(separator: ","))"
+        }
+        let head = "DEV · \(m.cvVersion)/\(m.methodVersion) · scale \(m.scale.source) \(m.scale.ok ? "ok" : "none") [\(m.scale.views.joined(separator: ","))] \(m.scale.reasons.joined(separator: ","))"
+        return DisclosureGroup("DEV · all results") {
+            Text(([head] + rows).joined(separator: "\n"))
+                .font(.system(size: 10, design: .monospaced)).foregroundStyle(StudioColor.inkFaint)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.system(size: 11, design: .monospaced)).tint(StudioColor.inkSoft)
+    }
+}
+
 /// One view of one scan, loaded from the authenticated endpoint into memory
 /// only — no URL is ever held, nothing is written to disk.
 struct BodyScanImageView: View {
@@ -1104,18 +1231,19 @@ enum BodyScanUpload {
     }
 }
 
-/// The capture conditions stored with each scan (protocol 5a.1) — nothing
-/// that identifies the phone beyond its model.
+/// The capture conditions stored with each scan — nothing that identifies the
+/// phone beyond its model. 5C: which camera, and the depth source it used.
 struct BodyScanCaptureInfo: ConvexEncodable, Encodable {
     let deviceModel: String
     let osVersion: String
     let appVersion: String
     let camera: String
+    let depth: String
     let imageMaxPixel: Double
     let jpegQuality: Double
 
     @MainActor
-    static func current() -> BodyScanCaptureInfo {
+    static func current(mode: BodyScanCaptureMode = .front, depth: BodyScanDepthSource = .none) -> BodyScanCaptureInfo {
         var system = utsname()
         uname(&system)
         let model = withUnsafeBytes(of: &system.machine) { raw in
@@ -1127,7 +1255,8 @@ struct BodyScanCaptureInfo: ConvexEncodable, Encodable {
             deviceModel: model.isEmpty ? "unknown" : model,
             osVersion: "iOS \(UIDevice.current.systemVersion)",
             appVersion: version,
-            camera: "front",
+            camera: mode.camera,
+            depth: depth.rawValue,
             imageMaxPixel: Double(BodyScanImageSpec.maxPixel),
             jpegQuality: BodyScanImageSpec.jpegQuality
         )

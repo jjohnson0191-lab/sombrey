@@ -56,10 +56,17 @@ test("scan ids are UUIDs (the idempotency key)", () => {
   assert.ok(!validScanId(undefined));
 });
 
-test("capture metadata: only the protocol's fields, bounded; front camera only", () => {
+test("capture metadata: only the protocol's fields, bounded; camera ↔ depth source consistent", () => {
   const c = { deviceModel: "iPhone16,1", osVersion: "iOS 18.1", appVersion: "1.0 (48)", camera: "front", imageMaxPixel: 2048, jpegQuality: 0.9 };
   assert.deepEqual(sanitizeCapture({ ...c, gps: "6.9,79.8", serial: "ABC" }), c);
-  assert.equal(sanitizeCapture({ ...c, camera: "rear" }), null);
+  assert.deepEqual(sanitizeCapture({ ...c, depth: "truedepth" }), { ...c, depth: "truedepth" });
+  assert.deepEqual(sanitizeCapture({ ...c, depth: "none" }), { ...c, depth: "none" }, "a device without depth still scans");
+  assert.deepEqual(sanitizeCapture({ ...c, camera: "rear", depth: "lidar" }), { ...c, camera: "rear", depth: "lidar" }, "5C LiDAR mode");
+  assert.equal(sanitizeCapture({ ...c, camera: "rear" }), null, "the rear mode exists only for LiDAR");
+  assert.equal(sanitizeCapture({ ...c, camera: "rear", depth: "truedepth" }), null);
+  assert.equal(sanitizeCapture({ ...c, depth: "lidar" }), null, "the front camera has no LiDAR");
+  assert.equal(sanitizeCapture({ ...c, depth: "sonar" }), null);
+  assert.equal(sanitizeCapture({ ...c, camera: "wide" }), null);
   assert.equal(sanitizeCapture({ ...c, deviceModel: "x".repeat(200) }), null);
   assert.equal(sanitizeCapture({ ...c, imageMaxPixel: 512 }), null);
   assert.equal(sanitizeCapture({ ...c, jpegQuality: 0.2 }), null);

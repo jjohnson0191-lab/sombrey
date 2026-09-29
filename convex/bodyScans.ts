@@ -9,6 +9,9 @@
 //   complete       → all protocol views present
 //   list           → the user's scans, newest first — never a storage id or URL
 //   discard/remove → delete an unfinished / any scan, blobs included
+//   attachFeatures → 5B/5C on-device CV features (numbers only); 5C derives
+//                    and stores the scan's measurements from them
+//   measurements   → the scan's derived measurements, with provenance
 //
 // SECURITY: every function resolves the user from the auth token (no client
 // user ids); every scan/image access checks ownership server-side; storage
@@ -16,8 +19,11 @@
 // served only by the authenticated GET /body-scan-image endpoint
 // (convex/http.ts), which checks ownership on every request.
 //
-// Nothing here measures anything. The scan stores the user's own recorded
-// context (a snapshot) — never an estimate.
+// The scan stores the user's own recorded context (a snapshot) — never an
+// estimate. Phase 5C measurements are derived from stored numbers by a
+// versioned method (convex/bodyScan/measurements.ts), kept per scan with
+// their uncertainty and status, and never written into the profile or the
+// weight/measurement history.
 
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -28,8 +34,9 @@ import {
   plausibleHeightCm, plausibleWeightKg, sanitizeCapture, validScanId, validateBlob, validateConditions, validateViewMeta,
 } from "./bodyScan/rules";
 import { isAbandoned, validateFeatureSet, type FeatureSet } from "./bodyScan/features";
+import { MEASUREMENT_METHOD_VERSION, computeMeasurements } from "./bodyScan/measurements";
+import { VIEW, featureMultiView, featureProcessing, featureQuality, featureScale, featureView } from "./bodyScan/validators";
 
-const VIEW = v.union(v.literal("front"), v.literal("side"), v.literal("back"));
 const SEX = v.union(v.literal("male"), v.literal("female"), v.literal("other"));
 
 async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> {
@@ -79,11 +86,39 @@ async function featuresOf(ctx: QueryCtx | MutationCtx, scanDocId: Id<"bodyScans"
   return await ctx.db.query("bodyScanFeatures").withIndex("by_scan_and_version", (q) => q.eq("scanDocId", scanDocId)).collect();
 }
 
-/** A scan and everything attached to it: images (and their blobs), features. */
+async function measurementsOf(ctx: QueryCtx | MutationCtx, scanDocId: Id<"bodyScans">) {
+  return await ctx.db.query("bodyScanMeasurements").withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scanDocId)).collect();
+}
+
+/** A scan and everything attached to it: images (and their blobs), features, measurements. */
 async function deleteScanDeep(ctx: MutationCtx, scan: Doc<"bodyScans">) {
   for (const i of await imagesOf(ctx, scan._id)) await deleteImageRow(ctx, i);
   for (const f of await featuresOf(ctx, scan._id)) await ctx.db.delete(f._id);
+  for (const m of await measurementsOf(ctx, scan._id)) await ctx.db.delete(m._id);
   await ctx.db.delete(scan._id);
+}
+
+/** Derives and stores the measurements for one stored feature set with the
+ * current method — once per (scan, CV version, method version). Uses the
+ * scan's own context snapshot, so a later profile edit never changes it. */
+async function storeMeasurements(ctx: MutationCtx, scan: Doc<"bodyScans">, features: Doc<"bodyScanFeatures">): Promise<boolean> {
+  const existing = await ctx.db.query("bodyScanMeasurements")
+    .withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scan._id).eq("cvVersion", features.cvVersion).eq("methodVersion", MEASUREMENT_METHOD_VERSION))
+    .first();
+  if (existing) return false;
+  const result = computeMeasurements(features as unknown as FeatureSet, scan.context.heightCm ?? null);
+  await ctx.db.insert("bodyScanMeasurements", {
+    userId: scan.userId,
+    scanDocId: scan._id,
+    cvVersion: result.cvVersion,
+    methodVersion: result.methodVersion,
+    computedAt: Date.now(),
+    scale: result.scale,
+    measurements: result.measurements,
+    ...(result.profileComparison ? { profileComparison: result.profileComparison } : {}),
+    validated: false,
+  });
+  return true;
 }
 
 // ─── Profile & consent ────────────────────────────────────────────────────────
@@ -171,7 +206,9 @@ export const start = mutation({
     scanId: v.string(),
     capture: v.object({
       deviceModel: v.string(), osVersion: v.string(), appVersion: v.string(),
-      camera: v.literal("front"), imageMaxPixel: v.number(), jpegQuality: v.number(),
+      camera: v.union(v.literal("front"), v.literal("rear")),
+      depth: v.optional(v.union(v.literal("none"), v.literal("truedepth"), v.literal("lidar"))),
+      imageMaxPixel: v.number(), jpegQuality: v.number(),
     }),
   },
   handler: async (ctx, args) => {
@@ -351,7 +388,6 @@ export const remove = mutation({
 
 // ─── Phase 5B: computer-vision features ───────────────────────────────────────
 
-const RECORD = v.record(v.string(), v.number());
 
 /** The phone's on-device CV results for a saved scan — structured numbers
  * only (convex/bodyScan/features.ts). One row per CV version: re-sending the
@@ -362,28 +398,11 @@ export const attachFeatures = mutation({
     scanId: v.string(),
     cvVersion: v.string(),
     processedAt: v.number(),
-    processing: v.object({ deviceModel: v.string(), osVersion: v.string(), appVersion: v.string(), components: v.array(v.string()) }),
-    scale: v.object({ kind: v.union(v.literal("none"), v.literal("lidar"), v.literal("arkit")), metersPerUnit: v.optional(v.number()) }),
-    views: v.array(v.object({
-      view: VIEW,
-      imageWidth: v.number(),
-      imageHeight: v.number(),
-      processingMs: v.number(),
-      keypoints: v.array(v.object({ name: v.string(), x: v.number(), y: v.number(), confidence: v.number() })),
-      silhouette: v.optional(v.object({
-        maskWidth: v.number(), maskHeight: v.number(), top: v.number(), bottom: v.number(), left: v.number(), right: v.number(),
-        heightFraction: v.number(), areaPerHeight2: v.number(), mainComponentFraction: v.number(), keypointAgreement: v.number(),
-      })),
-      widths: RECORD,
-      ratios: RECORD,
-      quality: RECORD,
-      issues: v.array(v.string()),
-    })),
-    multiView: v.object({ ratios: RECORD, consistency: RECORD }),
-    quality: v.object({
-      overallScore: v.number(), framing: v.number(), pose: v.number(), lighting: v.number(),
-      segmentation: v.number(), motion: v.number(), multiViewConsistency: v.number(),
-    }),
+    processing: featureProcessing,
+    scale: featureScale,
+    views: v.array(featureView),
+    multiView: featureMultiView,
+    quality: featureQuality,
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -395,9 +414,14 @@ export const attachFeatures = mutation({
     // Every view described must be a view this scan actually has.
     const views = new Set((await imagesOf(ctx, scan._id)).map((i) => i.view));
     if (args.views.some((fv) => !views.has(fv.view))) throw new ConvexError({ code: "INVALID", message: "Features for a view the scan doesn't have" });
+    // 5C evidence is only ever for a view the scan has, and a metric source
+    // must be the depth source the scan was captured with.
+    if ((args.scale.evidence ?? []).some((e) => !views.has(e.view))) throw new ConvexError({ code: "INVALID", message: "Scale evidence for a view the scan doesn't have" });
+    if (args.scale.kind !== "none" && args.scale.kind !== scan.capture.depth) throw new ConvexError({ code: "INVALID", message: "Scale source doesn't match the scan's capture" });
     const existing = await ctx.db.query("bodyScanFeatures").withIndex("by_scan_and_version", (q) => q.eq("scanDocId", scan._id).eq("cvVersion", args.cvVersion)).first();
     if (existing) return { stored: false, cvVersion: args.cvVersion };
-    await ctx.db.insert("bodyScanFeatures", { userId: user._id, scanDocId: scan._id, createdAt: Date.now(), ...set });
+    const id = await ctx.db.insert("bodyScanFeatures", { userId: user._id, scanDocId: scan._id, createdAt: Date.now(), ...set });
+    await storeMeasurements(ctx, scan, (await ctx.db.get(id))!);
     return { stored: true, cvVersion: args.cvVersion };
   },
 });
@@ -411,6 +435,37 @@ export const features = query({
     const user = await requireUser(ctx);
     const scan = await ownScan(ctx, user._id, args.scanId);
     return (await featuresOf(ctx, scan._id)).map(({ _id, _creationTime, userId: _u, scanDocId: _s, ...f }) => f);
+  },
+});
+
+/** The scan's measurements from the newest CV version and method, for the
+ * owner: every entry with its status, ≈95 % range, heuristic confidence,
+ * method and reasons (the app shows only "available" ones, and labels them
+ * as unvalidated estimates). null until features have been processed. */
+export const measurements = query({
+  args: { scanId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const scan = await ownScan(ctx, user._id, args.scanId);
+    const rows = await measurementsOf(ctx, scan._id);
+    if (!rows.length) return null;
+    const newest = rows.reduce((a, b) => (b.cvVersion > a.cvVersion || (b.cvVersion === a.cvVersion && b.methodVersion > a.methodVersion) ? b : a));
+    const { _id, _creationTime, userId: _u, scanDocId: _s, ...m } = newest;
+    return { ...m, snapshotHeightCm: scan.context.heightCm ?? null };
+  },
+});
+
+/** After a new measurement method ships: derive its results for stored
+ * feature sets (older method rows are kept). Internal only; batched. */
+export const recomputeMeasurements = internalMutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    let added = 0;
+    for (const f of await ctx.db.query("bodyScanFeatures").take(Math.min(args.limit ?? 100, 500))) {
+      const scan = await ctx.db.get(f.scanDocId);
+      if (scan && (await storeMeasurements(ctx, scan, f))) added++;
+    }
+    return { added, methodVersion: MEASUREMENT_METHOD_VERSION };
   },
 });
 
