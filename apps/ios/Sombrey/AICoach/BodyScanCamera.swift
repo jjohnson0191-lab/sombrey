@@ -227,11 +227,11 @@ final class BodyScanCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBuffe
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let data = error == nil ? photo.fileDataRepresentation() : nil
-        var depth: BodyScanDepthMap?
-        if error == nil, let d = photo.depthData {
-            let exif = (photo.metadata[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
-            depth = BodyScanDepthCapture.trueDepthMap(d, exifOrientation: exif, fieldOfViewDeg: fieldOfViewDeg)
-        }
+        let exif = (photo.metadata[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
+        let fov = fieldOfViewDeg
+        let depth: BodyScanDepthMap? = error == nil
+            ? photo.depthData.flatMap { BodyScanDepthCapture.trueDepthMap($0, exifOrientation: exif, fieldOfViewDeg: fov) }
+            : nil
         queue.async {
             self.photoContinuation?.resume(returning: data.map { BodyScanRawCapture(photo: $0, depth: depth) })
             self.photoContinuation = nil
