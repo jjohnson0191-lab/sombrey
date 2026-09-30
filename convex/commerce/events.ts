@@ -23,6 +23,9 @@ export const COMMERCE_EVENTS = {
   band_purchase_initiated: "client",
   band_checkout_abandoned: "client",
   subscription_purchase_initiated: "client",
+  // 6B: the user closed Apple's purchase sheet (StoreKit .userCancelled) — the one
+  // subscription abandonment the app can honestly observe.
+  subscription_checkout_abandoned: "client",
   band_checkout_completed: "server",
   band_order_completed: "server",
   band_returned: "server",

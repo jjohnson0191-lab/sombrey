@@ -207,3 +207,47 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  # ─── Compile check only (Phase 6B) ─────────────────────────────────────────
+  # Manual start only. Builds the existing SombreyApp UNSIGNED for a generic
+  # iOS device — Release, and Debug build-for-testing (compiles the test target
+  # and DEBUG-only code) — so Swift 6 / Xcode 26 errors are caught without a
+  # Mac that runs Xcode 26. NO signing, NO TestFlight / App Store Connect
+  # upload, NO Convex (no deployment URL, no secrets: a placeholder Clerk key),
+  # so it can't touch production, the Body Scan dev backend or its TestFlight
+  # builds. Artifacts: the two build logs.
+  sombrey-ios-compile-check:
+    name: Sombrey iOS — compile check (unsigned, no upload)
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      vars:
+        XCODE_PROJECT: "apps/ios/SombreyApp.xcodeproj"
+        XCODE_SCHEME: "SombreyApp"
+    scripts:
+      - name: Toolchain (Xcode / Swift versions)
+        script: |
+          xcodebuild -version
+          swift --version
+      - name: Placeholder Secrets.xcconfig (no secrets — compile only)
+        script: |
+          printf 'CLERK_PUBLISHABLE_KEY = pk_test_compile_check_only\n' > apps/ios/Secrets.xcconfig
+      - name: Resolve Swift package dependencies
+        script: |
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
+      - name: Compile the app (Release, generic iOS device, unsigned)
+        script: |
+          set -o pipefail
+          xcodebuild build -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 \
+            | tee build-release.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | tail -80
+      - name: Compile the app + tests (Debug build-for-testing, unsigned)
+        script: |
+          set -o pipefail
+          xcodebuild build-for-testing -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -configuration Debug \
+            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 \
+            | tee build-tests.log | grep -E "error:|TEST BUILD (SUCCEEDED|FAILED)|BUILD (SUCCEEDED|FAILED)" | tail -80
+    artifacts:
+      - build-release.log
+      - build-tests.log

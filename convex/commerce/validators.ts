@@ -50,7 +50,7 @@ export const ownershipStatus = v.union(
 );
 export const commerceEventName = v.union(
   v.literal("product_viewed"), v.literal("band_purchase_initiated"), v.literal("band_checkout_abandoned"),
-  v.literal("subscription_purchase_initiated"), v.literal("band_checkout_completed"), v.literal("band_order_completed"),
+  v.literal("subscription_purchase_initiated"), v.literal("subscription_checkout_abandoned"), v.literal("band_checkout_completed"), v.literal("band_order_completed"),
   v.literal("band_returned"), v.literal("subscription_activated"), v.literal("subscription_renewed"),
   v.literal("subscription_cancelled"), v.literal("subscription_expired"),
 );

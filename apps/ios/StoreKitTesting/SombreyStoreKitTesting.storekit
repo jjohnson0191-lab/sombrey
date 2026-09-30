@@ -1,0 +1,53 @@
+{
+  "identifier" : "86D0ACFB-2B82-4914-AF07-2CDC921C3E0C",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_locale" : "en_US",
+    "_storefront" : "USA"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "90000000",
+      "localizations" : [
+
+      ],
+      "name" : "Sombrey Membership — StoreKit TESTING ONLY",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "30.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "90000001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "LOCAL STOREKIT TESTING ONLY — not an App Store product.",
+              "displayName" : "Sombrey Membership (testing)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "sombrey.storekit_testing.membership_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Sombrey Membership Monthly — StoreKit TESTING ONLY",
+          "subscriptionGroupID" : "90000000",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

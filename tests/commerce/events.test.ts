@@ -6,7 +6,7 @@ import { COMMERCE_EVENTS, validateEvent } from "../../convex/commerce/events.ts"
 const P = ["sombrey_band", "sombrey_membership_monthly"];
 
 test("clients record only their own observations", () => {
-  for (const name of ["product_viewed", "band_purchase_initiated", "band_checkout_abandoned", "subscription_purchase_initiated"]) {
+  for (const name of ["product_viewed", "band_purchase_initiated", "band_checkout_abandoned", "subscription_purchase_initiated", "subscription_checkout_abandoned"]) {
     assert.equal(validateEvent({ name, platform: "ios", productId: "sombrey_band", countryCode: "LK", source: "home_card" }, "client", P), null, name);
   }
   for (const name of Object.keys(COMMERCE_EVENTS).filter((n) => (COMMERCE_EVENTS as Record<string, string>)[n] === "server")) {

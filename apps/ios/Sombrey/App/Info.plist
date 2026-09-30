@@ -85,6 +85,8 @@
 	     Secrets.xcconfig.example and ClerkAuthCoordinator.configure(). -->
 	<key>ClerkPublishableKey</key>
 	<string>$(CLERK_PUBLISHABLE_KEY)</string>
+	<key>SombreyMembershipProductID</key>
+	<string>$(SOMBREY_MEMBERSHIP_PRODUCT_ID)</string>
 
 	<!-- Sombrey Band (QCBandSDK) — Phase 3 native wearable integration.
 	     Keys/usage-description text per the vendor's own SDK Development

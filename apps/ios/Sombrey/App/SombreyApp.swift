@@ -14,6 +14,11 @@ struct SombreyApp: App {
     /// App-level for the same reasons: a physical activity in progress
     /// (Tennis, a run) survives tab switches and app kills.
     @State private var activitySession = ActivitySessionManager()
+    /// Sombrey Membership (StoreKit 2, Phase 6B). App-level so Apple's
+    /// transaction updates (renewals, refunds, approved Ask-to-Buy, purchases
+    /// on other devices) are handled from launch. No UI uses it yet (6D); it
+    /// never grants Sombrey access itself — the server does (6C).
+    @State private var membership = MembershipManager(accountID: { Clerk.shared.user?.id })
     private var notificationManager: NotificationManager { NotificationManager.shared }
     @Environment(\.scenePhase) private var scenePhase
 
@@ -33,6 +38,7 @@ struct SombreyApp: App {
                 .environment(wearableManager)
                 .environment(trainingSession)
                 .environment(activitySession)
+                .environment(membership)
                 .environment(notificationManager)
                 .onChange(of: scenePhase) { _, newPhase in
                     wearableManager.handleScenePhaseChange(isActive: newPhase == .active)
@@ -42,6 +48,7 @@ struct SombreyApp: App {
                     }
                 }
                 .task {
+                    membership.start()
                     trainingSession.restoreIfNeeded()
                     activitySession.restoreIfNeeded()
                     await notificationManager.reconcileAll()

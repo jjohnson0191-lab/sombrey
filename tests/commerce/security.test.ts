@@ -67,3 +67,33 @@ test("no user can set a verified subscription state or an order's money/state th
   assert.deepEqual(exported(helpers, "mutation"), []);
   assert.ok(exported(helpers, "internalMutation").includes("updateSubscriptionTier"));
 });
+
+// ─── Phase 6B: the iOS StoreKit layer can't grant or claim anything ─────────
+
+const IOS = join(import.meta.dirname, "../../apps/ios/Sombrey");
+function swiftFiles(dir = IOS): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+    d.isDirectory() ? swiftFiles(join(dir, d.name)) : d.name.endsWith(".swift") ? [join(dir, d.name)] : []);
+}
+
+test("6B: the app never calls backend-only commerce functions or claims a server event", () => {
+  const all = swiftFiles().map((f) => [f, readFileSync(f, "utf8")] as const);
+  for (const [f, src] of all) {
+    assert.ok(!/commerce\/internal|applyVerifiedSubscription|applyPaymentUpdate|updateFulfillment|createOrder|setQuote/.test(src), `${f} references a backend-only commerce function`);
+    for (const serverEvent of ["subscription_activated", "subscription_renewed", "subscription_cancelled", "subscription_expired", "band_checkout_completed", "band_order_completed", "band_returned"]) {
+      assert.ok(!src.includes(`"${serverEvent}"`), `${f} names the server-only event ${serverEvent}`);
+    }
+  }
+  const convexCalls = all.flatMap(([, src]) => [...src.matchAll(/"commerce\/[a-zA-Z]+:[a-zA-Z]+"/g)].map((m) => m[0]));
+  assert.deepEqual([...new Set(convexCalls)], ['"commerce/access:recordEvent"'], "the only commerce call is the client event recorder");
+});
+
+test("6B: an unverified transaction can't produce access, and nothing is sent until 6C", () => {
+  const models = readFileSync(join(IOS, "Commerce/MembershipModels.swift"), "utf8");
+  const manager = readFileSync(join(IOS, "Commerce/MembershipManager.swift"), "utf8");
+  assert.ok(/guard let t = best\.transaction\.verifiedValue else \{ return \.unverified \}/.test(models));
+  assert.ok(/case \.success\(\.unverified\): return \.failed\(\.unverified\)/.test(models));
+  assert.ok(/case \.unverified\(let t, _\):[\s\S]{0,200}ignored/.test(manager), "unverified updates are ignored (and not finished)");
+  assert.ok(/static let available = false/.test(manager), "commerce backend calls stay off until 6C deploys it");
+  assert.ok(!/\bprint\(|jwsRepresentation\)"|signedTransaction\)"/.test(manager + models), "no raw payload logging");
+});
