@@ -298,7 +298,7 @@ workflows:
           BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" /tmp/SombreyInfo.plist)
           echo "Compiled app: $VERSION ($BUILD) → Convex $URL"
           test "$URL" = "https://$DEV_CONVEX_HOST"
-          echo "DEV BUILD — Sombrey Body Scan 5F (history, visual comparison, proportion trends, image controls, larger framing). For the consolidated Phase 5 evaluation. Nothing validated. Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
+          echo "DEV BUILD — HOTFIX: fixes the crash on launch after allowing notifications (Body Scan 5F otherwise unchanged). Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
 
     artifacts:
       - build/ios/ipa/*.ipa

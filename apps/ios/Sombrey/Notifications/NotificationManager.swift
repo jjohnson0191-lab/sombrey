@@ -331,6 +331,14 @@ final class NotificationManager: NSObject {
     /// One-shot Convex query fetch — takes the first emitted value then
     /// cancels the underlying subscription, since `ConvexClientWithAuth`
     /// only exposes reactive `subscribe`, not a dedicated one-shot read.
+    ///
+    /// LAUNCH-CRASH FIX: ConvexMobile delivers query results and errors on
+    /// its own background callback thread, but the `sink` closures below
+    /// are main-actor-isolated (this class is `@MainActor`), and Swift 6
+    /// traps when an isolated closure runs off its actor. Hop to the main
+    /// queue first — exactly as `ConvexQuery` and `AppState` already do.
+    /// Without it, every call crashed the app (on each launch once
+    /// notifications were allowed, via `reconcileAll()`).
     private func fetchOnce<T: Decodable & Sendable>(_ queryName: String, as type: T.Type) async -> T? {
         await withCheckedContinuation { continuation in
             var cancellable: AnyCancellable?
@@ -338,6 +346,7 @@ final class NotificationManager: NSObject {
             cancellable = ConvexClientProvider.client
                 .subscribe(to: queryName, yielding: T.self)
                 .first()
+                .receive(on: DispatchQueue.main)
                 .sink(
                     receiveCompletion: { _ in
                         if !didResume {
