@@ -15,6 +15,12 @@
 //   composition    → 5E composition layer (body-fat estimate kept internal; BMI
 //                    from the user's recorded values), with its input snapshot
 //   compare        → 5E scan A → scan B: no meaningful / possible / meaningful change
+//                    (5F: + silhouette frames for the aligned visual comparison)
+//   details        → 5F everything recorded about one scan (for "Analysis details")
+//   trends         → 5F body-proportion series from enough comparable scans
+//   removeView     → 5F delete one view's image from a saved scan
+//   trainingConsent / setTrainingConsent → 5F OPTIONAL, separate, revocable
+//                    consent for future model training (no pipeline exists)
 //   recordUpload   → (internal) POST /body-scan-upload binds each upload to its
 //                    owner; cleanupOrphanUploads sweeps uploads never attached
 //
@@ -35,13 +41,14 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
-  CAPTURE_CONFIG, CONSENT_VERSION, PROTOCOL_VERSION, VIEWS, contextSnapshot, missingProfile, missingViews,
+  CAPTURE_CONFIG, CONSENT_VERSION, PROTOCOL_VERSION, TRAINING_CONSENT_VERSION, VIEWS, contextSnapshot, missingProfile, missingViews,
   plausibleHeightCm, plausibleWeightKg, sanitizeCapture, validScanId, validateBlob, validateConditions, validateViewMeta,
 } from "./bodyScan/rules";
 import { isAbandoned, validateFeatureSet, type FeatureSet } from "./bodyScan/features";
 import { MEASUREMENT_METHOD_VERSION, compareMeasurements, computeMeasurements } from "./bodyScan/measurements";
 import { COMPOSITION_VERSION, computeComposition } from "./bodyScan/composition";
 import { alignScans, type AlignmentInput } from "./bodyScan/features";
+import { buildTrends, isReleased, measurementProvenance, scanSummary } from "./bodyScan/history";
 import { VIEW, featureMultiView, featureProcessing, featureQuality, featureScale, featureView } from "./bodyScan/validators";
 import { latestMeasurements, ownScan, requireUser } from "./bodyScan/access";
 
@@ -243,6 +250,7 @@ export const start = mutation({
       deviceModel: v.string(), osVersion: v.string(), appVersion: v.string(),
       camera: v.union(v.literal("front"), v.literal("rear")),
       depth: v.optional(v.union(v.literal("none"), v.literal("truedepth"), v.literal("lidar"))),
+      clothing: v.optional(v.union(v.literal("recommended"), v.literal("fitted_athletic"))),
       imageMaxPixel: v.number(), jpegQuality: v.number(),
     }),
   },
@@ -369,19 +377,35 @@ export const list = query({
   handler: async (ctx) => {
     const user = await requireUser(ctx);
     const scans = await ctx.db.query("bodyScans").withIndex("by_user_and_created", (q) => q.eq("userId", user._id)).order("desc").take(200);
-    return await Promise.all(scans.map(async (s) => ({
-      scanId: s.scanId,
-      status: s.status,
-      protocolVersion: s.protocolVersion,
-      createdAt: s.createdAt,
-      completedAt: s.completedAt ?? null,
-      context: s.context,
-      // Which CV versions have processed this scan — never the values.
-      featureVersions: (await featuresOf(ctx, s._id)).map((f) => f.cvVersion),
-      views: (await imagesOf(ctx, s._id))
-        .sort((a, b) => VIEWS.indexOf(a.view) - VIEWS.indexOf(b.view))
-        .map((i) => ({ view: i.view, width: i.width, height: i.height, qualityScore: i.qualityScore, issues: i.issues, capturedAt: i.capturedAt })),
-    })));
+    return await Promise.all(scans.map(async (s) => {
+      const images = await imagesOf(ctx, s._id);
+      const m = await latestMeasurements(ctx, s._id);
+      const c = m ? await compositionOf(ctx, s._id, m.methodVersion) : null;
+      return {
+        scanId: s.scanId,
+        status: s.status,
+        protocolVersion: s.protocolVersion,
+        createdAt: s.createdAt,
+        completedAt: s.completedAt ?? null,
+        context: s.context,
+        camera: s.capture.camera,
+        depthSource: s.capture.depth ?? "none",
+        removedViews: s.removedViews ?? [],
+        // Which CV versions have processed this scan — never the values.
+        featureVersions: (await featuresOf(ctx, s._id)).map((f) => f.cvVersion),
+        views: images
+          .sort((a, b) => VIEWS.indexOf(a.view) - VIEWS.indexOf(b.view))
+          .map((i) => ({ view: i.view, width: i.width, height: i.height, qualityScore: i.qualityScore, issues: i.issues, capturedAt: i.capturedAt })),
+        // 5F: what the history row may honestly say (provenance, not values).
+        summary: scanSummary({
+          viewQualities: images.map((i) => i.qualityScore),
+          depthSource: s.capture.depth ?? "none",
+          measurements: m ? { methodVersion: m.methodVersion, measurements: m.measurements } : null,
+          composition: c ? { results: c.results } : null,
+          mdcValidated: Boolean(m && VALIDATED_MDC[m.methodVersion]),
+        }),
+      };
+    }));
   },
 });
 
@@ -490,7 +514,12 @@ export const measurements = query({
     const newest = await latestMeasurements(ctx, scan._id);
     if (!newest) return null;
     const { _id, _creationTime, userId: _u, scanDocId: _s, ...m } = newest;
-    return { ...m, snapshotHeightCm: scan.context.heightCm ?? null };
+    return {
+      ...m,
+      // 5F: how each value may be labelled — "measured" only once released.
+      measurements: m.measurements.map((x) => ({ ...x, provenance: measurementProvenance(m.methodVersion, x), released: isReleased(m.methodVersion, x.name) })),
+      snapshotHeightCm: scan.context.heightCm ?? null,
+    };
   },
 });
 
@@ -546,6 +575,30 @@ async function alignmentInput(ctx: QueryCtx, scan: Doc<"bodyScans">): Promise<Al
   };
 }
 
+async function compositionOf(ctx: QueryCtx, scanDocId: Id<"bodyScans">, methodVersion: string) {
+  const rows = await ctx.db.query("bodyScanCompositions").withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scanDocId).eq("measurementMethodVersion", methodVersion)).collect();
+  return rows.sort((x, y) => (x.compositionVersion < y.compositionVersion ? 1 : -1))[0] ?? null;
+}
+
+type Frame = { top: number; bottom: number; left: number; right: number };
+async function silhouettes(ctx: QueryCtx, scanDocId: Id<"bodyScans">): Promise<Record<string, Frame>> {
+  const f = (await featuresOf(ctx, scanDocId)).sort((x, y) => (x.cvVersion < y.cvVersion ? 1 : -1))[0];
+  const out: Record<string, Frame> = {};
+  for (const v of f?.views ?? []) if (v.silhouette) out[v.view] = { top: v.silhouette.top, bottom: v.silhouette.bottom, left: v.silhouette.left, right: v.silhouette.right };
+  return out;
+}
+
+async function comparisonFrames(ctx: QueryCtx, a: Doc<"bodyScans">, b: Doc<"bodyScans">) {
+  const [sa, sb] = [await silhouettes(ctx, a._id), await silhouettes(ctx, b._id)];
+  const [ia, ib] = [new Set((await imagesOf(ctx, a._id)).map((i) => i.view)), new Set((await imagesOf(ctx, b._id)).map((i) => i.view))];
+  return VIEWS.map((view) => {
+    const reasons: string[] = [];
+    if (!ia.has(view) || !ib.has(view)) reasons.push("image_missing");
+    if (!sa[view] || !sb[view]) reasons.push("no_silhouette");
+    return { view, available: reasons.length === 0, reasons, a: sa[view] ?? null, b: sb[view] ?? null };
+  });
+}
+
 /** Scan A → scan B for the owner: alignment (align.1), then per measurement
  * no_meaningful_change / possible_change / meaningful_change. "Meaningful"
  * needs a validated MDC — none exists yet, so it can't occur. Unvalidated. */
@@ -561,13 +614,115 @@ export const compare = query({
     const alignment = ia && ib ? alignScans(ia, ib) : null;
     const mdc = VALIDATED_MDC[ma.methodVersion];
     const result = compareMeasurements(ma, mb, { ...(mdc ? { mdc, mdcValidated: true } : {}), ...(alignment ? { alignment } : {}) });
+    // 5F: per view, the silhouette box of each scan (for the aligned visual
+    // comparison) — only for views both scans still have an image of.
+    const frames = await comparisonFrames(ctx, a, b);
     return {
       ...result,
+      frames,
       validated: false as const,
       methodVersion: ma.methodVersion,
       alignment: alignment ? { method: alignment.method, comparable: alignment.comparable, reasons: alignment.reasons } : null,
       mdcValidated: Boolean(mdc),
     };
+  },
+});
+
+/** 5F "Analysis details": everything recorded about one scan, for the owner.
+ * Provenance only — no storage ids, no URLs, nothing about other users. */
+export const details = query({
+  args: { scanId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const scan = await ownScan(ctx, user._id, args.scanId);
+    const m = await latestMeasurements(ctx, scan._id);
+    const c = m ? await compositionOf(ctx, scan._id, m.methodVersion) : null;
+    const features = await featuresOf(ctx, scan._id);
+    const newestFeatures = features.sort((x, y) => (x.cvVersion < y.cvVersion ? 1 : -1))[0];
+    const images = await imagesOf(ctx, scan._id);
+    return {
+      scanId: scan.scanId,
+      createdAt: scan.createdAt,
+      completedAt: scan.completedAt ?? null,
+      status: scan.status,
+      protocolVersion: scan.protocolVersion,
+      consentVersion: scan.consentVersion,
+      capture: scan.capture,
+      context: scan.context,
+      removedViews: scan.removedViews ?? [],
+      views: images.map((i) => ({ view: i.view, qualityScore: i.qualityScore, issues: i.issues, capturedAt: i.capturedAt, protocolConfig: i.conditions?.protocolConfig ?? null })),
+      cvVersion: newestFeatures?.cvVersion ?? null,
+      captureQualityOverall: newestFeatures?.quality.overallScore ?? null,
+      scaleSource: m?.scale.source ?? null,
+      scaleOk: m?.scale.ok ?? null,
+      measurementMethodVersion: m?.methodVersion ?? null,
+      compositionVersion: c?.compositionVersion ?? null,
+      compositionModels: c ? c.results.map((r) => ({ model: r.model, version: r.modelVersion, validationStatus: r.validationStatus, status: r.status })) : [],
+      validated: false as const,
+    };
+  },
+});
+
+/** 5F: body-proportion trends over the owner's saved scans (convex/bodyScan/history.ts). */
+export const trends = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const scans = await ctx.db.query("bodyScans").withIndex("by_user_and_created", (q) => q.eq("userId", user._id)).order("desc").take(100);
+    const input = [];
+    for (const s of scans) {
+      if (s.status !== "complete") continue;
+      const m = await latestMeasurements(ctx, s._id);
+      if (m) input.push({ scanId: s.scanId, at: s.createdAt, protocolVersion: s.protocolVersion, methodVersion: m.methodVersion, measurements: m.measurements });
+    }
+    return { trends: buildTrends(input), validated: false as const };
+  },
+});
+
+/** 5F: delete one view's image from a saved scan. The scan, its other images
+ * and its derived numbers are kept (delete the scan to remove everything);
+ * that view can no longer be compared visually. */
+export const removeView = mutation({
+  args: { scanId: v.string(), view: VIEW },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const scan = await ownScan(ctx, user._id, args.scanId);
+    if (scan.status !== "complete") throw new ConvexError({ code: "INVALID", message: "Only a saved scan's images can be deleted individually" });
+    let removed = false;
+    for (const img of await ctx.db.query("bodyScanImages").withIndex("by_scan_and_view", (q) => q.eq("scanDocId", scan._id).eq("view", args.view)).collect()) {
+      await deleteImageRow(ctx, img);
+      removed = true;
+    }
+    if (removed) await ctx.db.patch(scan._id, { removedViews: [...new Set([...(scan.removedViews ?? []), args.view])] });
+    return { removed };
+  },
+});
+
+/** 5F: the user's OPTIONAL training consent — separate from Body Scan consent. */
+export const trainingConsent = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const latest = await ctx.db.query("bodyScanTrainingConsent").withIndex("by_user_and_at", (q) => q.eq("userId", user._id)).order("desc").first();
+    return {
+      currentVersion: TRAINING_CONSENT_VERSION,
+      granted: latest?.granted === true && latest.version === TRAINING_CONSENT_VERSION,
+      version: latest?.version ?? null,
+      at: latest?.at ?? null,
+      // No training pipeline exists; this records the user's choice only.
+      pipelineActive: false as const,
+    };
+  },
+});
+
+/** Grant (for the current wording) or revoke. Each change is appended, never edited. */
+export const setTrainingConsent = mutation({
+  args: { granted: v.boolean(), version: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    if (args.granted && args.version !== TRAINING_CONSENT_VERSION) throw new ConvexError({ code: "INVALID", message: "Please review the latest wording" });
+    await ctx.db.insert("bodyScanTrainingConsent", { userId: user._id, version: args.granted ? args.version : TRAINING_CONSENT_VERSION, granted: args.granted, at: Date.now() });
+    return { granted: args.granted };
   },
 });
 

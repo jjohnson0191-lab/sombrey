@@ -49,10 +49,18 @@ export function validateConditions(c: CaptureConditions | undefined): string | n
  * capture; a dev build's local tuning takes precedence. Changing a value here
  * = a new version string. */
 export const CAPTURE_CONFIG = {
-  version: "5a.2-default",
-  spanMin: 0.6, spanMax: 0.9, minHeadY: 0.04, maxAnkleY: 0.95, centreMin: 0.33, centreMax: 0.67,
+  // 5F: a larger frame and a closer stance — the body may fill up to 93 % of
+  // the frame (was 90 %), with smaller head/feet margins. The drawn guide now
+  // spans ~2 %–97 % of the preview height. Quality gates unchanged otherwise.
+  version: "5f.1",
+  spanMin: 0.62, spanMax: 0.93, minHeadY: 0.03, maxAnkleY: 0.96, centreMin: 0.33, centreMax: 0.67,
   maxPitch: 20, maxRoll: 6, minBrightness: 0.2, maxSubjectMotion: 0.015, maxDeviceMotion: 0.06,
 } as const;
+
+/** 5F: the wording version of the OPTIONAL model-training consent — separate
+ * from CONSENT_VERSION (Body Scan use). A draft pending legal review, shown on
+ * development builds only; no training pipeline exists. */
+export const TRAINING_CONSENT_VERSION = "draft-2026-10";
 
 export const IMAGE_LIMITS = { minLongSide: 1024, maxLongSide: 4096, maxBytes: 8_000_000, contentType: "image/jpeg" } as const;
 /** An upload must be attached within this time of being uploaded. */
@@ -112,6 +120,8 @@ export type CaptureInfo = {
   /** Phase 5C: the depth source the phone captured with — "none" when the
    * device has none (older builds omit it). */
   depth?: DepthSource;
+  /** 5F: recommended minimal clothing, or fitted athletic wear (less accurate). */
+  clothing?: "recommended" | "fitted_athletic";
   imageMaxPixel: number; // stored long side
   jpegQuality: number;
 };
@@ -130,9 +140,10 @@ export function sanitizeCapture(c: unknown): CaptureInfo | null {
   // The front camera's depth is TrueDepth; the rear mode exists only for LiDAR.
   if (x.camera === "front" && depth === "lidar") return null;
   if (x.camera === "rear" && depth !== "lidar") return null;
+  if (x.clothing !== undefined && x.clothing !== "recommended" && x.clothing !== "fitted_athletic") return null;
   if (!Number.isInteger(x.imageMaxPixel) || x.imageMaxPixel! < IMAGE_LIMITS.minLongSide || x.imageMaxPixel! > IMAGE_LIMITS.maxLongSide) return null;
   if (typeof x.jpegQuality !== "number" || x.jpegQuality < 0.5 || x.jpegQuality > 1) return null;
-  return { deviceModel, osVersion, appVersion, camera: x.camera, ...(depth ? { depth } : {}), imageMaxPixel: x.imageMaxPixel!, jpegQuality: x.jpegQuality };
+  return { deviceModel, osVersion, appVersion, camera: x.camera, ...(depth ? { depth } : {}), ...(x.clothing ? { clothing: x.clothing } : {}), imageMaxPixel: x.imageMaxPixel!, jpegQuality: x.jpegQuality };
 }
 
 // ─── The user's context at scan time ─────────────────────────────────────────

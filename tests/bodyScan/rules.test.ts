@@ -67,6 +67,10 @@ test("capture metadata: only the protocol's fields, bounded; camera ↔ depth so
   assert.equal(sanitizeCapture({ ...c, depth: "lidar" }), null, "the front camera has no LiDAR");
   assert.equal(sanitizeCapture({ ...c, depth: "sonar" }), null);
   assert.equal(sanitizeCapture({ ...c, camera: "wide" }), null);
+  // 5F: what the user wore — recorded (fitted athletic wear may reduce accuracy), never free text.
+  assert.deepEqual(sanitizeCapture({ ...c, clothing: "fitted_athletic" }), { ...c, clothing: "fitted_athletic" });
+  assert.deepEqual(sanitizeCapture({ ...c, clothing: "recommended" }), { ...c, clothing: "recommended" });
+  assert.equal(sanitizeCapture({ ...c, clothing: "jeans and a hoodie" }), null);
   assert.equal(sanitizeCapture({ ...c, deviceModel: "x".repeat(200) }), null);
   assert.equal(sanitizeCapture({ ...c, imageMaxPixel: 512 }), null);
   assert.equal(sanitizeCapture({ ...c, jpegQuality: 0.2 }), null);

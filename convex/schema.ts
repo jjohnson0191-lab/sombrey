@@ -500,9 +500,14 @@ export default defineSchema({
       appVersion: v.string(),
       camera: v.union(v.literal("front"), v.literal("rear")),   // rear = 5C LiDAR mode
       depth: v.optional(v.union(v.literal("none"), v.literal("truedepth"), v.literal("lidar"))),
+      // 5F: what the user wore (fitted athletic clothing may reduce accuracy).
+      clothing: v.optional(v.union(v.literal("recommended"), v.literal("fitted_athletic"))),
       imageMaxPixel: v.number(),
       jpegQuality: v.number(),
     }),
+    // 5F: views whose image the user deleted from a saved scan (the scan and
+    // its derived numbers are kept; those views can't be compared visually).
+    removedViews: v.optional(v.array(v.union(v.literal("front"), v.literal("side"), v.literal("back")))),
     // The user's own recorded context when the scan was taken (profile,
     // weight log) — a snapshot, never rewritten by later profile edits.
     context: v.object({
@@ -622,6 +627,19 @@ export default defineSchema({
   }).index("by_storage", ["storageId"])
     .index("by_created", ["createdAt"])
     .index("by_user", ["userId"]),
+
+  // Body Scan Phase 5F: OPTIONAL consent to use de-identified Body Scan data
+  // for improving Sombrey's body-analysis models — completely separate from
+  // the Body Scan consent (users.bodyScanConsentVersion). An append-only log:
+  // each grant or revocation is a row (versioned, timestamped); the newest row
+  // is the current state. No training pipeline exists; nothing reads this
+  // for training until one is built and reviewed.
+  bodyScanTrainingConsent: defineTable({
+    userId: v.id("users"),
+    version: v.string(),
+    granted: v.boolean(),
+    at: v.number(),
+  }).index("by_user_and_at", ["userId", "at"]),
 
   // Body Scan Phase 5D — VALIDATION ONLY (development deployments; every
   // function checks SOMBREY_BODYSCAN_VALIDATION). Hand-measured ground truth

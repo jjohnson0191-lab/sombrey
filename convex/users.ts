@@ -1144,6 +1144,7 @@ export const deleteSelfAccount = mutation({
     await purgeDocs(ctx, await ctx.db.query("bodyScanFeatures").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("bodyScanMeasurements").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("bodyScanCompositions").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    await purgeDocs(ctx, await ctx.db.query("bodyScanTrainingConsent").withIndex("by_user_and_at", (q) => q.eq("userId", userId)).collect());
     // Uploads never attached: their blobs go too (an attached one was removed with its image row).
     for (const u of await ctx.db.query("bodyScanUploads").withIndex("by_user", (q) => q.eq("userId", userId)).collect()) {
       if (await ctx.db.system.get(u.storageId)) await ctx.storage.delete(u.storageId);

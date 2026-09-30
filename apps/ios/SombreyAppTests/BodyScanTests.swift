@@ -639,4 +639,84 @@ struct BodyScanTests {
         #expect(r.value(forHTTPHeaderField: "Content-Type") == "image/jpeg")
         #expect(r.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
     }
+
+    // MARK: Phase 5F — longitudinal experience
+
+    static func item(_ name: String, _ status: String, _ value: Double?, _ u: Double?, unit: String = "cm", provenance: BodyScanProvenance? = nil) -> BodyScanMeasurementsDTO.Item {
+        .init(name: name, kind: "length", status: status, unit: unit, value: value, uncertainty: u, confidence: 0.5, method: "m", reasons: [], provenance: provenance)
+    }
+
+    @Test func experimentalValuesAreNeverShownAsMeasuredAndStayOnDevelopmentBuilds() {
+        let m = Self.measurements([
+            Self.item("height", "available", 178.4, 3.2, provenance: .experimental),
+            Self.item("waistCircumference", "available", 82.2, 4.1, provenance: .measured),
+            Self.item("shoulderWidth", "low_confidence", 44, 9, provenance: .experimental),
+            Self.item("waistToHeight", "available", 0.462, 0.041, unit: "ratio", provenance: .experimental),
+        ])
+        let production = BodyScanDisplayPolicy(showsExperimental: false)
+        #expect(BodyScanResultPresentation.measurements(m, policy: production) == [.init(label: "Waist", text: "82 ± 5 cm", provenance: .measured)],
+                "production: only released ('Measured') values")
+        #expect(BodyScanResultPresentation.proportions(m, policy: production).isEmpty, "experimental proportions aren't shown in production")
+        let dev = BodyScanDisplayPolicy(showsExperimental: true)
+        let lines = BodyScanResultPresentation.measurements(m, policy: dev)
+        #expect(lines.map(\.provenance) == [.experimental, .measured], "each value keeps its own label")
+        #expect(!lines.contains { $0.label == "Shoulder width" }, "low-confidence results are never shown")
+        #expect(BodyScanResultPresentation.proportions(m, policy: dev) == [.init(label: "Waist-to-height", text: "0.46 ± 0.04", provenance: .experimental)])
+        #expect(BodyScanProvenance.calculated.label == "Calculated" && BodyScanProvenance.notAvailable.label == "Not available")
+        #expect(!production.shows(.experimental) && production.shows(.calculated) && !dev.shows(.notAvailable))
+    }
+
+    @Test func comparisonPhotosAreAlignedByBodyOutline() {
+        // Two photos: the body spans rows 0.10–0.90 in one and 0.20–0.80 in the other.
+        let container = CGSize(width: 300, height: 400)
+        let a = BodyScanComparisonDTO.Frame(top: 0.1, bottom: 0.9, left: 0.4, right: 0.6)
+        let b = BodyScanComparisonDTO.Frame(top: 0.2, bottom: 0.8, left: 0.3, right: 0.5)
+        let img = CGSize(width: 1536, height: 2048)
+        guard let pa = BodyScanAlignment.placement(frame: a, imageSize: img, container: container),
+              let pb = BodyScanAlignment.placement(frame: b, imageSize: img, container: container) else { #expect(Bool(false)); return }
+        func onScreen(_ p: (size: CGSize, center: CGPoint), _ y: Double) -> Double { Double(p.center.y) - Double(p.size.height) / 2 + y * Double(p.size.height) }
+        #expect(abs(onScreen(pa, 0.1) - 24) < 0.001 && abs(onScreen(pb, 0.2) - 24) < 0.001, "both outlines start at 6 % of the container")
+        #expect(abs(onScreen(pa, 0.9) - 376) < 0.001 && abs(onScreen(pb, 0.8) - 376) < 0.001, "…and end at 94 %")
+        let centreX = { (p: (size: CGSize, center: CGPoint), f: BodyScanComparisonDTO.Frame) in Double(p.center.x) - Double(p.size.width) / 2 + (f.left + f.right) / 2 * Double(p.size.width) }
+        #expect(abs(centreX(pa, a) - 150) < 0.001 && abs(centreX(pb, b) - 150) < 0.001, "both bodies centred")
+        #expect(BodyScanAlignment.placement(frame: .init(top: 0.5, bottom: 0.5, left: 0, right: 1), imageSize: img, container: container) == nil, "no outline, no forced alignment")
+    }
+
+    @Test func refusedComparisonsAreExplainedPlainly() {
+        #expect(BodyScanComparisonPresentation.refusal(["alignment:front:distance_differs"]) == "These scans were captured under different conditions (distance, phone angle or pose) and can't be reliably compared.")
+        #expect(BodyScanComparisonPresentation.refusal(["scale_source_differs"]).contains("different cameras"))
+        #expect(BodyScanComparisonPresentation.refusal(["not_processed"]).contains("once both scans have been analysed"))
+        #expect(BodyScanComparisonPresentation.viewRefusal(["image_missing"]).contains("no longer has this view's image"))
+    }
+
+    @Test func analysisDetailsCarryTheScansProvenance() throws {
+        let json = """
+        {"createdAt":1790000000000,"protocolVersion":"5a.2","consentVersion":"2026-09-28",
+         "capture":{"deviceModel":"iPhone16,1","osVersion":"iOS 26.0","appVersion":"1.0 (53)","camera":"front","depth":"truedepth","clothing":"fitted_athletic","imageMaxPixel":2048,"jpegQuality":0.9},
+         "context":{"heightCm":179,"weightKg":82,"sex":"male","ageYears":35},"removedViews":["back"],
+         "views":[{"view":"front","qualityScore":0.95,"issues":[],"capturedAt":1,"protocolConfig":"server:5f.1"}],
+         "cvVersion":"5c.1","captureQualityOverall":0.91,"scaleSource":"truedepth","scaleOk":false,"measurementMethodVersion":"m2","compositionVersion":"c1",
+         "compositionModels":[{"model":"rfm","version":"0","validationStatus":"experimental","status":"estimate"}],"validated":false}
+        """
+        let d = try JSONDecoder().decode(BodyScanDetailsDTO.self, from: Data(json.utf8))
+        let rows = Dictionary(uniqueKeysWithValues: BodyScanDetailsPresentation.rows(d))
+        #expect(rows["Device"] == "iPhone16,1" && rows["App version"] == "1.0 (53)" && rows["Depth"] == "TrueDepth (front)")
+        #expect(rows["Clothing"]?.contains("may reduce accuracy") == true)
+        #expect(rows["Capture settings"] == "server:5f.1")
+        #expect(rows["Analysis"] == "features 5c.1 · method m2 · composition c1")
+        #expect(rows["Distance measurement"] == "Not usable for this scan")
+        #expect(rows["Your details at this scan"] == "179 cm · 82.0 kg · male · 35 y")
+        #expect(rows["Validation"] == "Not yet validated")
+    }
+
+    @Test func historySummariesDecodeAndClothingIsNeutral() throws {
+        let json = """
+        {"captureQuality":0.88,"depthSource":"truedepth","processed":true,"measured":[],"experimental":["shoulderWidth"],"bmi":{"value":25.6,"displayable":true},"composition":"experimental","changeDetection":"possible_only"}
+        """
+        let s = try JSONDecoder().decode(BodyScanSummaryDTO.self, from: Data(json.utf8))
+        #expect(s.bmi?.value == 25.6 && s.changeDetection == "possible_only" && s.measured.isEmpty)
+        #expect(BodyScanClothing.recommended.note == nil)
+        let note = BodyScanClothing.fittedAthletic.note ?? ""
+        #expect(note.contains("less accurate") && !note.lowercased().contains("must") && !note.lowercased().contains("wrong"))
+    }
 }

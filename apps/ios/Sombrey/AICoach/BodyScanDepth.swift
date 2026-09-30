@@ -254,6 +254,9 @@ struct BodyScanMeasurementsDTO: Decodable, Equatable, Sendable {
         let confidence: Double
         let method: String
         let reasons: [String]
+        /// 5F: "measured" only once released through the validation gate.
+        var provenance: BodyScanProvenance? = nil
+        var released: Bool? = nil
     }
     struct Scale: Decodable, Equatable, Sendable {
         let source: String

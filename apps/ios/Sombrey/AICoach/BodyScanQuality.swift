@@ -473,6 +473,11 @@ struct BodyScanDTO: Decodable, Equatable, Identifiable {
     let context: BodyScanProfileDTO.Context
     var featureVersions: [String]? = nil
     let views: [ViewInfo]
+    // 5F
+    var camera: String? = nil
+    var depthSource: String? = nil
+    var removedViews: [String]? = nil
+    var summary: BodyScanSummaryDTO? = nil
     var id: String { scanId }
     var date: Date { Date(timeIntervalSince1970: createdAt / 1000) }
 }

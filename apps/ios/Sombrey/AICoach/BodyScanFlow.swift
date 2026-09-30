@@ -65,6 +65,8 @@ struct BodyScanFlow: View {
     @State private var capabilities = BodyScanCapabilities(trueDepth: false, lidar: false)
     /// Front (standard) or rear (LiDAR). Fixed once a view is captured.
     @State private var captureMode: BodyScanCaptureMode = .front
+    /// 5F: what the user is wearing (recorded; fitted athletic wear may reduce accuracy).
+    @State private var clothing: BodyScanClothing = .recommended
 
     init(startWithResults: Bool = false) {
         _showResults = State(initialValue: startWithResults)
@@ -205,6 +207,15 @@ struct BodyScanFlow: View {
                     .font(StudioFont.body(12))
                     .foregroundStyle(StudioColor.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
+                Picker("What you're wearing", selection: $clothing) {
+                    Text("As recommended").tag(BodyScanClothing.recommended)
+                    Text("Fitted athletic wear").tag(BodyScanClothing.fittedAthletic)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("bodyScan.clothing")
+                if let note = clothing.note {
+                    Text(note).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -461,6 +472,7 @@ struct BodyScanFlow: View {
         stage = .saving
         let draft = self.draft
         let mode = captureMode
+        let wearing = clothing
         // The depth source this scan captured with: the rear mode is LiDAR by
         // definition; the front camera records TrueDepth only if a view
         // actually carried depth. (No evidence → no metric scale either way.)
@@ -470,7 +482,7 @@ struct BodyScanFlow: View {
                 savingStep = "Preparing"
                 let _: BodyScanStartResult = try await ConvexClientProvider.client.mutation("bodyScans:start", with: [
                     "scanId": draft.scanId,
-                    "capture": BodyScanCaptureInfo.current(mode: mode, depth: depthSource),
+                    "capture": BodyScanCaptureInfo.current(mode: mode, depth: depthSource, clothing: wearing),
                 ])
                 serverScanStarted = true
                 for view in BodyScanView.allCases {
@@ -1000,22 +1012,37 @@ struct BodyScanHistoryView: View {
     @State private var selected: String?
     @State private var confirmingDelete: BodyScanDTO?
     @State private var showValidation = false
+    @State private var comparing = false
+    @State private var showTrends = false
 
     private var saved: [BodyScanDTO] { (scans.value ?? []).filter { $0.status == "complete" } }
+    private var current: BodyScanDTO? { saved.first(where: { $0.scanId == selected }) ?? saved.first }
+    /// The saved scan just before `scan` (the list is newest first).
+    private func previous(of scan: BodyScanDTO) -> BodyScanDTO? {
+        saved.firstIndex(where: { $0.scanId == scan.scanId }).flatMap { i in saved.indices.contains(i + 1) ? saved[i + 1] : nil }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                if let scan = saved.first(where: { $0.scanId == selected }) ?? saved.first {
+                if let scan = current {
                     header(scan)
                     HStack(spacing: 10) {
                         ForEach(BodyScanView.allCases) { v in
                             VStack(spacing: 6) {
-                                BodyScanImageView(scanId: scan.scanId, view: v)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 220)
-                                    .background { SombreyGlassChamber(cornerRadius: 16) }
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                Group {
+                                    if scan.views.contains(where: { $0.view == v.rawValue }) {
+                                        BodyScanImageView(scanId: scan.scanId, view: v)
+                                    } else {
+                                        Text((scan.removedViews ?? []).contains(v.rawValue) ? "Deleted" : "—")
+                                            .font(StudioFont.body(11)).foregroundStyle(StudioColor.inkFaint)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 220)
+                                .background { SombreyGlassChamber(cornerRadius: 16) }
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                                 Text(v.title.uppercased()).font(StudioFont.body(10, weight: .semibold)).tracking(1.4).foregroundStyle(StudioColor.inkSoft)
                             }
                         }
@@ -1023,21 +1050,17 @@ struct BodyScanHistoryView: View {
                     if let line = Self.contextLine(scan.context) {
                         Text(line).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
                     }
-                    if BodyScanMeasurementsView.enabled {
-                        BodyScanMeasurementsView(
-                            scanId: scan.scanId,
-                            previousScanId: saved.firstIndex(where: { $0.scanId == scan.scanId }).flatMap { i in saved.indices.contains(i + 1) ? saved[i + 1].scanId : nil },
-                            captureQuality: scan.views.map(\.qualityScore).min()
-                        )
+                    BodyScanResultCard(scan: scan, previous: previous(of: scan), canCompare: saved.count > 1, onCompare: { comparing = true })
+                        .id(scan.scanId)
+                    if saved.count > 1 {
+                        Button { showTrends = true } label: { Label("Proportion trends", systemImage: "chart.xyaxis.line").frame(maxWidth: .infinity) }
+                            .buttonStyle(.outlineCTA)
+                        earlier
                     }
-                    if saved.count > 1 { earlier }
-                    Text(BodyScanMeasurementsView.enabled
-                         ? "A private, consistent record for seeing how your body changes. Sombrey doesn't estimate body fat, weight or BMI from these photos."
-                         : "A private, consistent record for seeing how your body changes. Sombrey doesn't estimate body fat or measurements from these photos yet.")
+                    BodyScanImageControls(scan: scan, onDeleteScan: { confirmingDelete = scan })
+                    if BodyScanDevTools.enabled { BodyScanTrainingConsentRow() }
+                    Text("A private, consistent record of how your body changes over time — a fitness record, not a medical measurement. Sombrey doesn't estimate body fat or weight from these photos.")
                         .font(StudioFont.body(11)).foregroundStyle(StudioColor.inkFaint).fixedSize(horizontal: false, vertical: true)
-                    Button("Delete this scan", role: .destructive) { confirmingDelete = scan }
-                        .font(StudioFont.body(13, weight: .medium))
-                        .frame(minHeight: 44)
                 } else if scans.isLoading {
                     ProgressView().tint(StudioColor.ink).padding(.top, 60).frame(maxWidth: .infinity)
                 } else {
@@ -1059,10 +1082,16 @@ struct BodyScanHistoryView: View {
         }
         .task { scans.subscribe(to: "bodyScans:list") }
         .sheet(isPresented: $showValidation) { BodyScanValidationView() }
+        .sheet(isPresented: $comparing) {
+            if let scan = current, let earlier = previous(of: scan) ?? saved.first(where: { $0.scanId != scan.scanId }) {
+                BodyScanCompareView(scans: saved, earlier: earlier.scanId, later: scan.scanId)
+            }
+        }
+        .sheet(isPresented: $showTrends) { BodyScanTrendsView() }
         .confirmationDialog("Delete this scan?", isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }), titleVisibility: .visible, presenting: confirmingDelete) { scan in
             Button("Delete scan and photos", role: .destructive) { delete(scan) }
         } message: { _ in
-            Text("Its three photos are permanently removed.")
+            Text("Its photos and analysis are permanently removed, and it can't be compared any more.")
         }
     }
 
@@ -1071,27 +1100,27 @@ struct BodyScanHistoryView: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text(isBaseline ? "BASELINE" : "BODY SCAN").font(StudioFont.body(11, weight: .semibold)).tracking(1.8).foregroundStyle(StudioColor.inkSoft)
             Text(scan.date.formatted(.dateTime.day().month(.wide).year())).font(StudioFont.hero(30, weight: .semibold)).foregroundStyle(StudioColor.ink)
-            Text("3 views · private to your account").font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft)
-            if BodyScanDevTools.enabled {
-                // Dev builds only: whether on-device CV features were stored (never their values).
-                Text((scan.featureVersions ?? []).isEmpty ? "DEV · no CV features stored" : "DEV · CV features stored: \((scan.featureVersions ?? []).joined(separator: ", "))")
-                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(StudioColor.inkFaint)
-            }
+            Text("\(scan.views.count) of 3 views · private to your account").font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft)
         }
         .padding(.top, 16)
     }
 
+    /// Every saved scan, newest first, with what each can honestly say.
     private var earlier: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("YOUR SCANS").font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft)
             ForEach(saved) { scan in
                 Button { selected = scan.scanId } label: {
-                    HStack {
-                        Text(scan.date.formatted(.dateTime.day().month(.abbreviated).year()))
-                            .font(StudioFont.body(14, weight: (selected ?? saved.first?.scanId) == scan.scanId ? .semibold : .regular))
-                            .foregroundStyle(StudioColor.ink)
-                        Spacer()
-                        if saved.last?.scanId == scan.scanId { Text("Baseline").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(scan.date.formatted(.dateTime.day().month(.abbreviated).year()))
+                                .font(StudioFont.body(14, weight: (selected ?? saved.first?.scanId) == scan.scanId ? .semibold : .regular))
+                                .foregroundStyle(StudioColor.ink)
+                            Spacer()
+                            if saved.last?.scanId == scan.scanId { Text("Baseline").font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft) }
+                        }
+                        Text(Self.rowSummary(scan, showsExperimental: BodyScanDevTools.enabled))
+                            .font(StudioFont.body(11)).foregroundStyle(StudioColor.inkSoft)
                     }
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -1099,6 +1128,20 @@ struct BodyScanHistoryView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// One history row's second line: quality, what's available, BMI, change status.
+    nonisolated static func rowSummary(_ scan: BodyScanDTO, showsExperimental: Bool) -> String {
+        var parts: [String] = []
+        if let q = scan.summary?.captureQuality { parts.append(q >= 0.85 ? "Good capture" : q >= 0.6 ? "Fair capture" : "Low-quality capture") }
+        if scan.views.count < 3 { parts.append("\(3 - scan.views.count) image\(scan.views.count == 2 ? "" : "s") deleted") }
+        if let s = scan.summary {
+            if !s.processed { parts.append("Not analysed yet") }
+            if !s.measured.isEmpty { parts.append("\(s.measured.count) measured") }
+            if showsExperimental, !s.experimental.isEmpty { parts.append("\(s.experimental.count) experimental") }
+            if let bmi = s.bmi, bmi.displayable { parts.append(String(format: "BMI %.1f (calculated)", bmi.value)) }
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// The user's own recorded values at the time of the scan, labelled —
@@ -1114,128 +1157,6 @@ struct BodyScanHistoryView: View {
     private func delete(_ scan: BodyScanDTO) {
         Task { try? await ConvexClientProvider.client.mutation("bodyScans:remove", with: ["scanId": scan.scanId]) }
         if selected == scan.scanId { selected = nil }
-    }
-}
-
-/// Phase 5C: a scan's measurements. Shown only on development builds until a
-/// validation study signs the method off: available results as whole-cm
-/// estimates with their range, scale-free proportions by name, the height
-/// note — and, for the physical test, every result with its status and reasons.
-struct BodyScanMeasurementsView: View {
-    let scanId: String
-    /// 5E: the previous saved scan, for change over time.
-    var previousScanId: String? = nil
-    /// 5E: the capture-quality score (lowest of the three views).
-    var captureQuality: Double? = nil
-    @State private var result = ConvexQuery<BodyScanMeasurementsDTO?>()
-    @State private var composition = ConvexQuery<BodyScanCompositionDTO?>()
-    @State private var change = ConvexQuery<BodyScanChangeDTO>()
-
-    static var enabled: Bool { BodyScanDevTools.enabled }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("MEASUREMENTS").font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft)
-            if let q = BodyScanQualityPresentation.label(captureQuality) {
-                Text(q).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft)
-            }
-            if let m = result.value ?? nil {
-                let lines = BodyScanMeasurementPresentation.lines(m)
-                ForEach(lines, id: \.label) { line in
-                    HStack {
-                        Text(line.label).font(StudioFont.body(14)).foregroundStyle(StudioColor.ink)
-                        Spacer()
-                        Text(line.text).font(StudioFont.body(14, weight: .semibold)).foregroundStyle(StudioColor.ink).monospacedDigit()
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-                Text(BodyScanMeasurementPresentation.summary(m))
-                    .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
-                let proportions = BodyScanMeasurementPresentation.proportions(m)
-                if !proportions.isEmpty {
-                    Text("Available as proportions: \(proportions.joined(separator: ", ")).")
-                        .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
-                }
-                if let note = BodyScanMeasurementPresentation.heightNote(m) {
-                    Text(note).font(StudioFont.body(12, weight: .medium)).foregroundStyle(StudioColor.ink).fixedSize(horizontal: false, vertical: true)
-                }
-                compositionSection
-                changeSection
-                diagnostics(m)
-            } else if result.isLoading {
-                ProgressView().tint(StudioColor.ink)
-            } else {
-                Text("Measurements appear here once the scan has been analysed on your phone.")
-                    .font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background { SombreyGlassChamber(cornerRadius: 20) }
-        .task(id: scanId) {
-            result.subscribe(to: "bodyScans:measurements", with: ["scanId": scanId])
-            composition.subscribe(to: "bodyScans:composition", with: ["scanId": scanId])
-            if let previousScanId { change.subscribe(to: "bodyScans:compare", with: ["scanIdA": previousScanId, "scanIdB": scanId]) }
-        }
-    }
-
-    /// 5E: displayable composition results only (BMI from recorded values);
-    /// body fat stays hidden while experimental.
-    @ViewBuilder
-    private var compositionSection: some View {
-        if let c = composition.value ?? nil {
-            ForEach(BodyScanCompositionPresentation.lines(c), id: \.label) { line in
-                HStack {
-                    Text(line.label).font(StudioFont.body(14)).foregroundStyle(StudioColor.ink)
-                    Spacer()
-                    Text(line.text).font(StudioFont.body(13)).foregroundStyle(StudioColor.inkSoft).multilineTextAlignment(.trailing)
-                }
-                .accessibilityElement(children: .combine)
-            }
-            if let note = BodyScanCompositionPresentation.note(c) {
-                Text(note).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// 5E: change since the previous scan — never more certain than the scanner is.
-    @ViewBuilder
-    private var changeSection: some View {
-        if previousScanId != nil, let d = change.value {
-            Text("SINCE YOUR PREVIOUS SCAN").font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft).padding(.top, 6)
-            ForEach(BodyScanChangePresentation.lines(d), id: \.label) { line in
-                HStack {
-                    Text(line.label).font(StudioFont.body(14)).foregroundStyle(StudioColor.ink)
-                    Spacer()
-                    Text(line.text).font(StudioFont.body(13)).foregroundStyle(StudioColor.inkSoft)
-                }
-                .accessibilityElement(children: .combine)
-            }
-            Text(BodyScanChangePresentation.summary(d)).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// Dev builds only (the physical test): every result, whatever its status.
-    private func diagnostics(_ m: BodyScanMeasurementsDTO) -> some View {
-        let rows = m.measurements.map { x -> String in
-            let v = x.value.map { String(format: "%.1f", $0) } ?? "—"
-            let u = x.uncertainty.map { String(format: "±%.1f", $0) } ?? ""
-            return "\(x.name) \(x.status) \(v)\(u) \(x.unit) c\(String(format: "%.2f", x.confidence)) \(x.reasons.joined(separator: ","))"
-        }
-        let head = "DEV · \(m.cvVersion)/\(m.methodVersion) · scale \(m.scale.source) \(m.scale.ok ? "ok" : "none") [\(m.scale.views.joined(separator: ","))] \(m.scale.reasons.joined(separator: ","))"
-        let comp = ((composition.value ?? nil)?.results ?? []).map { r -> String in
-            let v = r.value.map { String(format: "%.1f", $0) } ?? "—"
-            let range = (r.low != nil && r.high != nil) ? String(format: " [%.1f–%.1f]", r.low!, r.high!) : ""
-            return "composition \(r.model) v\(r.modelVersion) \(r.name) \(r.status) \(v)\(range) \(r.validationStatus) shown:\(r.displayable) \(r.reasons.joined(separator: ","))"
-        }
-        let changes = (change.value?.changes ?? []).map { "change \($0.name) Δ\(String(format: "%+.1f", $0.delta)) noise \(String(format: "%.1f", $0.noise)) \($0.state)" }
-        return DisclosureGroup("DEV · all results") {
-            Text(([head] + rows + comp + changes).joined(separator: "\n"))
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(StudioColor.inkFaint)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.system(size: 11, design: .monospaced)).tint(StudioColor.inkSoft)
     }
 }
 
@@ -1341,11 +1262,12 @@ struct BodyScanCaptureInfo: ConvexEncodable, Encodable {
     let appVersion: String
     let camera: String
     let depth: String
+    let clothing: String
     let imageMaxPixel: Double
     let jpegQuality: Double
 
     @MainActor
-    static func current(mode: BodyScanCaptureMode = .front, depth: BodyScanDepthSource = .none) -> BodyScanCaptureInfo {
+    static func current(mode: BodyScanCaptureMode = .front, depth: BodyScanDepthSource = .none, clothing: BodyScanClothing = .recommended) -> BodyScanCaptureInfo {
         var system = utsname()
         uname(&system)
         let model = withUnsafeBytes(of: &system.machine) { raw in
@@ -1359,6 +1281,7 @@ struct BodyScanCaptureInfo: ConvexEncodable, Encodable {
             appVersion: version,
             camera: mode.camera,
             depth: depth.rawValue,
+            clothing: clothing.rawValue,
             imageMaxPixel: Double(BodyScanImageSpec.maxPixel),
             jpegQuality: BodyScanImageSpec.jpegQuality
         )
