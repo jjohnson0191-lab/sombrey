@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import SombreyApp
 
 /// Sport+ catalog — generated from the real vendor header

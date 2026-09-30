@@ -12,6 +12,7 @@ import Foundation
 /// actual delivery require a granted `UNUserNotificationCenter`, which
 /// isn't available in a unit-test host — those are physical-device QA
 /// items (see the task's final report).
+@MainActor
 struct NotificationSchedulingTests {
     @Test func nextOccurrenceLandsOnTheRequestedWeekdayHourAndMinute() throws {
         let date = try #require(NotificationManager.nextOccurrence(dayOfWeek: 3, hour: 8, minute: 30))
@@ -64,6 +65,7 @@ struct NotificationSchedulingTests {
     }
 }
 
+@MainActor
 struct NotificationDecodingTests {
     @Test func mealScheduleSlotDecodesPerDayIndependently() throws {
         let json = """
