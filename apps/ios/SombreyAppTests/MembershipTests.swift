@@ -217,9 +217,11 @@ struct MembershipTests {
         #expect(!handoff("xcode").verifiableByServer && !handoff("unknown").verifiableByServer)
         #expect(handoff("sandbox").verifiableByServer && handoff("production").verifiableByServer)
         var ledger = MembershipTransactionLedger()
-        #expect(ledger.firstDelivery(of: "2000000000000009"))
+        let first = ledger.firstDelivery(of: "2000000000000009")
+        #expect(first)
         ledger.forget("2000000000000009")
-        #expect(ledger.firstDelivery(of: "2000000000000009"), "after retry-later the next delivery is handled again")
+        let redelivered = ledger.firstDelivery(of: "2000000000000009")
+        #expect(redelivered, "after retry-later the next delivery is handled again")
     }
 
     @Test func diagnosticsRedactTransactionIds() {
