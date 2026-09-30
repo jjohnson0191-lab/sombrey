@@ -87,6 +87,10 @@
 	<string>$(CLERK_PUBLISHABLE_KEY)</string>
 	<key>SombreyMembershipProductID</key>
 	<string>$(SOMBREY_MEMBERSHIP_PRODUCT_ID)</string>
+	<!-- Commerce 6D: "enabled" only for a build whose Convex deployment serves
+	     entitlements (EntitlementGateConfig). Empty = not enforced. -->
+	<key>SombreyCommerceEntitlements</key>
+	<string>$(SOMBREY_COMMERCE_ENTITLEMENTS)</string>
 
 	<!-- Sombrey Band (QCBandSDK) — Phase 3 native wearable integration.
 	     Keys/usage-description text per the vendor's own SDK Development

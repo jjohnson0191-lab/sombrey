@@ -23,6 +23,19 @@ export type ProductType = "physical" | "subscription";
 export type Capability = "band_experience" | "vitals" | "ai_intelligence" | "advanced_features";
 export type CommercialState = "none" | "band_owner" | "subscriber" | "band_owner_subscriber";
 
+/** Phase 6D: every access-controlled surface of the app, by stable id. The app
+ * asks the server "may I show feature X?" — it never decides this itself. */
+export type FeatureId =
+  | "account" | "settings" | "band_pairing" | "core_tracking" | "body_scan"
+  | "vitals" | "wearable_data" | "ai_coach" | "ai_meal_analysis" | "advanced_intelligence";
+
+export type FeatureRule = {
+  /** Capabilities ALL required (empty = any signed-in user). */
+  requires: Capability[];
+  /** What the surface is — documentation for people, not logic. */
+  covers: string;
+};
+
 export type PhysicalProduct = {
   id: string;
   type: "physical";
@@ -81,17 +94,22 @@ export type CommerceConfig = {
     /** Undecided (docs/COMMERCE_6A.md §12). null = no provider integrated. */
     provider: null;
   };
-  /** Which capabilities each commercial state grants — refined in Phase 6D. */
+  /** Which capabilities each commercial state grants. */
   capabilityMatrix: Record<CommercialState, Capability[]>;
+  /** Phase 6D: which capabilities each app feature needs (docs/COMMERCE_6D.md §3). */
+  featureMatrix: Record<FeatureId, FeatureRule>;
   /** Existing access paths honoured as "subscriber-level" until 6D decides (see §8 of the doc). */
   legacyAccessGrantsSubscriberCapabilities: boolean;
-  /** Whether a Band paired before commerce existed counts as owning one (decision pending). */
+  /** Whether a Bluetooth pairing ALONE counts as owning a Band. Phase 6D: no —
+   * any client can register a device, so pairing is never proof. Bands paired
+   * before commerce existed are recognised through an audited ownership record
+   * (source "legacy_pairing"/"staff_grant", internal.grantBandOwnership). */
   pairedDeviceCountsAsBandOwnership: boolean;
 };
 
 /** PROVISIONAL — SUBJECT TO CHANGE. Launch assumptions, 2026-10. */
 export const COMMERCE_CONFIG: CommerceConfig = {
-  version: "2026-10-provisional.1",
+  version: "2026-10-provisional.2",
   provisional: true,
   currency: "USD",
   products: {
@@ -132,9 +150,26 @@ export const COMMERCE_CONFIG: CommerceConfig = {
     subscriber: ["ai_intelligence", "advanced_features"],
     band_owner_subscriber: ["band_experience", "vitals", "ai_intelligence", "advanced_features"],
   },
+  // PROVISIONAL (6D). Existing Band-free features stay free; Band-derived
+  // physiology needs a Band; AI needs membership. Nothing is invented here:
+  // each entry is a surface that exists in the app today.
+  featureMatrix: {
+    account: { requires: [], covers: "Sign-in, profile, account deletion" },
+    settings: { requires: [], covers: "Settings, notifications, schedules, privacy" },
+    band_pairing: { requires: [], covers: "Pairing a Band over Bluetooth — never proof of ownership" },
+    core_tracking: { requires: [], covers: "Training logs, workouts, exercise library, nutrition logging and food search, progress, goals" },
+    body_scan: { requires: [], covers: "Body Scan — unchanged; its own consent, ownership and privacy rules apply" },
+    vitals: { requires: ["vitals"], covers: "The Vitals screen and live Band measurements" },
+    wearable_data: { requires: ["band_experience"], covers: "Band-derived Readiness, Strain, sleep and recorded wearable history" },
+    ai_coach: { requires: ["ai_intelligence"], covers: "Sombrey Coach (AI conversation)" },
+    ai_meal_analysis: { requires: ["ai_intelligence"], covers: "AI Macro Calculator (photo analysis)" },
+    advanced_intelligence: { requires: ["advanced_features"], covers: "Reserved — no surface exists yet; nothing is gated by it today" },
+  },
   legacyAccessGrantsSubscriberCapabilities: true,
-  pairedDeviceCountsAsBandOwnership: true,
+  pairedDeviceCountsAsBandOwnership: false,
 };
+
+export const FEATURE_IDS = Object.keys(COMMERCE_CONFIG.featureMatrix) as FeatureId[];
 
 export const CAPABILITIES: readonly Capability[] = ["band_experience", "vitals", "ai_intelligence", "advanced_features"];
 const ISO_COUNTRY = /^[A-Z]{2}$/;
@@ -182,6 +217,16 @@ export function validateCommerceConfig(c: CommerceConfig): string[] {
     for (const cap of caps) if (!CAPABILITIES.includes(cap)) p.push(`capabilityMatrix.${state}: unknown ${cap}`);
   }
   if (c.capabilityMatrix.none.length) p.push("capabilityMatrix.none: no commercial relationship grants nothing paid");
+  for (const [feature, rule] of Object.entries(c.featureMatrix)) {
+    for (const cap of rule.requires) if (!CAPABILITIES.includes(cap)) p.push(`featureMatrix.${feature}: unknown ${cap}`);
+    // Every paid feature must be reachable by SOME state, or it could never be unlocked.
+    if (rule.requires.length && !rule.requires.every((cap) => c.capabilityMatrix.band_owner_subscriber.includes(cap))) {
+      p.push(`featureMatrix.${feature}: no commercial state unlocks it`);
+    }
+  }
+  for (const f of ["account", "settings", "band_pairing"] as const) {
+    if (c.featureMatrix[f]?.requires.length) p.push(`featureMatrix.${f}: must stay available to every signed-in user`);
+  }
   const both = new Set(c.capabilityMatrix.band_owner_subscriber);
   for (const cap of [...c.capabilityMatrix.band_owner, ...c.capabilityMatrix.subscriber]) {
     if (!both.has(cap)) p.push(`capabilityMatrix.band_owner_subscriber: must include ${cap}`);

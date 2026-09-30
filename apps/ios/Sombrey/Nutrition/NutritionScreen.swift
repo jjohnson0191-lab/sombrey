@@ -18,19 +18,33 @@ struct NutritionPanel: View {
     @State private var showingAddMeal = false
     @State private var showingMealSchedule = false
     @State private var showingMacroCalculator = false
+    @State private var showingAccess = false
+    @Environment(EntitlementStore.self) private var entitlements
+
+    private var macroCalculatorAccess: FeatureAccess { entitlements.access(.aiMealAnalysis) }
+    private var macroCalculatorEyebrow: String {
+        if case .locked(let unlock) = macroCalculatorAccess { return AccessCopy.requirementLabel(unlock) }
+        return "AI MACRO CALCULATOR"
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 todaySection
+                // Commerce 6D: the AI Macro Calculator is membership
+                // intelligence; food search and logging below stay free.
                 SombreyFeatureEntry(
-                    eyebrow: "AI MACRO CALCULATOR",
+                    eyebrow: macroCalculatorEyebrow,
                     title: "Photograph a meal",
                     detail: "Sombrey estimates what's on the plate — you check it before it's logged.",
+                    status: macroCalculatorAccess == .allowed ? nil : "Tap to see what Membership includes",
                     glyph: "camera",
-                    action: { showingMacroCalculator = true }
+                    action: {
+                        if macroCalculatorAccess == .allowed { showingMacroCalculator = true } else { showingAccess = true }
+                    }
                 )
                 .accessibilityIdentifier("nutrition.macroCalculatorEntry")
+                .task { await entitlements.noteLocked(.aiMealAnalysis) }
                 Button {
                     showingAddMeal = true
                 } label: {
@@ -52,6 +66,7 @@ struct NutritionPanel: View {
         }
         .sheet(isPresented: $showingAddMeal) { AddMealView() }
         .fullScreenCover(isPresented: $showingMacroCalculator) { MacroCalculatorFlow() }
+        .sheet(isPresented: $showingAccess) { SombreyAccessSheet() }
         .sheet(isPresented: $showingMealSchedule) { MealScheduleView() }
     }
 

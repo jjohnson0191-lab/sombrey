@@ -27,6 +27,9 @@ export const chat = action({
     ),
   },
   handler: async (ctx, args): Promise<{ reply: string }> => {
+    // Commerce 6D: Sombrey Coach is membership intelligence — decided on the
+    // server from the caller's verified entitlements (FEATURE_LOCKED otherwise).
+    await ctx.runQuery(internal.commerce.gate.requireFeature, { feature: "ai_coach" });
     const fitnessContext = await ctx.runQuery(internal.ai.sombreyCoachContext.getSombreyContext);
 
     const systemPrompt = `You are Sombrey Coach, the AI intelligence layer inside the Sombrey app — a premium wearable + AI fitness platform.

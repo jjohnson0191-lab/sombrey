@@ -23,6 +23,7 @@ import { internal } from "./_generated/api";
 import { appendNutritionEntry } from "./nutritionLogs";
 import { PHOTO_MEAL_CATEGORY } from "./foods";
 import { analysisReason, photoMealTotals, validateConfirmedMeal } from "./nutrition/photoMeal";
+import { assertFeature } from "./commerce/gate";
 
 async function requireUser(ctx: QueryCtx | MutationCtx) {
   const identity = await ctx.auth.getUserIdentity();
@@ -41,7 +42,9 @@ async function ownRow(ctx: QueryCtx | MutationCtx, userId: Id<"users">, id: Id<"
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
+    // Commerce 6D: the AI Macro Calculator is membership intelligence — no
+    // upload is even offered without it.
+    await assertFeature(ctx, await requireUser(ctx), "ai_meal_analysis");
     return await ctx.storage.generateUploadUrl();
   },
 });
@@ -51,6 +54,7 @@ export const startAnalysis = mutation({
   args: { storageId: v.id("_storage"), localDate: v.string() },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    await assertFeature(ctx, user, "ai_meal_analysis");
     const meta = await ctx.db.system.get(args.storageId);
     if (!meta) throw new ConvexError({ code: "NOT_FOUND", message: "Photo not found" });
     if ((meta.contentType ?? "").split("/")[0] !== "image" || meta.size > 8_000_000) {

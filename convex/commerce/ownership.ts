@@ -18,7 +18,7 @@ export type OwnershipStatus =
 
 export type OwnershipSource =
   | "order"           // a Sombrey commerce order (commerceOrders)
-  | "legacy_pairing"  // a Band paired before commerce existed (decision pending — docs §9)
+  | "legacy_pairing"  // a Band paired before commerce existed — recorded ONLY by the audited internal grant (6D)
   | "staff_grant";    // granted by an owner/admin (audited) — e.g. replacements, testers
 
 export const OWNERSHIP_TRANSITIONS: Record<OwnershipStatus, OwnershipStatus[]> = {

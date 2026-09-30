@@ -26,6 +26,9 @@ export const COMMERCE_EVENTS = {
   // 6B: the user closed Apple's purchase sheet (StoreKit .userCancelled) — the one
   // subscription abandonment the app can honestly observe.
   subscription_checkout_abandoned: "client",
+  // 6D: the user met a locked feature (source = the feature id). Recorded at
+  // most once per feature per app session by the app; never PII.
+  feature_access_denied: "client",
   band_checkout_completed: "server",
   band_order_completed: "server",
   band_returned: "server",

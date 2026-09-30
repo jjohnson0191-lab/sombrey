@@ -11,6 +11,10 @@
 		000000000000000000000304 /* MembershipManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000303 /* MembershipManager.swift */; };
 		000000000000000000000306 /* MembershipDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000305 /* MembershipDiagnosticsView.swift */; };
 		000000000000000000000308 /* MembershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000307 /* MembershipTests.swift */; };
+		000000000000000000000311 /* EntitlementModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000310 /* EntitlementModels.swift */; };
+		000000000000000000000313 /* EntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000312 /* EntitlementStore.swift */; };
+		000000000000000000000315 /* AccessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000314 /* AccessViews.swift */; };
+		000000000000000000000317 /* EntitlementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000316 /* EntitlementTests.swift */; };
 		000000000000000000000041 /* SombreyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000001 /* SombreyApp.swift */; };
 		000000000000000000000042 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000002 /* AppState.swift */; };
 		000000000000000000000043 /* Color+Studio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000003 /* Color+Studio.swift */; };
@@ -161,6 +165,10 @@
 		000000000000000000000303 /* MembershipManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MembershipManager.swift"; sourceTree = "<group>"; };
 		000000000000000000000305 /* MembershipDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MembershipDiagnosticsView.swift"; sourceTree = "<group>"; };
 		000000000000000000000307 /* MembershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MembershipTests.swift"; sourceTree = "<group>"; };
+		000000000000000000000310 /* EntitlementModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntitlementModels.swift"; sourceTree = "<group>"; };
+		000000000000000000000312 /* EntitlementStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntitlementStore.swift"; sourceTree = "<group>"; };
+		000000000000000000000314 /* AccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AccessViews.swift"; sourceTree = "<group>"; };
+		000000000000000000000316 /* EntitlementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntitlementTests.swift"; sourceTree = "<group>"; };
 		000000000000000000000001 /* SombreyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SombreyApp.swift"; sourceTree = "<group>"; };
 		000000000000000000000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState.swift"; sourceTree = "<group>"; };
 		000000000000000000000003 /* Color+Studio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Studio.swift"; sourceTree = "<group>"; };
@@ -328,6 +336,9 @@
 			000000000000000000000301 /* MembershipModels.swift */,
 			000000000000000000000303 /* MembershipManager.swift */,
 			000000000000000000000305 /* MembershipDiagnosticsView.swift */,
+			000000000000000000000310 /* EntitlementModels.swift */,
+			000000000000000000000312 /* EntitlementStore.swift */,
+			000000000000000000000314 /* AccessViews.swift */,
 			);
 			path = Commerce;
 			sourceTree = "<group>";
@@ -684,6 +695,7 @@
 			00000000000000000000003D /* ConvexClientProviderTests.swift */,
 			0000000000000000000000C5 /* WearableManagerTests.swift */,
 			000000000000000000000307 /* MembershipTests.swift */,
+			000000000000000000000316 /* EntitlementTests.swift */,
 			0000000000000000000000F6 /* WearableModelsTests.swift */,
 			0000000000000000000000D6 /* Phase3TrainingArchitectureTests.swift */,
 			0000000000000000000000DC /* ReadinessTests.swift */,
@@ -925,6 +937,9 @@
 				000000000000000000000302 /* MembershipModels.swift */,
 				000000000000000000000304 /* MembershipManager.swift */,
 				000000000000000000000306 /* MembershipDiagnosticsView.swift */,
+				000000000000000000000311 /* EntitlementModels.swift */,
+				000000000000000000000313 /* EntitlementStore.swift */,
+				000000000000000000000315 /* AccessViews.swift */,
 				000000000000000000000059 /* QCBandService.swift */,
 				00000000000000000000005A /* MockQCBandService.swift */,
 				00000000000000000000005B /* QCBandSDKService.swift */,
@@ -1012,6 +1027,7 @@
 				00000000000000000000007A /* ConvexClientProviderTests.swift */,
 				0000000000000000000000C6 /* WearableManagerTests.swift */,
 				000000000000000000000308 /* MembershipTests.swift */,
+				000000000000000000000317 /* EntitlementTests.swift */,
 				0000000000000000000000F7 /* WearableModelsTests.swift */,
 				0000000000000000000000D7 /* Phase3TrainingArchitectureTests.swift */,
 				0000000000000000000000DD /* ReadinessTests.swift */,

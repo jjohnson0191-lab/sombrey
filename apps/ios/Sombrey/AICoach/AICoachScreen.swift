@@ -71,8 +71,11 @@ struct SombreyScreen: View {
     private var coach: some View {
         let scans = BodyScan.group(photos.value ?? [])
         return VStack(spacing: 12) {
-            SombreyConversationSurface(conversation: appState.coach)
-                .frame(maxHeight: .infinity)
+            // Commerce 6D: Sombrey Coach is membership intelligence (server-decided).
+            FeatureGate(feature: .aiCoach) {
+                SombreyConversationSurface(conversation: appState.coach)
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
             if !keyboardShown {
                 BodyScanEntry(scans: scans) {
                     bodyScanResults = !scans.isEmpty

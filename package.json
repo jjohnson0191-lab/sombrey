@@ -16,7 +16,8 @@
     "test:progress": "node --experimental-strip-types --test tests/progress/*.test.ts",
     "test:intelligence": "node --experimental-strip-types --test tests/intelligence/*.test.ts",
     "test:nutrition": "node --experimental-strip-types --test tests/nutrition/*.test.ts",
-    "test:commerce": "node --experimental-strip-types --test tests/commerce/*.test.ts"
+    "test:commerce": "node --experimental-strip-types --test tests/commerce/*.test.ts",
+    "test:ios": "node --experimental-strip-types --test tests/ios/*.test.ts"
   },
   "dependencies": {
     "@apple/app-store-server-library": "3.1.0",

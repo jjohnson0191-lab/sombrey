@@ -1,7 +1,8 @@
 // Sombrey commerce (Phase 6A) — everything a CLIENT may call.
 //
 //   publicConfig   → prices, countries and policies to display (anyone)
-//   myEntitlements → what the signed-in user may access (computed, never stored)
+//   myEntitlements → what the signed-in user may access (computed, never stored;
+//                    6D: per-feature access, membership summary, offers)
 //   myOrders       → the user's own orders (no provider internals)
 //   mySubscription → the user's own subscription state (no transaction ids)
 //   recordEvent    → a client-side commerce event (closed list, validated,
@@ -22,14 +23,13 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
-import { hasPremiumAccess } from "../lib/roles.js";
-import { COMMERCE_CONFIG, publicCommerceConfig } from "./config";
-import { computeEntitlements } from "./entitlements";
+import { COMMERCE_CONFIG, FEATURE_IDS, publicCommerceConfig } from "./config";
+import { unlockFor } from "./entitlements";
+import { entitlementsFor } from "./gate";
 import { validateEvent } from "./events";
 import { EVENTS_PER_HOUR } from "./events";
-import { linkAccountToken, toSubscriptionRecord } from "./subscriptionStore";
+import { linkAccountToken } from "./subscriptionStore";
 import { appAccountTokenFor } from "./accountToken";
-import { sandboxGrantsAccess } from "./appStoreConfig";
 
 async function currentUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users"> | null> {
   const identity = await ctx.auth.getUserIdentity();
@@ -43,27 +43,24 @@ async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> {
   return user;
 }
 
-/** Prices, countries and policies to display. PROVISIONAL — from convex/commerce/config.ts. */
+/** Prices, countries and policies to display. PROVISIONAL — from convex/commerce/config.ts.
+ * 6D: plus what unlocks each feature (from the feature matrix) so the app can
+ * explain the Band and Membership without holding any rules itself. */
 export const publicConfig = query({
   args: {},
-  handler: async () => publicCommerceConfig(COMMERCE_CONFIG),
+  handler: async () => ({
+    ...publicCommerceConfig(COMMERCE_CONFIG),
+    featureUnlocks: Object.fromEntries(FEATURE_IDS.map((f) => [f, unlockFor(COMMERCE_CONFIG.featureMatrix[f].requires, COMMERCE_CONFIG)])),
+  }),
 });
 
-/** What the signed-in user may access — computed from verified facts each time. */
+/** What the signed-in user may access — computed from verified facts each
+ * time (commerce/gate.ts): the commercial state, capabilities, per-feature
+ * access with what would unlock it, the membership summary and which
+ * purchase entry points to offer. The app renders this; it never decides it. */
 export const myEntitlements = query({
   args: {},
-  handler: async (ctx) => {
-    const user = await requireUser(ctx);
-    const ownership = await ctx.db.query("bandOwnership").withIndex("by_user", (q) => q.eq("userId", user._id)).collect();
-    const subscriptions = await ctx.db.query("commerceSubscriptions").withIndex("by_user", (q) => q.eq("userId", user._id)).collect();
-    const paired = await ctx.db.query("wearableDevices").withIndex("by_user", (q) => q.eq("userId", user._id)).take(10);
-    return computeEntitlements({
-      ownership: ownership.map((o) => ({ status: o.status, source: o.source })),
-      subscriptions: subscriptions.map(toSubscriptionRecord),
-      legacyPremium: hasPremiumAccess(user),
-      pairedDevices: paired.length,
-    }, COMMERCE_CONFIG, Date.now(), { allowSandbox: sandboxGrantsAccess(process.env) });
-  },
+  handler: async (ctx) => entitlementsFor(ctx, await requireUser(ctx)),
 });
 
 /** The user's own orders — status, items, amounts, tracking; no provider internals. */

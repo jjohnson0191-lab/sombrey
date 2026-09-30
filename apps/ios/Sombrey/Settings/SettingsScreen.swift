@@ -10,6 +10,19 @@ import UIKit
 /// explanation, data export, help) are honest entry points — they say
 /// the content isn't published, and never invent policy text.
 struct SettingsScreen: View {
+    @Environment(EntitlementStore.self) private var entitlements
+    @State private var showingAccess = false
+
+    /// One short line from the server's membership summary.
+    private var accessDetail: String {
+        switch entitlements.state {
+        case .ready(let e):
+            let member = e.subscriptionActive ? "Member" : "Not a member"
+            return e.ownsBand ? "Band · \(member)" : member
+        case .checking: return "Checking…"
+        case .unavailable, .notEnforced: return ""
+        }
+    }
     @Environment(AppState.self) private var appState
     @State private var isSigningOut = false
     @State private var activeGoal = ConvexQuery<ClientGoal?>()
@@ -44,7 +57,12 @@ struct SettingsScreen: View {
                 }
 
                 settingsGroup("ACCOUNT") {
-                    row("Subscription", detail: "Not available yet") { placeholder = .subscription }
+                    if entitlements.enforced {
+                        // Commerce 6D: the server's answer — status, restore, what's included.
+                        row("Membership & Band", detail: accessDetail) { showingAccess = true }
+                    } else {
+                        row("Subscription", detail: "Not available yet") { placeholder = .subscription }
+                    }
                     WearableBandSection()
                     goalSection
                     row("Units", detail: "Metric · kg, km") { placeholder = .units }
@@ -135,6 +153,7 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showingWeatherInfo) {
             WeatherPrivacyView()
         }
+        .sheet(isPresented: $showingAccess) { SombreyAccessSheet() }
         .sheet(isPresented: $showingNotificationSettings) {
             NotificationSettingsView()
         }

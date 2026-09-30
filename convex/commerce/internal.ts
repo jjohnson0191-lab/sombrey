@@ -12,7 +12,7 @@ import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { COMMERCE_CONFIG } from "./config";
 import { FULFILLMENT_TRANSITIONS, PAYMENT_TRANSITIONS, RETURN_TRANSITIONS, buildOrderDraft, canTransition, formatOrderNumber, orderTotal, returnEligibility } from "./orders";
-import { transitionOwnership, type OwnershipStatus } from "./ownership";
+import { OWNED_STATUSES, transitionOwnership, type OwnershipStatus } from "./ownership";
 import { validateEvent, type CommerceEventName } from "./events";
 import { applyNotification, linkAccountToken, writeVerifiedSubscription, type StoreConfig } from "./subscriptionStore";
 import { fulfillmentStatus, paymentStatus, returnStatus, shipment, shippingAddress, subscriptionHistoryEvent as historyEvent, subscriptionStatus } from "./validators";
@@ -142,6 +142,42 @@ export const updateReturn = internalMutation({
       await moveOwnershipForOrder(ctx, o._id, "returned", "staff");
       await serverEvent(ctx, "band_returned", o.userId, { productId: o.lines[0]?.productId, countryCode: o.shippingAddress.countryCode, orderId: o._id });
     }
+    return { changed: true };
+  },
+});
+
+/** An audited Band ownership grant (Phase 6D) — a replacement, a tester, or a
+ * Band paired before commerce existed ("legacy_pairing"). Run by staff from the
+ * Convex dashboard/CLI after checking the Band is genuinely the user's; never
+ * reachable from the app (a Bluetooth pairing is not proof of ownership).
+ * Idempotent: an existing owned grant of the same source is returned. */
+export const grantBandOwnership = internalMutation({
+  args: { userId: v.id("users"), source: v.union(v.literal("staff_grant"), v.literal("legacy_pairing")) },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new ConvexError({ code: "NOT_FOUND", message: "User not found" });
+    const existing = (await ctx.db.query("bandOwnership").withIndex("by_user", (q) => q.eq("userId", args.userId)).collect())
+      .find((r) => r.source === args.source && OWNED_STATUSES.includes(r.status));
+    if (existing) return { ownershipId: existing._id, created: false };
+    const now = Date.now();
+    const ownershipId = await ctx.db.insert("bandOwnership", {
+      userId: args.userId, source: args.source, status: "delivered",
+      history: [{ status: "delivered", at: now, by: "staff" }], createdAt: now, updatedAt: now,
+    });
+    return { ownershipId, created: true };
+  },
+});
+
+/** Ends a staff/legacy grant (e.g. a Band returned outside an order). History is kept. */
+export const revokeBandOwnership = internalMutation({
+  args: { ownershipId: v.id("bandOwnership") },
+  handler: async (ctx, args) => {
+    const r = await ctx.db.get(args.ownershipId);
+    if (!r) throw new ConvexError({ code: "NOT_FOUND", message: "Ownership record not found" });
+    if (r.source === "order") throw new ConvexError({ code: "INVALID", message: "Order ownership changes through the order's return flow" });
+    const t = transitionOwnership(r, "returned", Date.now(), "staff");
+    if (!t.ok) throw new ConvexError({ code: "INVALID", message: t.error });
+    await ctx.db.patch(r._id, { status: t.record.status, history: t.record.history, updatedAt: Date.now() });
     return { changed: true };
   },
 });

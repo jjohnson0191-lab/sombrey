@@ -16,9 +16,12 @@ struct SombreyApp: App {
     @State private var activitySession = ActivitySessionManager()
     /// Sombrey Membership (StoreKit 2, Phase 6B). App-level so Apple's
     /// transaction updates (renewals, refunds, approved Ask-to-Buy, purchases
-    /// on other devices) are handled from launch. No UI uses it yet (6D); it
-    /// never grants Sombrey access itself — the server does (6C).
+    /// on other devices) are handled from launch. It never grants Sombrey
+    /// access itself — the server does (6C).
     @State private var membership = MembershipManager(accountID: { Clerk.shared.user?.id })
+    /// What this account may access, as decided by the server (Commerce 6D).
+    /// Off (everything as before) unless this build's backend serves it.
+    @State private var entitlements = EntitlementStore()
     private var notificationManager: NotificationManager { NotificationManager.shared }
     @Environment(\.scenePhase) private var scenePhase
 
@@ -39,12 +42,14 @@ struct SombreyApp: App {
                 .environment(trainingSession)
                 .environment(activitySession)
                 .environment(membership)
+                .environment(entitlements)
                 .environment(notificationManager)
                 .onChange(of: scenePhase) { _, newPhase in
                     wearableManager.handleScenePhaseChange(isActive: newPhase == .active)
                     if newPhase == .active {
                         Task { await notificationManager.reconcileAll() }
                         Task { await trainingSession.flushPendingSets() }
+                        if case .signedIn = appState.authPhase { entitlements.refresh() }
                     }
                 }
                 .task {
@@ -56,7 +61,9 @@ struct SombreyApp: App {
                     activitySession.reattachIfNeeded(wearable: wearableManager)
                 }
                 .onChange(of: appState.authPhase) { _, newPhase in
+                    if case .signedIn = newPhase { entitlements.refresh() }
                     if case .signedOut = newPhase {
+                        entitlements.reset()
                         wearableManager.handleSignOut()
                         trainingSession.reset()
                         activitySession.reset()

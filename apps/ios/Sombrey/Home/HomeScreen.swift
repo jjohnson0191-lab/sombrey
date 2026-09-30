@@ -29,6 +29,10 @@ struct HomeScreen: View {
     @Environment(TrainingSessionManager.self) private var trainingSession
     @State private var showingBandPairing = false
     @State private var showingVitals = false
+    @Environment(EntitlementStore.self) private var entitlements
+    /// Commerce 6D — server-decided (EntitlementStore); always true in builds
+    /// whose backend doesn't serve entitlements.
+    private var bandDataAllowed: Bool { entitlements.access(.wearableData) == .allowed }
     @State private var showingDiagnostics = false
     @State private var readiness = ConvexQuery<ReadinessResultDTO?>()
     @State private var sleep = ConvexQuery<[SleepSessionSummaryDTO]>()
@@ -46,16 +50,25 @@ struct HomeScreen: View {
                     .padding(.top, 16)
                     .studioReveal(index: 0)
 
-                readinessHero
-                    .padding(.top, 22)
-                    .studioReveal(index: 1)
+                // Commerce 6D: Band-derived Readiness/Strain/Vitals/activity/
+                // sleep show only when the server says this account owns a
+                // Band; otherwise one intentional card says what the Band adds.
+                if bandDataAllowed {
+                    readinessHero
+                        .padding(.top, 22)
+                        .studioReveal(index: 1)
 
-                // Daily Strain — the load companion to the Sombrey Score.
-                StrainInstrument(strain: strain.value, isLoading: strain.isLoading) {
-                    appState.selectedTab = .progress
+                    // Daily Strain — the load companion to the Sombrey Score.
+                    StrainInstrument(strain: strain.value, isLoading: strain.isLoading) {
+                        appState.selectedTab = .progress
+                    }
+                    .padding(.top, 12)
+                    .studioReveal(index: 1)
+                } else {
+                    FeatureGate(feature: .wearableData) { EmptyView() }
+                        .padding(.top, 22)
+                        .studioReveal(index: 1)
                 }
-                .padding(.top, 12)
-                .studioReveal(index: 1)
 
                 if let error = appState.userLoadError {
                     Text("Couldn't load your account: \(error)")
@@ -64,32 +77,40 @@ struct HomeScreen: View {
                         .padding(.top, 16)
                 }
 
-                liveHeartRateCard
-                    .padding(.top, 24)
-                    .studioReveal(index: 2)
+                if bandDataAllowed {
+                    if entitlements.access(.vitals) == .allowed {
+                        liveHeartRateCard
+                            .padding(.top, 24)
+                            .studioReveal(index: 2)
 
-                vitalsCard
+                        vitalsCard
+                            .padding(.top, 16)
+                            .studioReveal(index: 3)
+                    } else {
+                        FeatureGate(feature: .vitals) { EmptyView() }
+                            .padding(.top, 24)
+                            .studioReveal(index: 2)
+                    }
+
+                    // Activity sits in the same tier as Today's Vitals — it IS
+                    // today's band data — as its own day-dial instrument.
+                    ActivityDialInstrument(
+                        steps: stepsToday,
+                        activeCalories: activeCaloriesToday,
+                        distance: distanceToday,
+                        isPaired: wearableManager.pairedDevice != nil
+                    )
                     .padding(.top, 16)
-                    .studioReveal(index: 3)
+                    .studioReveal(index: 4)
 
-                // Activity sits in the same tier as Today's Vitals — it IS
-                // today's band data — as its own day-dial instrument.
-                ActivityDialInstrument(
-                    steps: stepsToday,
-                    activeCalories: activeCaloriesToday,
-                    distance: distanceToday,
-                    isPaired: wearableManager.pairedDevice != nil
-                )
-                .padding(.top, 16)
-                .studioReveal(index: 4)
-
-                SleepTimelineInstrument(
-                    sessions: sleep.value,
-                    isPaired: wearableManager.pairedDevice != nil,
-                    isLoading: sleep.isLoading
-                )
-                .padding(.top, 16)
-                .studioReveal(index: 4)
+                    SleepTimelineInstrument(
+                        sessions: sleep.value,
+                        isPaired: wearableManager.pairedDevice != nil,
+                        isLoading: sleep.isLoading
+                    )
+                    .padding(.top, 16)
+                    .studioReveal(index: 4)
+                }
 
                 trainingCard
                     .padding(.top, 16)

@@ -35,14 +35,19 @@ test("a subscription counts only while verified and active; a Band only while ow
   assert.equal(computeEntitlements({ ...base, ownership: [{ status: "purchased", source: "order" }] }, strict, NOW).state, "band_owner", "PROVISIONAL: paid-for counts as owned");
 });
 
-test("legacy access and paired Bands follow the config flags (decisions pending)", () => {
+test("legacy access follows the config flag; a bare pairing is never ownership (6D), an audited legacy_pairing record is", () => {
   assert.equal(computeEntitlements({ ...base, legacyPremium: true }, strict, NOW).state, "none");
   const legacy = computeEntitlements({ ...base, legacyPremium: true }, COMMERCE_CONFIG, NOW);
   assert.deepEqual([legacy.state, legacy.subscriptionSources], ["subscriber", ["legacy_premium"]]);
-  assert.equal(computeEntitlements({ ...base, pairedDevices: 1 }, strict, NOW).state, "none", "a pairing isn't proof of purchase");
-  const paired = computeEntitlements({ ...base, pairedDevices: 1 }, COMMERCE_CONFIG, NOW);
-  assert.deepEqual([paired.state, paired.bandSources], ["band_owner", ["legacy_pairing"]]);
-  assert.equal(paired.configVersion, COMMERCE_CONFIG.version);
+  assert.equal(legacy.ownsBand, false, "legacy premium never grants a Band");
+  assert.equal(COMMERCE_CONFIG.pairedDeviceCountsAsBandOwnership, false);
+  assert.equal(computeEntitlements({ ...base, pairedDevices: 3 }, COMMERCE_CONFIG, NOW).state, "none", "a pairing isn't proof of purchase");
+  const audited = computeEntitlements({ ...base, ownership: [{ status: "delivered", source: "legacy_pairing" }] }, COMMERCE_CONFIG, NOW);
+  assert.deepEqual([audited.state, audited.bandSources], ["band_owner", ["legacy_pairing"]]);
+  // The flag still works if a future config turns it back on.
+  const permissive = computeEntitlements({ ...base, pairedDevices: 1 }, { ...structuredClone(COMMERCE_CONFIG), pairedDeviceCountsAsBandOwnership: true }, NOW);
+  assert.equal(permissive.state, "band_owner");
+  assert.equal(audited.configVersion, COMMERCE_CONFIG.version);
 });
 
 test("ownership: ordered ≠ owned ≠ connected; activation isn't possible until a method exists", () => {

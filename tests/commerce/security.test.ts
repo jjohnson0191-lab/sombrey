@@ -44,7 +44,8 @@ test("every state change is an internal function", () => {
   assert.deepEqual(exported(internal, "query"), []);
   assert.deepEqual(exported(internal, "action"), []);
   assert.deepEqual(exported(internal, "internalMutation").sort(), [
-    "applyAppStoreNotification", "applyPaymentUpdate", "applyVerifiedSubscription", "createOrder", "reserveAppStoreSubmission", "setQuote", "updateFulfillment", "updateReturn",
+    "applyAppStoreNotification", "applyPaymentUpdate", "applyVerifiedSubscription", "createOrder", "grantBandOwnership", "reserveAppStoreSubmission",
+    "revokeBandOwnership", "setQuote", "updateFulfillment", "updateReturn",
   ]);
 });
 
@@ -57,8 +58,11 @@ test("nothing outside the trusted module writes orders, subscriptions or ownersh
       assert.ok(!writes, `${file} inserts into ${table}`);
     }
     // 6C: the shared writer is reachable only through internal functions.
-    // (access.ts imports only the token link and the row mapper — checked above.)
-    if (/from "[^"]*subscriptionStore(\.ts)?"/.test(src)) assert.equal(file, "commerce/access.ts", `${file} imports the subscription writer`);
+    // Only the read side may import the store module, and only its token link / row mapper.
+    if (/from "[^"]*subscriptionStore(\.ts)?"/.test(src)) {
+      assert.ok(["commerce/access.ts", "commerce/gate.ts"].includes(file), `${file} imports the subscription writer`);
+      assert.ok(!/writeVerifiedSubscription|applyNotification/.test(src), `${file} reaches the subscription writer`);
+    }
   }
   const store = read("commerce/subscriptionStore.ts");
   assert.deepEqual([...store.matchAll(/export const (\w+) = (query|mutation|action|internal\w+)\(/g)], [], "the writer module registers no Convex functions");
@@ -101,8 +105,9 @@ test("6B/6C: the app never calls backend-only commerce functions or claims a ser
   }
   const convexCalls = all.flatMap(([, src]) => [...src.matchAll(/"commerce\/[a-zA-Z]+:[a-zA-Z]+"/g)].map((m) => m[0]));
   assert.deepEqual([...new Set(convexCalls)].sort(), [
-    '"commerce/access:linkAppStoreAccount"', '"commerce/access:myEntitlements"', '"commerce/access:recordEvent"', '"commerce/appStore:submitTransaction"',
-  ], "6C: client events, the argument-free account link, the server's membership answer, and Apple-signed transactions — nothing else");
+    '"commerce/access:linkAppStoreAccount"', '"commerce/access:myEntitlements"', '"commerce/access:publicConfig"', '"commerce/access:recordEvent"', '"commerce/appStore:submitTransaction"',
+  ], "6C/6D: client events, the argument-free account link, the server's entitlement answer, public prices, and Apple-signed transactions — nothing else");
+  assert.match(read("commerce/access.ts"), /export const publicConfig = query\(\{\s*args: \{\},/, "public config is a read with no input");
 });
 
 test("6B/6C: an unverified transaction can't produce access; only Apple's signed transaction is sent; access is read from the server", () => {

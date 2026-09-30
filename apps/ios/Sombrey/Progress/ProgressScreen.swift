@@ -59,7 +59,8 @@ struct ProgressScreen: View {
             RecordsSection(records: o.records).studioReveal(index: 6)
             LoadRecoverySection(loadRecovery: o.loadRecovery, longer: o.loadRecovery28).studioReveal(index: 6)
             MilestonesSection(milestones: o.milestones).studioReveal(index: 6)
-            vitalsEntry
+            // Commerce 6D: Vitals history needs a Band on this account (server-decided).
+            FeatureGate(feature: .vitals) { vitalsEntry }
         } else if overview.isLoading {
             HStack(spacing: 10) {
                 ProgressView().tint(StudioColor.ink).controlSize(.small)
