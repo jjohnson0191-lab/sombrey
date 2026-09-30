@@ -132,12 +132,19 @@ expiry events remain server-only (enforced by tests/commerce/security.test.ts).
 - Sandbox testers for device testing.
 
 ## 14. Build and tests
-- Swift unit tests: `SombreyAppTests/MembershipTests.swift` (13), run locally through a harness against
-  the pure core; the Xcode test target is compiled by the compile-check workflow (§15).
+- Swift unit tests: `SombreyAppTests/MembershipTests.swift` (13) — run locally (13/13) through a
+  harness against the pure core, and **compiled by Xcode 26** in CI (not executed there: the main
+  scheme's test action fails with "No test bundle product", a pre-existing issue).
 - `tests/commerce` (Node): 28 incl. two source-level checks of the iOS layer.
-- New Codemagic workflow `sombrey-ios-compile-check`: manual, **unsigned, no upload, no Convex** —
-  compiles Release and Debug build-for-testing only. The Body Scan dev workflow isn't on this branch
-  and would upload to TestFlight, so it wasn't used.
+- New Codemagic workflow `sombrey-ios-compile-check` (manual; **unsigned, no upload, no Convex,
+  placeholder Clerk key**): Release build of the app + a Debug build of the app and the unit-test
+  target via the CI-only scheme `SombreyAppCompileCheck`. Final run: both **BUILD SUCCEEDED**, 0 errors.
+  The Body Scan dev workflow isn't on this branch and uploads to TestFlight, so it wasn't used.
+- Getting the test target to compile surfaced pre-existing test-only problems, fixed: the test target
+  didn't search `apps/ios/Frameworks` (QCBandSDK); `Phase3TrainingArchitectureTests` and
+  `WearableManagerTests` lacked `import Foundation`; `NotificationTests` and `AppStateTests` called
+  main-actor code from nonisolated suites (now `@MainActor`). One real Xcode-26-only error in the new
+  `MembershipTests` (a mutating call inside `#expect`) was fixed. No app code changed for these.
 
 ## 15. Unresolved
 - The App Store product id and storefront prices (App Store Connect).
