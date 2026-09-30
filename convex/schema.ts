@@ -1,4 +1,8 @@
 import { defineSchema, defineTable } from "convex/server";
+import {
+  commerceEventName, fulfillmentStatus, orderLine, ownershipStatus, paymentStatus, returnStatus,
+  shipment, shippingAddress, subscriptionStatus,
+} from "./commerce/validators";
 import { v } from "convex/values";
 
 export default defineSchema({
@@ -581,6 +585,124 @@ export default defineSchema({
     priceAtAdd: v.number(),
   }).index("by_user", ["userId"])
     .index("by_user_product_variant", ["userId", "productId", "variantId"]),
+
+  // ─── Sombrey commerce (Phase 6A) ─────────────────────────────────────────
+  // The Sombrey Band + Membership commerce domain (docs/COMMERCE_6A.md). The
+  // legacy web merch store (storeProducts / storeOrders / cartItems) and the
+  // GOAT WALK web Premium (Hercules, users.subscriptionTier) are untouched.
+  // Products and prices live in convex/commerce/config.ts (versioned,
+  // validated) — not in a table. Every write to these tables comes from
+  // internal functions (trusted backend/provider flows); clients only read
+  // their own rows and record client-side commerce events.
+
+  // A physical order. Prices, names, currency and config version are
+  // SNAPSHOTS: later price changes never rewrite an order. Shipping/tax/total
+  // are unknown (null) until a provider quotes them.
+  commerceOrders: defineTable({
+    userId: v.id("users"),
+    orderNumber: v.string(),                   // "SB-XXXXXXXX", unique
+    configVersion: v.string(),
+    currency: v.string(),
+    lines: v.array(orderLine),
+    subtotalCents: v.number(),
+    shippingCents: v.union(v.number(), v.null()),
+    taxCents: v.union(v.number(), v.null()),
+    totalCents: v.union(v.number(), v.null()),
+    // The return policy the order was sold under (snapshot).
+    returnPolicy: v.object({ windowDays: v.number(), eligibleConditions: v.array(v.string()) }),
+    shippingAddress,
+    paymentStatus,
+    fulfillmentStatus,
+    returnStatus,
+    returnCondition: v.optional(v.string()),
+    shipments: v.array(shipment),
+    // The payment provider's references (provider undecided — docs §12).
+    provider: v.optional(v.object({
+      name: v.string(),
+      checkoutSessionId: v.optional(v.string()),
+      paymentId: v.optional(v.string()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    paidAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+  }).index("by_user", ["userId"])
+    .index("by_order_number", ["orderNumber"])
+    .index("by_payment_status", ["paymentStatus"]),
+
+  // One row per App Store subscription (original transaction), written ONLY
+  // from verified Apple data (StoreKit 2 server verification / App Store
+  // Server Notifications — Phase 6B). Never from a client flag.
+  commerceSubscriptions: defineTable({
+    userId: v.id("users"),
+    provider: v.literal("app_store"),
+    environment: v.union(v.literal("production"), v.literal("sandbox")),
+    productId: v.string(),                     // Sombrey product id (config)
+    appStoreProductId: v.string(),
+    originalTransactionId: v.string(),
+    latestTransactionId: v.string(),
+    status: subscriptionStatus,
+    autoRenewEnabled: v.boolean(),
+    purchaseDate: v.number(),
+    expiresDate: v.union(v.number(), v.null()),
+    revocationDate: v.optional(v.number()),
+    signedDate: v.number(),
+    lastVerifiedAt: v.number(),
+    verificationMethod: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"])
+    .index("by_original_transaction", ["originalTransactionId"]),
+
+  // Append-only history of verified subscription changes — never rewritten.
+  commerceSubscriptionHistory: defineTable({
+    subscriptionId: v.id("commerceSubscriptions"),
+    userId: v.id("users"),
+    latestTransactionId: v.string(),
+    status: subscriptionStatus,
+    expiresDate: v.union(v.number(), v.null()),
+    signedDate: v.number(),
+    verificationMethod: v.string(),
+    recordedAt: v.number(),
+  }).index("by_subscription", ["subscriptionId"])
+    .index("by_user", ["userId"]),
+
+  // A Band's journey from purchase to activation/connection (or return).
+  // Separate from orders (paid ≠ connected) and from wearableDevices (the
+  // G69/QCBandSDK pairing, which a record can reference via activation.deviceRef).
+  bandOwnership: defineTable({
+    userId: v.id("users"),
+    source: v.union(v.literal("order"), v.literal("legacy_pairing"), v.literal("staff_grant")),
+    orderId: v.optional(v.id("commerceOrders")),
+    status: ownershipStatus,
+    history: v.array(v.object({
+      status: ownershipStatus,
+      at: v.number(),
+      by: v.union(v.literal("system"), v.literal("provider"), v.literal("staff")),
+    })),
+    activation: v.optional(v.object({ method: v.string(), deviceRef: v.optional(v.string()), activatedAt: v.number() })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"])
+    .index("by_order", ["orderId"]),
+
+  // Append-only commercial events (convex/commerce/events.ts): a closed
+  // catalogue, minimal data, for measurement — nothing acts on them.
+  commerceEvents: defineTable({
+    name: commerceEventName,
+    userId: v.optional(v.id("users")),         // removed when the account is deleted
+    at: v.number(),
+    origin: v.union(v.literal("client"), v.literal("server")),
+    platform: v.union(v.literal("ios"), v.literal("web"), v.literal("backend")),
+    productId: v.optional(v.string()),
+    countryCode: v.optional(v.string()),
+    source: v.optional(v.string()),
+    amountCents: v.optional(v.number()),
+    currency: v.optional(v.string()),
+    orderId: v.optional(v.id("commerceOrders")),
+    configVersion: v.string(),
+  }).index("by_user_and_at", ["userId", "at"])
+    .index("by_name_and_at", ["name", "at"]),
 
   storeOrders: defineTable({
     // Customer info

@@ -1144,6 +1144,14 @@ export const deleteSelfAccount = mutation({
     await purgeDocs(ctx, await ctx.db.query("communityPosts").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("postComments").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("cartItems").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    // Sombrey commerce (Phase 6A): commerceOrders, commerceSubscriptions and
+    // commerceSubscriptionHistory are financial records — retained, like
+    // storeOrders (see above). Band ownership state is deleted; commerce
+    // events keep only their counts (the account link is removed).
+    await purgeDocs(ctx, await ctx.db.query("bandOwnership").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    for (const e of await ctx.db.query("commerceEvents").withIndex("by_user_and_at", (q) => q.eq("userId", userId)).collect()) {
+      await ctx.db.patch(e._id, { userId: undefined });
+    }
     await purgeDocs(ctx, await ctx.db.query("mealPhotoLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("workoutPerformanceLogs").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     await purgeDocs(ctx, await ctx.db.query("clientGoals").withIndex("by_user", (q) => q.eq("userId", userId)).collect());

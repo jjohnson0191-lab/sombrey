@@ -15,7 +15,8 @@
     "test:exercise": "node --experimental-strip-types --test tests/exercise/*.test.ts",
     "test:progress": "node --experimental-strip-types --test tests/progress/*.test.ts",
     "test:intelligence": "node --experimental-strip-types --test tests/intelligence/*.test.ts",
-    "test:nutrition": "node --experimental-strip-types --test tests/nutrition/*.test.ts"
+    "test:nutrition": "node --experimental-strip-types --test tests/nutrition/*.test.ts",
+    "test:commerce": "node --experimental-strip-types --test tests/commerce/*.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
