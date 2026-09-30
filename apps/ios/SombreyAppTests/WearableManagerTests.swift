@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import SombreyApp
 
 /// Only what's testable without a live Convex session/network — matching

@@ -5,6 +5,7 @@ import ConvexMobile
 /// `AppState.authPhase(for:)` is kept as a pure static function
 /// specifically so the Convex `AuthState` -> app `AuthPhase` mapping is
 /// testable without a live `ConvexClient`/network/FFI — see AppState.swift.
+@MainActor
 struct AppStateTests {
     @Test func loadingMapsToLoading() {
         #expect(AppState.authPhase(for: .loading) == .loading)

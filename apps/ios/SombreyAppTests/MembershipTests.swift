@@ -111,11 +111,15 @@ struct MembershipTests {
 
     @Test func repeatedDeliveriesAreHandledOnce() {
         var ledger = MembershipTransactionLedger()
-        #expect(ledger.firstDelivery(of: "2000000000000001"))
-        #expect(!ledger.firstDelivery(of: "2000000000000001"), "the purchase result and Transaction.updates deliver the same transaction")
-        #expect(ledger.firstDelivery(of: "2000000000000002"), "a renewal is a new transaction")
+        let first = ledger.firstDelivery(of: "2000000000000001")
+        let repeated = ledger.firstDelivery(of: "2000000000000001")
+        let renewal = ledger.firstDelivery(of: "2000000000000002")
+        #expect(first)
+        #expect(!repeated, "the purchase result and Transaction.updates deliver the same transaction")
+        #expect(renewal, "a renewal is a new transaction")
         var relaunched = MembershipTransactionLedger()
-        #expect(relaunched.firstDelivery(of: "2000000000000001"), "after relaunch Apple re-delivers unfinished transactions; handling (finish + server handoff) is idempotent")
+        let afterRelaunch = relaunched.firstDelivery(of: "2000000000000001")
+        #expect(afterRelaunch, "after relaunch Apple re-delivers unfinished transactions; handling (finish + server handoff) is idempotent")
     }
 
     @Test func renewalRevocationAndCancellationChangeTheStatus() {
