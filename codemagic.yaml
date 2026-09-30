@@ -242,12 +242,15 @@ workflows:
           xcodebuild build -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -configuration Release \
             -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 \
             | tee build-release.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | tail -80
-      - name: Compile the app + tests (Debug build-for-testing, unsigned)
+      - name: Compile the app + unit tests (Debug, the test TARGET, unsigned)
+        # Builds the SombreyAppTests target (and the app, in Debug, as its
+        # dependency) directly: the shared scheme's test action fails with
+        # "No test bundle product" (a pre-existing scheme issue).
         script: |
           set -o pipefail
-          xcodebuild build-for-testing -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" -configuration Debug \
-            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 \
-            | tee build-tests.log | grep -E "error:|TEST BUILD (SUCCEEDED|FAILED)|BUILD (SUCCEEDED|FAILED)" | tail -80
+          xcodebuild build -project "$XCODE_PROJECT" -target SombreyAppTests -configuration Debug -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 \
+            | tee build-tests.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | tail -80
     artifacts:
       - build-release.log
       - build-tests.log
