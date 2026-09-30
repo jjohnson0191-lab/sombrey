@@ -110,6 +110,16 @@ http.route({
   }),
 });
 
+/** The caller's identity for the Body Scan endpoints, or null. A malformed or
+ * forged token is a plain 401 — never a 500 that echoes the parser's error. */
+async function bodyScanIdentity(ctx: { auth: { getUserIdentity: () => Promise<{ tokenIdentifier: string } | null> } }) {
+  try {
+    return await ctx.auth.getUserIdentity();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Body Scan images — the ONLY way a body-scan image leaves storage.
  *
@@ -127,7 +137,7 @@ http.route({
   method: "GET",
   handler: httpAction(async (ctx, request) => {
     const noStore = { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" };
-    const identity = await ctx.auth.getUserIdentity();
+    const identity = await bodyScanIdentity(ctx);
     if (!identity) return new Response("Unauthorized", { status: 401, headers: noStore });
     const url = new URL(request.url);
     const storageId = await ctx.runQuery(internal.bodyScans.imageForOwner, {
@@ -139,6 +149,40 @@ http.route({
     const blob = await ctx.storage.get(storageId);
     if (!blob) return new Response("Not found", { status: 404, headers: noStore });
     return new Response(blob, { status: 200, headers: { ...noStore, "Content-Type": "image/jpeg" } });
+  }),
+});
+
+/**
+ * Body Scan uploads (Phase 5E) — the authenticated way an image enters storage.
+ *
+ *   POST /body-scan-upload            (body: the JPEG, ≤ 8 MB)
+ *   Authorization: Bearer <the app's Clerk "convex" JWT>
+ *   → 200 {"storageId": "..."}  · 401 not signed in · 403 no Body Scan consent
+ *     · 413 too large · 415 not a JPEG
+ *
+ * The blob is bound to its owner the moment it's stored (bodyScanUploads),
+ * so an upload that's never attached (the app closed mid-save) is deleted by
+ * the hourly sweep — and only blobs created here are ever swept. The image
+ * still becomes part of a scan only through bodyScans:attachView.
+ */
+http.route({
+  path: "/body-scan-upload",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const noStore = { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" };
+    const identity = await bodyScanIdentity(ctx);
+    if (!identity) return new Response("Unauthorized", { status: 401, headers: noStore });
+    const permission = await ctx.runQuery(internal.bodyScans.uploadPermission, { tokenIdentifier: identity.tokenIdentifier });
+    if (!permission.ok) return new Response("Not allowed", { status: permission.status, headers: noStore });
+    if (!(request.headers.get("Content-Type") ?? "").startsWith("image/jpeg")) return new Response("JPEG only", { status: 415, headers: noStore });
+    const declared = Number(request.headers.get("Content-Length") ?? "0");
+    if (declared > 8_000_000) return new Response("Too large", { status: 413, headers: noStore });
+    const blob = await request.blob();
+    if (blob.size === 0 || blob.size > 8_000_000) return new Response("Too large", { status: 413, headers: noStore });
+    const storageId = await ctx.storage.store(new Blob([blob], { type: "image/jpeg" }));
+    const recorded = await ctx.runMutation(internal.bodyScans.recordUpload, { tokenIdentifier: identity.tokenIdentifier, storageId });
+    if (!recorded.ok) return new Response("Not allowed", { status: 403, headers: noStore });
+    return new Response(JSON.stringify({ storageId }), { status: 200, headers: { ...noStore, "Content-Type": "application/json" } });
   }),
 });
 

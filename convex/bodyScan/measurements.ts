@@ -18,7 +18,14 @@
 
 import type { FeatureSet, FeatureView, ScaleEvidence } from "./features.ts";
 
-export const MEASUREMENT_METHOD_VERSION = "m1";
+/** Method history (stored rows of every version are kept; never overwritten):
+ *  m1 (5C) — height, widths/depths, ellipse circumferences, volume, proportions.
+ *  m2 (5E) — m1 unchanged for every shared measurement, plus: thigh/calf depth,
+ *            a ±95 % range on waist-to-height (scale cancels: edges + ellipse
+ *            model only — the input to the composition layer), silhouette area
+ *            index, arm/leg symmetry and shoulder/hip tilt (posture). Priors and
+ *            thresholds are unchanged: no validation data exists yet (5D). */
+export const MEASUREMENT_METHOD_VERSION = "m2";
 
 /** Provisional error model (1σ, relative unless stated). These are priors,
  * not measured accuracy: a validation study replaces them. Kept in one place
@@ -70,13 +77,13 @@ export const MIN_CAPTURE_QUALITY = 0.6;
 export const VIEW_AGREEMENT_MAX_REL = 0.03;
 
 export type MeasurementStatus = "available" | "low_confidence" | "unavailable";
-export type MeasurementKind = "length" | "circumference" | "volume" | "mass" | "index" | "ratio";
+export type MeasurementKind = "length" | "circumference" | "volume" | "mass" | "index" | "ratio" | "angle";
 
 export type Measurement = {
   name: string;
   kind: MeasurementKind;
   status: MeasurementStatus;
-  unit: "cm" | "L" | "kg" | "kg/m2" | "ratio";
+  unit: "cm" | "L" | "kg" | "kg/m2" | "ratio" | "deg";
   /** Present for available and low-confidence results only. */
   value?: number;
   /** Approximate 95 % half-width, same unit. */
@@ -242,6 +249,27 @@ function ratio(name: string, method: string, value: number | undefined, quality:
   return { name, kind: "ratio", status: "available", unit: "ratio", value: round(value, 3), confidence: round(clamp01(quality), 3), method, reasons: ["scale_free"] };
 }
 
+/** A scale-free ratio with a ±95 % range (relative 1σ `rel`), judged like a
+ * circumference: its uncertainty comes from the same outline and shape terms. */
+function ratioWithRange(name: string, method: string, value: number | undefined, rel: number, quality: number): Measurement {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return unavailable(name, "ratio", "ratio", method, ["missing_view_data"]);
+  const half = 2 * rel, threshold = AVAILABLE_MAX_REL.circumference;
+  const why = ["scale_free"];
+  let status: MeasurementStatus = "available";
+  if (half > threshold) { status = "low_confidence"; why.push("uncertainty_too_high"); }
+  if (quality < MIN_CAPTURE_QUALITY) { status = "low_confidence"; why.push("capture_quality_low"); }
+  return {
+    name, kind: "ratio", status, unit: "ratio", method, reasons: why, value: round(value, 3), uncertainty: round(half * value, 3),
+    confidence: round((threshold / (threshold + half)) * clamp01(quality), 3),
+  };
+}
+
+/** A posture angle (degrees) straight from the keypoints: no scale, no range model. */
+function angle(name: string, value: number | undefined, quality: number): Measurement {
+  if (value === undefined || !Number.isFinite(value)) return unavailable(name, "angle", "deg", "keypoint_line_angle", ["missing_view_data"]);
+  return { name, kind: "angle", status: "available", unit: "deg", value: round(value, 1), confidence: round(clamp01(quality), 3), method: "keypoint_line_angle", reasons: ["scale_free"] };
+}
+
 /** Mean of the named widths that are present. */
 function widthOf(v: FeatureView | undefined, keys: string[]): number | undefined {
   const xs = keys.map((k) => v?.widths[k]).filter((x): x is number => typeof x === "number" && x > 0);
@@ -275,6 +303,8 @@ export function computeMeasurements(f: FeatureSet, profileHeightCm?: number | nu
     ["chestDepth", side, ["chestDepth"], sidePx], ["waistDepth", side, ["waistDepth"], sidePx], ["hipDepth", side, ["hipDepth"], sidePx],
     ["upperArmWidth", front, ["upperArmLeft", "upperArmRight"], frontPx],
     ["thighWidth", front, ["thighLeft", "thighRight"], frontPx], ["calfWidth", front, ["calfLeft", "calfRight"], frontPx],
+    // m2: side-view leg depths (5c.1 features).
+    ["thighDepth", side, ["thighDepth"], sidePx], ["calfDepth", side, ["calfDepth"], sidePx],
   ];
   for (const [name, v, keys, px] of lengths) {
     const norm = widthOf(v, keys);
@@ -301,6 +331,7 @@ export function computeMeasurements(f: FeatureSet, profileHeightCm?: number | nu
     ["calfCircumference", "calf", ["calfLeft", "calfRight"], ["calfDepth"]],
   ];
   let waistGirthNorm: number | undefined;
+  let waistShapeRel: number | undefined;
   for (const [name, part, wKeys, dKeys] of girths) {
     const w = widthOf(front, wKeys), d = widthOf(side, dKeys);
     if (w === undefined || d === undefined) {
@@ -312,9 +343,9 @@ export function computeMeasurements(f: FeatureSet, profileHeightCm?: number | nu
     const [lo, hi] = WIDTH_TO_DEPTH[part];
     if (w / d < lo || w / d > hi) { out.push(unavailable(name, "circumference", "cm", CIRC, ["inconsistent_front_side"])); continue; }
     const norm = ellipsePerimeter(w / 2, d / 2);
-    if (part === "waist") waistGirthNorm = norm;
-    if (!scale.ok) { out.push(unavailable(name, "circumference", "cm", CIRC, noScale)); continue; }
     const shape = (edgeRel(w, frontPx) * w + edgeRel(d, sidePx) * d) / (w + d);
+    if (part === "waist") { waistGirthNorm = norm; waistShapeRel = Math.hypot(shape, PRIORS.ellipseModel); }
+    if (!scale.ok) { out.push(unavailable(name, "circumference", "cm", CIRC, noScale)); continue; }
     out.push(metric(name, "circumference", "cm", CIRC, norm * scale.heightM * 100,
       Math.sqrt(scale.rel ** 2 + shape ** 2 + PRIORS.ellipseModel ** 2), AVAILABLE_MAX_REL.circumference, quality, []));
   }
@@ -334,16 +365,23 @@ export function computeMeasurements(f: FeatureSet, profileHeightCm?: number | nu
   else out.push(metric("trunkLegVolume", "volume", "L", VOL, volumeIndex * scale.heightM ** 3 * 1000,
     Math.hypot(3 * scale.rel, PRIORS.volumeModel), AVAILABLE_MAX_REL.volume, quality, []));
 
-  // Never estimated in 5C — the architecture's place for them, with the reason.
-  out.push(unavailable("weight", "mass", "kg", "none", ["not_estimated_in_5c"]));
-  out.push(unavailable("bmi", "index", "kg/m2", "none", ["requires_validated_weight"]));
+  // The scanner never estimates weight; BMI from the user's RECORDED height and
+  // weight belongs to the composition layer (convex/bodyScan/composition.ts).
+  out.push(unavailable("weight", "mass", "kg", "none", ["not_estimated_from_images"]));
+  out.push(unavailable("bmi", "index", "kg/m2", "none", ["scanner_does_not_estimate_weight"]));
 
   // Scale-free proportions (need no metric scale).
   const RATIO = "scale_free_ratio";
   out.push(ratio("waistToHip", RATIO, front?.ratios.waistToHip, quality));
   out.push(ratio("shoulderToWaist", RATIO, front?.ratios.shoulderToWaist, quality));
-  out.push(ratio("waistToHeight", "front_side_ellipse_over_height", waistGirthNorm, quality));
+  out.push(ratioWithRange("waistToHeight", "front_side_ellipse_over_height", waistGirthNorm, waistShapeRel ?? 1, quality));
   out.push(ratio("volumeIndex", "stacked_ellipse_over_height_cubed", volumeIndex, quality));
+  // m2: silhouette area, symmetry, posture (scale-free; engineering inputs, not shown).
+  out.push(ratio("silhouetteAreaIndex", "silhouette_area_over_height_squared", front?.silhouette?.areaPerHeight2, quality));
+  out.push(ratio("armSymmetry", "keypoint_limb_length_difference", front?.ratios.armSymmetry === 0 ? undefined : front?.ratios.armSymmetry, quality));
+  out.push(ratio("legSymmetry", "keypoint_limb_length_difference", front?.ratios.legSymmetry === 0 ? undefined : front?.ratios.legSymmetry, quality));
+  out.push(angle("shoulderTilt", front?.ratios.shoulderTiltDeg, quality));
+  out.push(angle("hipTilt", front?.ratios.hipTiltDeg, quality));
 
   // The scan's height vs the profile height at scan time — never overwritten.
   let profileComparison: MeasurementSet["profileComparison"];
@@ -369,17 +407,29 @@ export function computeMeasurements(f: FeatureSet, profileHeightCm?: number | nu
 
 // ─── Change detection (foundation for 5F) ─────────────────────────────────────
 
-export type MeasurementChange = { name: string; unit: string; a: number; b: number; delta: number; noise: number; mdc: number | null; exceedsNoise: boolean };
+export type ChangeState = "no_meaningful_change" | "possible_change" | "meaningful_change";
+export type MeasurementChange = {
+  name: string; unit: string; a: number; b: number; delta: number;
+  /** Combined ±95 % range of the two results: √(uA² + uB²). */
+  noise: number;
+  /** Minimum detectable change (5D) for this measurement, if known. */
+  mdc: number | null;
+  exceedsNoise: boolean;
+  state: ChangeState;
+};
 
-/** Scan A → scan B on measurements both have as "available". A difference
- * only `exceedsNoise` when it's larger than BOTH the two scans' combined 95 %
- * uncertainty and — once 5D repeatability data exists — the measurement's
- * minimum detectable change (MDC95). Scans that don't align (5D align.1:
- * different distance, tilt or pose) aren't compared at all. Unvalidated. */
+/** Scan A → scan B on measurements both have as "available" (with a range).
+ *   |Δ| ≤ combined range                          → no_meaningful_change
+ *   |Δ| > range, MDC validated and |Δ| > MDC      → meaningful_change
+ *   |Δ| > range, MDC validated and |Δ| ≤ MDC      → no_meaningful_change
+ *   |Δ| > range, no validated MDC                 → possible_change
+ * "Meaningful" therefore needs a validated MDC (5D repeatability study); until
+ * one exists nothing is ever called meaningful. Scans that don't align (align.1)
+ * or differ in method / scale source aren't compared at all. Unvalidated. */
 export function compareMeasurements(
   a: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale">,
   b: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale">,
-  opts: { mdc?: Record<string, number>; alignment?: { comparable: boolean; reasons: string[] } } = {},
+  opts: { mdc?: Record<string, number>; mdcValidated?: boolean; alignment?: { comparable: boolean; reasons: string[] } } = {},
 ): { comparable: false; reasons: string[] } | { comparable: true; validated: false; changes: MeasurementChange[] } {
   const reasons: string[] = [];
   if (a.methodVersion !== b.methodVersion) reasons.push("method_version_differs");
@@ -390,11 +440,18 @@ export function compareMeasurements(
   for (const ma of a.measurements) {
     const mb = b.measurements.find((m) => m.name === ma.name);
     if (!mb || ma.status !== "available" || mb.status !== "available" || ma.unit !== mb.unit) continue;
-    if (ma.value === undefined || mb.value === undefined) continue;
-    const delta = round(mb.value - ma.value, ma.unit === "ratio" ? 3 : 1);
-    const noise = ma.unit === "ratio" ? 0 : round(Math.hypot(ma.uncertainty ?? 0, mb.uncertainty ?? 0));
+    if (ma.value === undefined || mb.value === undefined || ma.uncertainty === undefined || mb.uncertainty === undefined) continue;
+    const digits = ma.unit === "ratio" ? 3 : 1;
+    const delta = round(mb.value - ma.value, digits);
+    const noise = round(Math.hypot(ma.uncertainty, mb.uncertainty), digits);
     const mdc = opts.mdc?.[ma.name] ?? null;
-    changes.push({ name: ma.name, unit: ma.unit, a: ma.value, b: mb.value, delta, noise, mdc, exceedsNoise: ma.unit !== "ratio" && Math.abs(delta) > Math.max(noise, mdc ?? 0) });
+    const size = Math.abs(delta);
+    const state: ChangeState = size <= noise
+      ? "no_meaningful_change"
+      : opts.mdcValidated && mdc !== null
+        ? (size > mdc ? "meaningful_change" : "no_meaningful_change")
+        : "possible_change";
+    changes.push({ name: ma.name, unit: ma.unit, a: ma.value, b: mb.value, delta, noise, mdc, exceedsNoise: size > Math.max(noise, mdc ?? 0), state });
   }
   return { comparable: true, validated: false, changes };
 }

@@ -16,6 +16,7 @@
 // Pure — no I/O. Tested in tests/bodyScan/validation.test.ts.
 
 import type { Measurement, MeasurementSet } from "./measurements.ts";
+import type { CompositionResult } from "./composition.ts";
 
 export const VALIDATION_ANALYSIS_VERSION = "v1";
 
@@ -32,7 +33,9 @@ export const TRUTH_MEASUREMENTS = {
   thigh: { scanner: "thighCircumference", unit: "cm", range: [25, 110] },
   calf: { scanner: "calfCircumference", unit: "cm", range: [20, 70] },
   shoulderWidth: { scanner: "shoulderWidth", unit: "cm", range: [25, 70] },
-} as const satisfies Record<string, { scanner: string; unit: "cm" | "kg"; range: [number, number] }>;
+  // 5E: DXA whole-body fat % — the reference for the composition layer (rfm v0 today).
+  bodyFat: { scanner: "bodyFatPercent", unit: "%", range: [2, 70] },
+} as const satisfies Record<string, { scanner: string; unit: "cm" | "kg" | "%"; range: [number, number] }>;
 export type TruthMeasurement = keyof typeof TRUTH_MEASUREMENTS;
 
 /** Documented measuring protocols (docs/BODY_SCAN_5D.md §3). */
@@ -43,10 +46,12 @@ export const TRUTH_PROTOCOLS = [
   "tape_isak_style",           // circumferences: tape horizontal, relaxed, end of normal exhale, no compression
   "caliper_biacromial",        // shoulder width: acromion to acromion (a bone width, NOT the silhouette width)
   "tape_shoulder_silhouette",  // shoulder width across the widest point of the deltoids (silhouette-comparable)
+  "dxa_whole_body",            // body fat: whole-body DXA fat mass ÷ total mass, by a clinician/technologist
 ] as const;
 export const TRUTH_OPERATORS = ["self", "assistant", "clinician"] as const;
 export const LENGTH_UNITS = { cm: 1, mm: 0.1, in: 2.54 } as const;
 export const MASS_UNITS = { kg: 1, lb: 0.45359237 } as const;
+export const PERCENT_UNITS = { "%": 1 } as const;
 
 export type TruthInput = {
   subjectCode: string;
@@ -58,7 +63,7 @@ export type TruthInput = {
   operator: string;
   repeat: number;
 };
-export type Truth = Omit<TruthInput, "measurement" | "unit"> & { measurement: TruthMeasurement; unit: "cm" | "kg" };
+export type Truth = Omit<TruthInput, "measurement" | "unit"> & { measurement: TruthMeasurement; unit: "cm" | "kg" | "%" };
 
 export const SUBJECT_CODE = /^[A-Z0-9][A-Z0-9-]{0,11}$/;
 
@@ -73,15 +78,16 @@ export function normaliseTruth(t: TruthInput, now: number): { ok: true; truth: T
   if (!Number.isInteger(t.repeat) || t.repeat < 1 || t.repeat > 5) return { ok: false, error: "Repeat must be 1–5" };
   if (!Number.isFinite(t.measuredAt) || t.measuredAt > now + 60_000 || t.measuredAt < now - 365 * 86_400_000) return { ok: false, error: "Invalid date" };
   if (!Number.isFinite(t.value) || t.value <= 0) return { ok: false, error: "Value must be a positive number" };
-  const factor = spec.unit === "kg"
-    ? (MASS_UNITS as Record<string, number>)[t.unit]
-    : (LENGTH_UNITS as Record<string, number>)[t.unit];
-  if (factor === undefined) return { ok: false, error: `Unit must be ${spec.unit === "kg" ? "kg or lb" : "cm, mm or in"}` };
+  const units: Record<string, number> = spec.unit === "kg" ? MASS_UNITS : spec.unit === "%" ? PERCENT_UNITS : LENGTH_UNITS;
+  const factor = units[t.unit];
+  if (factor === undefined) return { ok: false, error: `Unit must be ${Object.keys(units).join(" or ")}` };
   const value = Math.round(t.value * factor * 100) / 100;
   if (value < spec.range[0] || value > spec.range[1]) return { ok: false, error: `Implausible ${t.measurement}: ${value} ${spec.unit}` };
   const heightProtocols = ["stadiometer_barefoot", "wall_mark_barefoot"];
+  if (t.measurement === "bodyFat" && t.operator !== "clinician") return { ok: false, error: "DXA body fat must be recorded by a clinician / technologist" };
   const ok =
-    t.measurement === "height" ? heightProtocols.includes(t.protocol)
+    t.measurement === "bodyFat" ? t.protocol === "dxa_whole_body"
+    : t.measurement === "height" ? heightProtocols.includes(t.protocol)
       : t.measurement === "weight" ? t.protocol === "scale_calibrated_morning"
         : t.measurement === "shoulderWidth" ? t.protocol === "caliper_biacromial" || t.protocol === "tape_shoulder_silhouette"
           : t.protocol === "tape_isak_style";
@@ -262,11 +268,13 @@ export type TaggedScan = {
   depthSource: string;          // capture.depth ?? "none"
   tag: ScanTag;
   measurements: Pick<MeasurementSet, "methodVersion" | "measurements" | "scale"> | null;
+  /** 5E: the scan's composition results (internal estimates included). */
+  composition?: { compositionVersion: string; results: CompositionResult[] } | null;
 };
 
 export type Observation = {
   scanId: string; subject: string; session: string; repeat: string; measurement: TruthMeasurement;
-  status: Measurement["status"] | "not_processed"; scanner: number | null; uncertainty: number | null; confidence: number | null;
+  status: Measurement["status"] | CompositionResult["status"] | "not_processed"; scanner: number | null; uncertainty: number | null; confidence: number | null;
   truth: number | null; truthRepeats: number;
   error: Pointwise | null;
   depthSource: string; deviceModel: string; distanceM: number; phoneHeight: string; lighting: string; clothing: string; pose: string;
@@ -285,12 +293,14 @@ export function observations(scans: TaggedScan[], truths: Truth[]): Observation[
   const out: Observation[] = [];
   for (const s of scans) {
     for (const [name, spec] of Object.entries(TRUTH_MEASUREMENTS) as Array<[TruthMeasurement, (typeof TRUTH_MEASUREMENTS)[TruthMeasurement]]>) {
-      const m = s.measurements?.measurements.find((x) => x.name === spec.scanner);
+      // Body fat is a composition result (the rfm model today), not a measurement.
+      const c = spec.scanner === "bodyFatPercent" ? s.composition?.results.find((x) => x.name === "bodyFatPercent" && x.model === "rfm") : undefined;
+      const m = spec.scanner === "bodyFatPercent" ? undefined : s.measurements?.measurements.find((x) => x.name === spec.scanner);
       const t = truthFor(truths, s.tag.subjectCode, name, s.createdAt);
-      const scanner = m?.value ?? null;
+      const scanner = (c ? c.value : m?.value) ?? null;
       out.push({
         scanId: s.scanId, subject: s.tag.subjectCode, session: s.tag.session, repeat: s.tag.repeat, measurement: name,
-        status: m?.status ?? "not_processed", scanner, uncertainty: m?.uncertainty ?? null, confidence: m?.confidence ?? null,
+        status: c?.status ?? m?.status ?? "not_processed", scanner, uncertainty: (c ? c.uncertainty : m?.uncertainty) ?? null, confidence: m?.confidence ?? null,
         truth: t?.value ?? null, truthRepeats: t?.repeats ?? 0,
         error: scanner !== null && t ? pointError({ scanner, truth: t.value }) : null,
         depthSource: s.depthSource, deviceModel: s.deviceModel, distanceM: s.tag.distanceM, phoneHeight: s.tag.phoneHeight,

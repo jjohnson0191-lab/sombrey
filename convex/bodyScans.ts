@@ -12,6 +12,11 @@
 //   attachFeatures → 5B/5C on-device CV features (numbers only); 5C derives
 //                    and stores the scan's measurements from them
 //   measurements   → the scan's derived measurements, with provenance
+//   composition    → 5E composition layer (body-fat estimate kept internal; BMI
+//                    from the user's recorded values), with its input snapshot
+//   compare        → 5E scan A → scan B: no meaningful / possible / meaningful change
+//   recordUpload   → (internal) POST /body-scan-upload binds each upload to its
+//                    owner; cleanupOrphanUploads sweeps uploads never attached
 //
 // SECURITY: every function resolves the user from the auth token (no client
 // user ids); every scan/image access checks ownership server-side; storage
@@ -30,11 +35,13 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
-  CONSENT_VERSION, PROTOCOL_VERSION, VIEWS, contextSnapshot, missingProfile, missingViews,
+  CAPTURE_CONFIG, CONSENT_VERSION, PROTOCOL_VERSION, VIEWS, contextSnapshot, missingProfile, missingViews,
   plausibleHeightCm, plausibleWeightKg, sanitizeCapture, validScanId, validateBlob, validateConditions, validateViewMeta,
 } from "./bodyScan/rules";
 import { isAbandoned, validateFeatureSet, type FeatureSet } from "./bodyScan/features";
-import { MEASUREMENT_METHOD_VERSION, computeMeasurements } from "./bodyScan/measurements";
+import { MEASUREMENT_METHOD_VERSION, compareMeasurements, computeMeasurements } from "./bodyScan/measurements";
+import { COMPOSITION_VERSION, computeComposition } from "./bodyScan/composition";
+import { alignScans, type AlignmentInput } from "./bodyScan/features";
 import { VIEW, featureMultiView, featureProcessing, featureQuality, featureScale, featureView } from "./bodyScan/validators";
 import { latestMeasurements, ownScan, requireUser } from "./bodyScan/access";
 
@@ -79,33 +86,74 @@ async function deleteScanDeep(ctx: MutationCtx, scan: Doc<"bodyScans">) {
   for (const i of await imagesOf(ctx, scan._id)) await deleteImageRow(ctx, i);
   for (const f of await featuresOf(ctx, scan._id)) await ctx.db.delete(f._id);
   for (const m of await measurementsOf(ctx, scan._id)) await ctx.db.delete(m._id);
+  for (const c of await ctx.db.query("bodyScanCompositions").withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scan._id)).collect()) await ctx.db.delete(c._id);
   // 5D validation tag (dev only): the scan's conditions label goes with it.
   for (const t of await ctx.db.query("bodyScanValidationTags").withIndex("by_scan", (q) => q.eq("scanDocId", scan._id)).collect()) await ctx.db.delete(t._id);
   await ctx.db.delete(scan._id);
 }
 
-/** Derives and stores the measurements for one stored feature set with the
- * current method — once per (scan, CV version, method version). Uses the
- * scan's own context snapshot, so a later profile edit never changes it. */
+/** Derives and stores, for one stored feature set, the measurements (current
+ * method) and the composition layer (current version) — each once per version,
+ * never overwriting an earlier version. Uses the scan's own context snapshot,
+ * so a later profile edit never changes either. Returns whether anything new
+ * was stored. */
 async function storeMeasurements(ctx: MutationCtx, scan: Doc<"bodyScans">, features: Doc<"bodyScanFeatures">): Promise<boolean> {
-  const existing = await ctx.db.query("bodyScanMeasurements")
+  let added = false;
+  let row = await ctx.db.query("bodyScanMeasurements")
     .withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scan._id).eq("cvVersion", features.cvVersion).eq("methodVersion", MEASUREMENT_METHOD_VERSION))
     .first();
-  if (existing) return false;
-  const result = computeMeasurements(features as unknown as FeatureSet, scan.context.heightCm ?? null);
-  await ctx.db.insert("bodyScanMeasurements", {
-    userId: scan.userId,
-    scanDocId: scan._id,
-    cvVersion: result.cvVersion,
-    methodVersion: result.methodVersion,
-    computedAt: Date.now(),
-    scale: result.scale,
-    measurements: result.measurements,
-    ...(result.profileComparison ? { profileComparison: result.profileComparison } : {}),
-    validated: false,
-  });
-  return true;
+  if (!row) {
+    const result = computeMeasurements(features as unknown as FeatureSet, scan.context.heightCm ?? null);
+    const id = await ctx.db.insert("bodyScanMeasurements", {
+      userId: scan.userId,
+      scanDocId: scan._id,
+      cvVersion: result.cvVersion,
+      methodVersion: result.methodVersion,
+      computedAt: Date.now(),
+      scale: result.scale,
+      measurements: result.measurements,
+      ...(result.profileComparison ? { profileComparison: result.profileComparison } : {}),
+      validated: false,
+    });
+    row = (await ctx.db.get(id))!;
+    added = true;
+  }
+  const hasComposition = await ctx.db.query("bodyScanCompositions")
+    .withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scan._id).eq("measurementMethodVersion", row!.methodVersion).eq("compositionVersion", COMPOSITION_VERSION))
+    .first();
+  if (!hasComposition) {
+    const c = scan.context;
+    const composition = computeComposition(row, {
+      scanAt: scan.createdAt,
+      ...(c.sex ? { sex: c.sex } : {}),
+      ...(c.ageYears !== undefined ? { ageYears: c.ageYears } : {}),
+      ...(c.heightCm !== undefined ? { heightCm: c.heightCm } : {}),
+      ...(c.weightKg !== undefined ? { weightKg: c.weightKg } : {}),
+      ...(c.weightSource ? { weightSource: c.weightSource } : {}),
+      ...(c.weightRecordedAt !== undefined ? { weightRecordedAt: c.weightRecordedAt } : {}),
+      depthSource: scan.capture.depth ?? "none",
+      captureQuality: features.quality.overallScore,
+    });
+    await ctx.db.insert("bodyScanCompositions", {
+      userId: scan.userId,
+      scanDocId: scan._id,
+      cvVersion: row.cvVersion,
+      measurementMethodVersion: composition.measurementMethodVersion,
+      compositionVersion: composition.compositionVersion,
+      computedAt: Date.now(),
+      inputs: composition.inputs,
+      results: composition.results,
+      validated: false,
+    });
+    added = true;
+  }
+  return added;
 }
+
+/** Validated minimum detectable change per measurement, by method version —
+ * EMPTY until the 5D repeatability study produces it. Until then no change is
+ * ever classified "meaningful" (see compareMeasurements). */
+const VALIDATED_MDC: Record<string, Record<string, number>> = {};
 
 // ─── Profile & consent ────────────────────────────────────────────────────────
 
@@ -115,6 +163,7 @@ export const profile = query({
     const user = await requireUser(ctx);
     const context = await currentContext(ctx, user, Date.now());
     return {
+      captureConfig: CAPTURE_CONFIG,
       context,
       missing: missingProfile(context),
       consent: {
@@ -254,6 +303,11 @@ export const attachView = mutation({
       if (attached.userId === user._id && attached.scanDocId === scan._id && attached.view === args.view) return { ok: true as const, view: args.view, replaced: false };
       throw new ConvexError({ code: "INVALID", message: "That image can't be used" });
     }
+    // 5E: uploads through the authenticated endpoint carry an owner. Someone
+    // else's in-flight upload is refused and left alone (it's theirs).
+    const ledger = await ctx.db.query("bodyScanUploads").withIndex("by_storage", (q) => q.eq("storageId", args.storageId)).unique();
+    if (ledger && ledger.userId !== user._id) throw new ConvexError({ code: "INVALID", message: "That image can't be used" });
+    if (ledger) await ctx.db.delete(ledger._id);
     const refuse = async (error: string) => {
       // An unattached upload from this request: removed so it never lingers.
       if (await ctx.db.system.get(args.storageId)) await ctx.storage.delete(args.storageId);
@@ -451,6 +505,115 @@ export const recomputeMeasurements = internalMutation({
       if (scan && (await storeMeasurements(ctx, scan, f))) added++;
     }
     return { added, methodVersion: MEASUREMENT_METHOD_VERSION };
+  },
+});
+
+/** The scan's composition layer (newest measurement method / composition
+ * version), for the owner. Every result keeps its status, range components,
+ * validation status and whether it may be displayed — the app shows only
+ * displayable ones; in c1 no body-fat estimate is displayable. */
+export const composition = query({
+  args: { scanId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const scan = await ownScan(ctx, user._id, args.scanId);
+    const rows = await ctx.db.query("bodyScanCompositions").withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scan._id)).collect();
+    if (!rows.length) return null;
+    const newest = rows.reduce((a, b) => (
+      b.measurementMethodVersion > a.measurementMethodVersion ||
+      (b.measurementMethodVersion === a.measurementMethodVersion && b.compositionVersion > a.compositionVersion) ? b : a));
+    const { _id, _creationTime, userId: _u, scanDocId: _s, ...c } = newest;
+    return c;
+  },
+});
+
+async function alignmentInput(ctx: QueryCtx, scan: Doc<"bodyScans">): Promise<AlignmentInput | null> {
+  const f = (await featuresOf(ctx, scan._id)).sort((a, b) => (a.cvVersion < b.cvVersion ? 1 : -1))[0];
+  if (!f) return null;
+  const images = await imagesOf(ctx, scan._id);
+  return {
+    depthSource: scan.capture.depth ?? "none",
+    protocolVersion: scan.protocolVersion,
+    views: f.views.map((v) => {
+      const cond = images.find((i) => i.view === v.view)?.conditions;
+      return {
+        view: v.view,
+        ...(cond ? { bodySpan: cond.bodySpan, pitchDegrees: cond.pitchDegrees } : {}),
+        ...(v.silhouette ? { heightFraction: v.silhouette.heightFraction } : {}),
+        ratios: v.ratios,
+      };
+    }),
+  };
+}
+
+/** Scan A → scan B for the owner: alignment (align.1), then per measurement
+ * no_meaningful_change / possible_change / meaningful_change. "Meaningful"
+ * needs a validated MDC — none exists yet, so it can't occur. Unvalidated. */
+export const compare = query({
+  args: { scanIdA: v.string(), scanIdB: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const a = await ownScan(ctx, user._id, args.scanIdA);
+    const b = await ownScan(ctx, user._id, args.scanIdB);
+    const [ma, mb] = [await latestMeasurements(ctx, a._id), await latestMeasurements(ctx, b._id)];
+    if (!ma || !mb) return { comparable: false as const, reasons: ["not_processed"], validated: false as const };
+    const [ia, ib] = [await alignmentInput(ctx, a), await alignmentInput(ctx, b)];
+    const alignment = ia && ib ? alignScans(ia, ib) : null;
+    const mdc = VALIDATED_MDC[ma.methodVersion];
+    const result = compareMeasurements(ma, mb, { ...(mdc ? { mdc, mdcValidated: true } : {}), ...(alignment ? { alignment } : {}) });
+    return {
+      ...result,
+      validated: false as const,
+      methodVersion: ma.methodVersion,
+      alignment: alignment ? { method: alignment.method, comparable: alignment.comparable, reasons: alignment.reasons } : null,
+      mdcValidated: Boolean(mdc),
+    };
+  },
+});
+
+// ─── Uploads (5E): owner-bound, orphans swept ─────────────────────────────────
+
+/** For POST /body-scan-upload: may this signed-in user upload a scan image? */
+export const uploadPermission = internalQuery({
+  args: { tokenIdentifier: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.query("users").withIndex("by_token", (q) => q.eq("tokenIdentifier", args.tokenIdentifier)).unique();
+    if (!user) return { ok: false as const, status: 404 };
+    if (user.bodyScanConsentVersion !== CONSENT_VERSION) return { ok: false as const, status: 403 };
+    return { ok: true as const };
+  },
+});
+
+/** For POST /body-scan-upload: the blob the endpoint just stored, bound to its owner. */
+export const recordUpload = internalMutation({
+  args: { tokenIdentifier: v.string(), storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.query("users").withIndex("by_token", (q) => q.eq("tokenIdentifier", args.tokenIdentifier)).unique();
+    if (!user || user.bodyScanConsentVersion !== CONSENT_VERSION) {
+      if (await ctx.db.system.get(args.storageId)) await ctx.storage.delete(args.storageId);
+      return { ok: false as const };
+    }
+    await ctx.db.insert("bodyScanUploads", { userId: user._id, storageId: args.storageId, createdAt: Date.now() });
+    return { ok: true as const };
+  },
+});
+
+export const ORPHAN_UPLOAD_AFTER_MS = 60 * 60 * 1000;
+
+/** Uploads never attached within an hour (the app was closed mid-save): their
+ * blobs are deleted. Only blobs the upload endpoint created are ever touched,
+ * and never one that became a scan image. Runs hourly (convex/crons.ts). */
+export const cleanupOrphanUploads = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - ORPHAN_UPLOAD_AFTER_MS;
+    let removed = 0;
+    for (const row of await ctx.db.query("bodyScanUploads").withIndex("by_created", (q) => q.lt("createdAt", cutoff)).take(200)) {
+      const attached = await ctx.db.query("bodyScanImages").withIndex("by_storage", (q) => q.eq("storageId", row.storageId)).first();
+      if (!attached && (await ctx.db.system.get(row.storageId))) { await ctx.storage.delete(row.storageId); removed++; }
+      await ctx.db.delete(row._id);
+    }
+    return { removed };
   },
 });
 

@@ -73,9 +73,9 @@ export const featureQuality = v.object({
 /** Phase 5C: one derived measurement (convex/bodyScan/measurements.ts). */
 export const measurement = v.object({
   name: v.string(),
-  kind: v.union(v.literal("length"), v.literal("circumference"), v.literal("volume"), v.literal("mass"), v.literal("index"), v.literal("ratio")),
+  kind: v.union(v.literal("length"), v.literal("circumference"), v.literal("volume"), v.literal("mass"), v.literal("index"), v.literal("ratio"), v.literal("angle")),
   status: v.union(v.literal("available"), v.literal("low_confidence"), v.literal("unavailable")),
-  unit: v.union(v.literal("cm"), v.literal("L"), v.literal("kg"), v.literal("kg/m2"), v.literal("ratio")),
+  unit: v.union(v.literal("cm"), v.literal("L"), v.literal("kg"), v.literal("kg/m2"), v.literal("ratio"), v.literal("deg")),
   value: v.optional(v.number()),
   uncertainty: v.optional(v.number()),   // ≈ 95 % half-width, same unit
   confidence: v.number(),                // 0–1 heuristic, not a probability
@@ -95,4 +95,42 @@ export const profileComparison = v.object({
   scannerHeightCm: v.optional(v.number()),
   differenceCm: v.optional(v.number()),
   differs: v.boolean(),
+});
+
+/** Phase 5E: one composition-model output (convex/bodyScan/composition.ts). */
+export const compositionResult = v.object({
+  name: v.union(v.literal("bodyFatPercent"), v.literal("bmi")),
+  model: v.string(),
+  modelVersion: v.string(),
+  modelKind: v.union(v.literal("equation"), v.literal("learned")),
+  validationStatus: v.union(v.literal("experimental"), v.literal("calculated_from_recorded_values"), v.literal("not_trained")),
+  status: v.union(v.literal("estimate"), v.literal("calculated"), v.literal("unavailable")),
+  value: v.optional(v.number()),
+  low: v.optional(v.number()),
+  high: v.optional(v.number()),
+  uncertainty: v.optional(v.number()),
+  uncertaintyComponents: v.object({
+    measurement: v.union(v.number(), v.null()),
+    model: v.union(v.number(), v.null()),
+    unquantified: v.array(v.string()),
+  }),
+  displayable: v.boolean(),
+  population: v.string(),
+  reasons: v.array(v.string()),
+});
+
+/** The exact inputs a composition result used (the scan's snapshot). */
+export const compositionInputs = v.object({
+  scanAt: v.number(),
+  sex: v.optional(v.string()),
+  ageYears: v.optional(v.number()),
+  heightCm: v.optional(v.number()),
+  weightKg: v.optional(v.number()),
+  weightSource: v.optional(v.string()),
+  weightRecordedAt: v.optional(v.number()),
+  depthSource: v.string(),
+  captureQuality: v.number(),
+  waistToHeight: v.optional(v.number()),
+  waistToHeightUncertainty: v.optional(v.number()),
+  waistToHeightStatus: v.optional(v.string()),
 });

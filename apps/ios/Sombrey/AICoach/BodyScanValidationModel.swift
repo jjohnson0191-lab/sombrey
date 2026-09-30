@@ -14,6 +14,8 @@ enum BodyScanValidationVocabulary {
         let label: String
         let isMass: Bool
         let protocols: [String]
+        /// 5E: DXA body fat (%), recorded by a clinician / technologist only.
+        var isPercent = false
     }
 
     static let measurements: [Measurement] = [
@@ -26,8 +28,9 @@ enum BodyScanValidationVocabulary {
         .init(key: "thigh", label: "Thigh", isMass: false, protocols: ["tape_isak_style"]),
         .init(key: "calf", label: "Calf", isMass: false, protocols: ["tape_isak_style"]),
         .init(key: "shoulderWidth", label: "Shoulder width", isMass: false, protocols: ["tape_shoulder_silhouette", "caliper_biacromial"]),
+        .init(key: "bodyFat", label: "Body fat (DXA)", isMass: false, protocols: ["dxa_whole_body"], isPercent: true),
     ]
-    static func units(for m: Measurement) -> [String] { m.isMass ? ["kg", "lb"] : ["cm", "mm", "in"] }
+    static func units(for m: Measurement) -> [String] { m.isPercent ? ["%"] : m.isMass ? ["kg", "lb"] : ["cm", "mm", "in"] }
 
     static let operators = ["self", "assistant", "clinician"]
     static let repeats = ["A", "B", "C", "D", "E"]

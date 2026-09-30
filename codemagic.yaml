@@ -220,7 +220,7 @@ workflows:
   # it can't deploy or touch production data. It uploads to TestFlight for
   # internal testing — not an App Store release.
   sombrey-body-scan-5a-dev:
-    name: Sombrey Body Scan Dev (5A–5D, dev backend)
+    name: Sombrey Body Scan Dev (5A–5E, dev backend)
     max_build_duration: 60
     instance_type: mac_mini_m2
 
@@ -298,7 +298,7 @@ workflows:
           BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" /tmp/SombreyInfo.plist)
           echo "Compiled app: $VERSION ($BUILD) → Convex $URL"
           test "$URL" = "https://$DEV_CONVEX_HOST"
-          echo "DEV BUILD — Sombrey Body Scan 5D validation harness (ground truth, scan labels, pilot report; Scan history › DEV · Validation). Estimates unvalidated. Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
+          echo "DEV BUILD — Sombrey Body Scan 5E composition engine (experimental body-composition layer, change over time, authenticated uploads; DEV · Validation kept). Nothing validated. Backend: development Convex ($DEV_CONVEX_HOST), not production. Not for release." > release_notes.txt
 
     artifacts:
       - build/ios/ipa/*.ipa

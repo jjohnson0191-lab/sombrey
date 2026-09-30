@@ -147,10 +147,13 @@ export const report = query({
       const scan = await ctx.db.get(t.scanDocId);
       if (!scan || scan.userId !== user._id || scan.status !== "complete") continue;
       const m = await latestMeasurements(ctx, scan._id);
+      const compositions = m ? await ctx.db.query("bodyScanCompositions").withIndex("by_scan_and_versions", (q) => q.eq("scanDocId", scan._id).eq("measurementMethodVersion", m.methodVersion)).collect() : [];
+      const composition = compositions.sort((a, b) => (a.compositionVersion < b.compositionVersion ? 1 : -1))[0];
       scans.push({
         scanId: scan.scanId, createdAt: scan.createdAt, deviceModel: scan.capture.deviceModel, depthSource: scan.capture.depth ?? "none",
         tag: { subjectCode: t.subjectCode, session: t.session, repeat: t.repeat, distanceM: t.distanceM, phoneHeight: t.phoneHeight, lighting: t.lighting, clothing: t.clothing, pose: t.pose },
         measurements: m ? { methodVersion: m.methodVersion, measurements: m.measurements, scale: m.scale } : null,
+        composition: composition ? { compositionVersion: composition.compositionVersion, results: composition.results } : null,
       });
     }
     const truthRows = await ctx.db.query("bodyScanValidationTruth").withIndex("by_user", (q) => q.eq("userId", user._id)).take(2000);

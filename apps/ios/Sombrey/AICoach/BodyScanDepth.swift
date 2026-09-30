@@ -327,3 +327,116 @@ enum BodyScanMeasurementPresentation {
         return "Scanner estimate differs from your saved height. You can review your details in Settings › Profile › Body details."
     }
 }
+
+// MARK: - Composition (bodyScans:composition) — Phase 5E
+
+struct BodyScanCompositionDTO: Decodable, Equatable, Sendable {
+    struct Result: Decodable, Equatable, Sendable {
+        let name: String
+        let model: String
+        let modelVersion: String
+        let modelKind: String
+        let validationStatus: String
+        let status: String
+        var value: Double? = nil
+        var low: Double? = nil
+        var high: Double? = nil
+        var uncertainty: Double? = nil
+        let displayable: Bool
+        let reasons: [String]
+    }
+    let compositionVersion: String
+    let measurementMethodVersion: String
+    let results: [Result]
+    let validated: Bool
+}
+
+enum BodyScanCompositionPresentation {
+    /// Only results the server marked displayable. Body fat, if ever
+    /// displayable, is a range (never a point value); BMI names its source.
+    static func lines(_ c: BodyScanCompositionDTO) -> [BodyScanMeasurementPresentation.Line] {
+        c.results.filter(\.displayable).compactMap { r in
+            switch r.name {
+            case "bmi":
+                guard let v = r.value else { return nil }
+                return .init(label: "BMI", text: String(format: "%.1f · from your recorded height and weight", v))
+            case "bodyFatPercent":
+                guard let lo = r.low, let hi = r.high else { return nil }
+                return .init(label: "Body fat", text: "\(Int(lo.rounded()))–\(Int(hi.rounded())) % · experimental")
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// Said whenever a body-fat result exists but isn't shown.
+    static func note(_ c: BodyScanCompositionDTO) -> String? {
+        let hidden = c.results.contains { $0.name == "bodyFatPercent" && !$0.displayable }
+        return hidden ? "Body composition from scans is experimental and validation is pending, so no body-fat estimate is shown yet." : nil
+    }
+}
+
+// MARK: - Change over time (bodyScans:compare) — Phase 5E
+
+struct BodyScanChangeDTO: Decodable, Equatable, Sendable {
+    struct Change: Decodable, Equatable, Sendable {
+        let name: String
+        let unit: String
+        let a: Double
+        let b: Double
+        let delta: Double
+        let noise: Double
+        var mdc: Double? = nil
+        let state: String
+    }
+    let comparable: Bool
+    var reasons: [String]? = nil
+    var changes: [Change]? = nil
+    var mdcValidated: Bool? = nil
+    let validated: Bool
+}
+
+enum BodyScanChangePresentation {
+    /// One line per shown measurement. A difference inside the scans' combined
+    /// range is "No meaningful change"; beyond it, without a validated minimum
+    /// detectable change, only "Possible change". Whole centimetres.
+    static func lines(_ d: BodyScanChangeDTO) -> [BodyScanMeasurementPresentation.Line] {
+        guard d.comparable, let changes = d.changes else { return [] }
+        return BodyScanMeasurementPresentation.order.compactMap { entry in
+            guard let c = changes.first(where: { $0.name == entry.name }), c.unit == "cm" else { return nil }
+            let signed = Int(c.delta.rounded())
+            let amount = signed == 0 ? "" : " (\(signed > 0 ? "+" : "−")\(abs(signed)) cm)"
+            switch c.state {
+            case "meaningful_change": return .init(label: entry.label, text: "Change\(amount)")
+            case "possible_change": return .init(label: entry.label, text: "Possible change\(amount) · not confirmed")
+            default: return .init(label: entry.label, text: "No meaningful change")
+            }
+        }
+    }
+
+    static func summary(_ d: BodyScanChangeDTO) -> String {
+        if !d.comparable {
+            return (d.reasons ?? []).contains("not_processed")
+                ? "Comparison appears once both scans have been analysed."
+                : "These two scans weren't taken the same way closely enough to compare fairly (distance, phone angle, pose or camera)."
+        }
+        if lines(d).isEmpty { return "No measurement was precise enough in both scans to compare." }
+        return d.mdcValidated == true
+            ? "Compared with your previous scan."
+            : "Compared with your previous scan. Small differences can come from the scan itself; changes aren't confirmed until scanner repeatability is validated."
+    }
+}
+
+// MARK: - Scan quality — Phase 5E
+
+enum BodyScanQualityPresentation {
+    /// A plain label for the capture-quality score (0–1). Not a measurement.
+    static func label(_ score: Double?) -> String? {
+        guard let s = score else { return nil }
+        switch s {
+        case 0.85...: return "Scan quality: good"
+        case 0.6..<0.85: return "Scan quality: fair"
+        default: return "Scan quality: low — consider retaking"
+        }
+    }
+}

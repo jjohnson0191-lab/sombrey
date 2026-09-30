@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import {
-  featureMultiView, featureProcessing, featureQuality, featureScale, featureView,
+  compositionInputs, compositionResult, featureMultiView, featureProcessing, featureQuality, featureScale, featureView,
   measurement, measurementScale, profileComparison,
 } from "./bodyScan/validators";
 import { v } from "convex/values";
@@ -592,6 +592,37 @@ export default defineSchema({
   }).index("by_scan_and_versions", ["scanDocId", "cvVersion", "methodVersion"])
     .index("by_user", ["userId"]),
 
+  // Body Scan Phase 5E: the composition layer (convex/bodyScan/composition.ts)
+  // for one measurement set — one row per (scan, measurement method,
+  // composition version); a newer version is stored alongside, never over.
+  // Inputs are the scan's own snapshot. Nothing is validated; body-fat
+  // estimates are internal (displayable: false) in c1.
+  bodyScanCompositions: defineTable({
+    userId: v.id("users"),
+    scanDocId: v.id("bodyScans"),
+    cvVersion: v.string(),
+    measurementMethodVersion: v.string(),
+    compositionVersion: v.string(),
+    computedAt: v.number(),
+    inputs: compositionInputs,
+    results: v.array(compositionResult),
+    validated: v.literal(false),
+  }).index("by_scan_and_versions", ["scanDocId", "measurementMethodVersion", "compositionVersion"])
+    .index("by_user", ["userId"]),
+
+  // Body Scan Phase 5E: uploads made through the authenticated
+  // POST /body-scan-upload endpoint, bound to their owner when the blob is
+  // created. A row is removed when the upload is attached (or refused);
+  // rows older than an hour are orphans — their blobs are deleted hourly.
+  // Only blobs this endpoint created are ever swept.
+  bodyScanUploads: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+    createdAt: v.number(),
+  }).index("by_storage", ["storageId"])
+    .index("by_created", ["createdAt"])
+    .index("by_user", ["userId"]),
+
   // Body Scan Phase 5D — VALIDATION ONLY (development deployments; every
   // function checks SOMBREY_BODYSCAN_VALIDATION). Hand-measured ground truth
   // and per-scan capture conditions for comparing the scanner with reality.
@@ -604,8 +635,8 @@ export default defineSchema({
     subjectCode: v.string(),            // e.g. "S01" — never a name
     measuredAt: v.number(),
     measurement: v.string(),            // TRUTH_MEASUREMENTS key
-    value: v.number(),                  // canonical: cm or kg
-    unit: v.union(v.literal("cm"), v.literal("kg")),
+    value: v.number(),                  // canonical: cm, kg or % (DXA body fat)
+    unit: v.union(v.literal("cm"), v.literal("kg"), v.literal("%")),
     protocol: v.string(),               // TRUTH_PROTOCOLS
     operator: v.string(),               // self | assistant | clinician
     repeat: v.number(),                 // 1–5

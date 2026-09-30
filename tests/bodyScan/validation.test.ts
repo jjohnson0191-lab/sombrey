@@ -37,7 +37,10 @@ test("ground truth: invalid entries are refused, never stored", () => {
     [{ value: NaN }, /positive/],
     [{ unit: "kg" }, /Unit/],                                          // mass unit for a length
     [{ measurement: "weight", unit: "cm", protocol: "scale_calibrated_morning" }, /Unit/],
-    [{ measurement: "bodyFat" }, /Unknown measurement/],
+    [{ measurement: "fatMass" }, /Unknown measurement/],
+    [{ measurement: "bodyFat", value: 22, unit: "%", protocol: "dxa_whole_body", operator: "self" }, /clinician/],   // DXA is never self-reported
+    [{ measurement: "bodyFat", value: 22, unit: "%", protocol: "tape_isak_style", operator: "clinician" }, /doesn't apply/],
+    [{ measurement: "bodyFat", value: 95, unit: "%", protocol: "dxa_whole_body", operator: "clinician" }, /Implausible/],
     [{ protocol: "tape_isak_style" }, /doesn't apply/],                // a tape protocol for height
     [{ measurement: "waist", protocol: "stadiometer_barefoot", value: 84 }, /doesn't apply/],
     [{ subjectCode: "John Smith" }, /Subject code/],                   // no names
@@ -195,7 +198,7 @@ test("report: per-measurement accuracy, available-only accuracy, repeatability, 
   assert.equal(w.truthOperatorSd, null, "one day, one subject, two tape repeats → df 1: too few");
   assert.equal(report.pilot, true);
   assert.ok(report.notes[0].startsWith("Pilot validation"));
-  assert.equal(obs.length, 5 * 9);
+  assert.equal(obs.length, 5 * 10);
   assert.equal(report.subjects, 1);
 });
 
@@ -217,7 +220,7 @@ test("report: factor breakdowns (depth source, distance, …) and scale failure 
 test("csv export: one row per scan × measurement, escaped, no names", () => {
   const { observations: obs } = buildReport([scan("a", tag("A"), set(180, 86))], [truth("height", 178)]);
   const csv = toCsv(obs).split("\n");
-  assert.equal(csv.length, 1 + 9);
+  assert.equal(csv.length, 1 + 10);
   assert.ok(csv[0].startsWith("scanId,subject,session,repeat,measurement,status,scanner"));
   assert.ok(csv.some((l) => l.startsWith("a,S01,d1,A,height,low_confidence,180,4.5")));
 });
@@ -261,4 +264,22 @@ test("change detection: a difference below the MDC is noise; misaligned scans ar
   assert.ok(withMdc.comparable && !withMdc.changes[0].exceedsNoise && withMdc.changes[0].mdc === 3.2, "below the MDC it's noise");
   const misaligned = compareMeasurements(ms(84), ms(86), { alignment: { comparable: false, reasons: ["front:pose_differs"] } });
   assert.deepEqual(misaligned, { comparable: false, reasons: ["alignment:front:pose_differs"] });
+});
+
+test("5E: DXA body fat is ground truth for the composition layer's internal estimate", () => {
+  const dxa = normaliseTruth(truthIn({ measurement: "bodyFat", value: 21.4, unit: "%", protocol: "dxa_whole_body", operator: "clinician" }), NOW);
+  assert.ok(dxa.ok && dxa.truth.unit === "%" && dxa.truth.value === 21.4);
+  const withComposition: TaggedScan = {
+    ...scan("a", tag("A"), set(180, 86)),
+    composition: { compositionVersion: "c1", results: [{
+      name: "bodyFatPercent", model: "rfm", modelVersion: "0", modelKind: "equation", validationStatus: "experimental", status: "estimate",
+      value: 24.1, low: 15.7, high: 32.5, uncertainty: 8.4, uncertaintyComponents: { measurement: 1.6, model: 8.2, unquantified: [] },
+      displayable: false, population: "", reasons: [],
+    }] },
+  };
+  const bf = observations([withComposition], [truth("bodyFat" as Truth["measurement"], 21.4)]).find((o) => o.measurement === "bodyFat")!;
+  assert.deepEqual([bf.status, bf.scanner, bf.uncertainty, bf.truth], ["estimate", 24.1, 8.4, 21.4]);
+  assert.deepEqual(bf.error, { absolute: 2.7, signed: 2.7, absolutePercent: 12.62 });
+  const none = observations([scan("b", tag("A"), set(180, 86))], []).find((o) => o.measurement === "bodyFat")!;
+  assert.equal(none.status, "not_processed");
 });

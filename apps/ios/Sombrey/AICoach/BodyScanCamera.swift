@@ -290,6 +290,13 @@ final class BodyScanCameraModel {
     /// The rear mode: seconds to walk round to the front of the phone.
     nonisolated static let rearSeconds = 15
 
+    /// 5E: gates from the server, unless this device has local (dev) tuning or
+    /// the server's values aren't sane — the app's own bounds always hold.
+    func applyServerConfig(_ server: BodyScanServerCaptureConfig?) {
+        guard !BodyScanProtocolConfig.hasLocalTuning(), let c = server?.config else { return }
+        config = c
+    }
+
     /// Chosen before the camera starts; fixed for the whole scan.
     func use(_ mode: BodyScanCaptureMode) {
         guard mode != self.mode else { return }

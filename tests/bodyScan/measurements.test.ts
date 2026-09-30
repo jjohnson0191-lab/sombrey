@@ -234,9 +234,9 @@ test("validation: inconsistent front/side geometry and missing views", () => {
   assert.equal(get(noSide, "hipCircumference").status, "unavailable");
 });
 
-test("weight and BMI are never produced in 5C; body fat doesn't exist here", () => {
+test("weight and BMI are never estimated from images; body fat doesn't exist in the measurement layer", () => {
   const m = computeMeasurements(features());
-  assert.deepEqual(get(m, "weight"), { name: "weight", kind: "mass", status: "unavailable", unit: "kg", confidence: 0, method: "none", reasons: ["not_estimated_in_5c"] });
+  assert.deepEqual(get(m, "weight"), { name: "weight", kind: "mass", status: "unavailable", unit: "kg", confidence: 0, method: "none", reasons: ["not_estimated_from_images"] });
   assert.equal(get(m, "bmi").status, "unavailable");
   assert.ok(!m.measurements.some((x) => /fat|rfm/i.test(x.name)));
   assert.equal(m.validated, false);
@@ -296,4 +296,44 @@ test("change: differences inside the combined uncertainty are noise", () => {
   assert.deepEqual(compareMeasurements(a, { ...b, methodVersion: "m0" }), { comparable: false, reasons: ["method_version_differs"] });
   const lidar = computeMeasurements(features({ scale: { kind: "lidar", evidence: [consistentEvidence("front")] } }));
   assert.deepEqual(compareMeasurements(a, lidar), { comparable: false, reasons: ["scale_source_differs"] }, "TrueDepth and LiDAR scans aren't compared");
+});
+
+// ─── m2 (Phase 5E) ───────────────────────────────────────────────────────────
+
+test("m2: new features — leg depths, waist-to-height range, silhouette area, symmetry, posture", () => {
+  const f = features({ views: [view("front", { ratios: { ...view("front").ratios, armSymmetry: 0.03, legSymmetry: 0.02, shoulderTiltDeg: -1.4, hipTiltDeg: 0.8 } }), view("side"), view("back")] });
+  const m = computeMeasurements(f);
+  assert.equal(m.methodVersion, "m2");
+  assert.equal(get(m, "thighDepth").value, 17.5);   // 0.1 × 175
+  assert.equal(get(m, "calfDepth").value, 11.4);    // 0.065 × 175
+  const whtr = get(m, "waistToHeight");
+  assert.ok(whtr.uncertainty! > 0, "m2 gives waist-to-height a range");
+  // Honest result under today's priors: outline edges (512-row mask) + ellipse model ≈ ±10 % → low confidence.
+  assert.equal(whtr.status, "low_confidence");
+  assert.ok(whtr.reasons.includes("uncertainty_too_high"));
+  assert.equal(get(m, "silhouetteAreaIndex").value, 0.11);
+  assert.equal(get(m, "armSymmetry").value, 0.03);
+  assert.deepEqual([get(m, "shoulderTilt").value, get(m, "shoulderTilt").unit, get(m, "hipTilt").value], [-1.4, "deg", 0.8]);
+});
+
+test("m2: waist-to-height's range has no scale term — the same with or without depth", () => {
+  const metric = get(computeMeasurements(features()), "waistToHeight");
+  const noScale = get(computeMeasurements(features({ scale: { kind: "none" } })), "waistToHeight");
+  assert.equal(metric.value, noScale.value);
+  assert.equal(metric.uncertainty, noScale.uncertainty);
+});
+
+test("m2: every measurement m1 had is computed identically (the new version only adds)", () => {
+  // m1's values for this synthetic set, frozen from the 5C run.
+  const m = computeMeasurements(features());
+  const expected: Record<string, number> = { height: 175, shoulderWidth: 43.8, waistDepth: 21.9, thighWidth: 15.8, torsoLength: 52.5, legLength: 82.3 };
+  for (const [name, value] of Object.entries(expected)) assert.equal(get(m, name).value, value, name);
+  assert.ok(Math.abs(get(m, "waistCircumference").value! - ellipsePerimeter(0.17 / 2, 0.125 / 2) * 175) < 0.06);
+});
+
+test("m2: missing posture/symmetry inputs are unavailable, never zero", () => {
+  const m = computeMeasurements(features());
+  assert.equal(get(m, "armSymmetry").status, "unavailable");
+  assert.equal(get(m, "shoulderTilt").status, "unavailable");
+  assert.equal(get(m, "shoulderTilt").value, undefined);
 });

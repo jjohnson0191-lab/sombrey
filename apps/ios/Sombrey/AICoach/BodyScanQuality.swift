@@ -78,11 +78,14 @@ struct BodyScanProtocolConfig: Equatable, Codable, Sendable {
     var minBrightness = 0.20
     var maxSubjectMotion = 0.015
     var maxDeviceMotion = 0.06
+    /// 5E: set when the gates came from the server ("server:<version>").
+    var label: String? = nil
 
     static let standard = BodyScanProtocolConfig()
 
-    /// Recorded with each view ("default", or the tuned values).
+    /// Recorded with each view ("default", "server:<version>", or the tuned values).
     var id: String {
+        if let label { return label }
         guard self != .standard else { return "default" }
         let f = { (v: Double) in String(format: "%.2f", v) }
         return "tuned:span=\(f(spanMin))-\(f(spanMax)),pitch=\(f(maxPitch)),roll=\(f(maxRoll)),light=\(f(minBrightness))"
@@ -95,6 +98,8 @@ struct BodyScanProtocolConfig: Equatable, Codable, Sendable {
     var guideNoseY: Double { guideAnkleY - guideSpan }
 
     private static let key = "bodyScan.protocolConfig"
+    /// Whether this device has locally tuned gates (dev builds) — they win over the server's.
+    static func hasLocalTuning(_ defaults: UserDefaults = .standard) -> Bool { defaults.data(forKey: key) != nil }
     static func load(_ defaults: UserDefaults = .standard) -> BodyScanProtocolConfig {
         guard let data = defaults.data(forKey: key), let c = try? JSONDecoder().decode(BodyScanProtocolConfig.self, from: data), c.isSane else { return .standard }
         return c
@@ -412,6 +417,23 @@ enum BodyScanImageSpec {
 
 // MARK: - Backend shapes
 
+/// 5E: the capture gates served with the profile (convex/bodyScan/rules.ts
+/// CAPTURE_CONFIG) — applied only within the app's own sanity bounds.
+struct BodyScanServerCaptureConfig: Decodable, Equatable, Sendable {
+    let version: String
+    let spanMin, spanMax, minHeadY, maxAnkleY, centreMin, centreMax: Double
+    let maxPitch, maxRoll, minBrightness, maxSubjectMotion, maxDeviceMotion: Double
+
+    /// The config to use, or nil when it isn't sane (the app then keeps its own).
+    var config: BodyScanProtocolConfig? {
+        let c = BodyScanProtocolConfig(spanMin: spanMin, spanMax: spanMax, minHeadY: minHeadY, maxAnkleY: maxAnkleY, centreMin: centreMin, centreMax: centreMax,
+                                       maxPitch: maxPitch, maxRoll: maxRoll, minBrightness: minBrightness, maxSubjectMotion: maxSubjectMotion,
+                                       maxDeviceMotion: maxDeviceMotion, label: "server:\(version)")
+        let saneMotion = (0.001...0.1).contains(maxSubjectMotion) && (0.005...0.5).contains(maxDeviceMotion) && centreMin < centreMax && (0.1...0.9).contains(centreMin)
+        return c.isSane && saneMotion ? c : nil
+    }
+}
+
 struct BodyScanProfileDTO: Decodable, Equatable {
     struct Context: Decodable, Equatable {
         var heightCm: Double? = nil
@@ -430,6 +452,7 @@ struct BodyScanProfileDTO: Decodable, Equatable {
     let missing: [String]
     let consent: Consent
     let protocolVersion: String
+    var captureConfig: BodyScanServerCaptureConfig? = nil
 }
 
 /// One scan from `bodyScans:list` — never a storage id or URL.

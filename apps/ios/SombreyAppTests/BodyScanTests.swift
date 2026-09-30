@@ -536,7 +536,8 @@ struct BodyScanTests {
 
     @Test func validationUnitsAndProtocolsMatchTheServer() {
         let byKey = Dictionary(uniqueKeysWithValues: BodyScanValidationVocabulary.measurements.map { ($0.key, $0) })
-        #expect(Set(byKey.keys) == ["height", "weight", "chest", "waist", "hips", "upperArm", "thigh", "calf", "shoulderWidth"])
+        #expect(Set(byKey.keys) == ["height", "weight", "chest", "waist", "hips", "upperArm", "thigh", "calf", "shoulderWidth", "bodyFat"])
+        #expect(BodyScanValidationVocabulary.units(for: byKey["bodyFat"]!) == ["%"] && byKey["bodyFat"]!.protocols == ["dxa_whole_body"])
         #expect(BodyScanValidationVocabulary.units(for: byKey["weight"]!) == ["kg", "lb"])
         #expect(BodyScanValidationVocabulary.units(for: byKey["waist"]!) == ["cm", "mm", "in"])
         #expect(byKey["height"]!.protocols.allSatisfy { $0.hasSuffix("barefoot") })
@@ -564,5 +565,78 @@ struct BodyScanTests {
         #expect(text.contains("BY DISTANCEM") && text.contains("height MAE n/a"), "withheld statistics are n/a, never 0")
         #expect(text.contains("front:sparse_depth×1"))
         #expect(BodyScanValidationFormat.pairedLine(dto.paired[0]) == "S01 d1 A 1.5m truedepth height: scan 180.2±8.1 [low_confidence] truth 178.0 err +2.2")
+    }
+
+    // MARK: Phase 5E — composition, change over time, server capture config, uploads
+
+    static func serverConfig(spanMin: Double = 0.5, spanMax: Double = 0.92, maxPitch: Double = 22) -> BodyScanServerCaptureConfig {
+        BodyScanServerCaptureConfig(version: "5e-test", spanMin: spanMin, spanMax: spanMax, minHeadY: 0.04, maxAnkleY: 0.95, centreMin: 0.33, centreMax: 0.67,
+                                    maxPitch: maxPitch, maxRoll: 6, minBrightness: 0.2, maxSubjectMotion: 0.015, maxDeviceMotion: 0.06)
+    }
+
+    @Test func serverCaptureGatesApplyOnlyWithinTheAppsOwnBounds() {
+        let c = Self.serverConfig().config
+        #expect(c != nil && c?.spanMin == 0.5 && c?.id == "server:5e-test", "recorded as the server's config")
+        #expect(Self.serverConfig(spanMin: 0.95, spanMax: 0.9).config == nil, "an inverted span is refused")
+        #expect(Self.serverConfig(maxPitch: 80).config == nil, "a tilt the app would never accept is refused")
+        var tuned = c!
+        tuned.label = nil
+        #expect(tuned.id.hasPrefix("tuned:"), "once tuned locally it's never labelled as the server's")
+        #expect(BodyScanProtocolConfig.standard.id == "default")
+    }
+
+    static func composition(_ results: [BodyScanCompositionDTO.Result]) -> BodyScanCompositionDTO {
+        BodyScanCompositionDTO(compositionVersion: "c1", measurementMethodVersion: "m2", results: results, validated: false)
+    }
+    static func compResult(_ name: String, _ model: String, status: String, value: Double?, low: Double? = nil, high: Double? = nil, displayable: Bool) -> BodyScanCompositionDTO.Result {
+        .init(name: name, model: model, modelVersion: "1", modelKind: "equation", validationStatus: "experimental", status: status,
+              value: value, low: low, high: high, displayable: displayable, reasons: [])
+    }
+
+    @Test func bodyFatStaysHiddenWhileExperimentalAndBMINamesItsSource() {
+        let c = Self.composition([
+            Self.compResult("bodyFatPercent", "rfm", status: "estimate", value: 22.4, low: 14.1, high: 30.7, displayable: false),
+            Self.compResult("bmi", "bmi.recorded", status: "calculated", value: 25.61, displayable: true),
+            Self.compResult("bodyFatPercent", "sombrey.bodyfat", status: "unavailable", value: nil, displayable: false),
+        ])
+        let lines = BodyScanCompositionPresentation.lines(c)
+        #expect(lines == [.init(label: "BMI", text: "25.6 · from your recorded height and weight")])
+        #expect(!lines.contains { $0.label.contains("Body fat") }, "no body-fat number while experimental")
+        #expect(BodyScanCompositionPresentation.note(c)?.contains("validation is pending") == true)
+        // If a future version marks body fat displayable, it's a range — never a point value.
+        let future = Self.composition([Self.compResult("bodyFatPercent", "sombrey.bodyfat", status: "estimate", value: 22.4, low: 19.6, high: 25.2, displayable: true)])
+        #expect(BodyScanCompositionPresentation.lines(future) == [.init(label: "Body fat", text: "20–25 % · experimental")])
+    }
+
+    static func change(_ state: String, delta: Double, name: String = "waistCircumference", comparable: Bool = true, mdcValidated: Bool = false) -> BodyScanChangeDTO {
+        BodyScanChangeDTO(comparable: comparable, reasons: comparable ? nil : ["alignment:front:pose_differs"],
+                          changes: [.init(name: name, unit: "cm", a: 84, b: 84 + delta, delta: delta, noise: 2.1, state: state)],
+                          mdcValidated: mdcValidated, validated: false)
+    }
+
+    @Test func changeOverTimeIsNeverMoreCertainThanTheScanner() {
+        #expect(BodyScanChangePresentation.lines(Self.change("no_meaningful_change", delta: 1.2)) == [.init(label: "Waist", text: "No meaningful change")])
+        #expect(BodyScanChangePresentation.lines(Self.change("possible_change", delta: -3.4)) == [.init(label: "Waist", text: "Possible change (−3 cm) · not confirmed")])
+        #expect(BodyScanChangePresentation.lines(Self.change("meaningful_change", delta: 4.6, mdcValidated: true)) == [.init(label: "Waist", text: "Change (+5 cm)")])
+        #expect(BodyScanChangePresentation.summary(Self.change("possible_change", delta: 3)).contains("aren't confirmed"))
+        let misaligned = Self.change("possible_change", delta: 3, comparable: false)
+        #expect(BodyScanChangePresentation.lines(misaligned).isEmpty)
+        #expect(BodyScanChangePresentation.summary(misaligned).contains("weren't taken the same way"))
+    }
+
+    @Test func scanQualityIsALabelNotANumber() {
+        #expect(BodyScanQualityPresentation.label(0.93) == "Scan quality: good")
+        #expect(BodyScanQualityPresentation.label(0.7) == "Scan quality: fair")
+        #expect(BodyScanQualityPresentation.label(0.4)?.hasPrefix("Scan quality: low") == true)
+        #expect(BodyScanQualityPresentation.label(nil) == nil)
+    }
+
+    @Test func uploadsAreAuthenticatedAndNeverCarryAUrl() {
+        let r = BodyScanUpload.authenticatedRequest(site: URL(string: "https://adamant-chicken-676.convex.site")!, token: "t0k", bytes: 123_456)
+        #expect(r.httpMethod == "POST")
+        #expect(r.url?.absoluteString == "https://adamant-chicken-676.convex.site/body-scan-upload")
+        #expect(r.value(forHTTPHeaderField: "Authorization") == "Bearer t0k")
+        #expect(r.value(forHTTPHeaderField: "Content-Type") == "image/jpeg")
+        #expect(r.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
     }
 }

@@ -42,6 +42,18 @@ export function validateConditions(c: CaptureConditions | undefined): string | n
 
 /** Stored images: JPEG, portrait, long side 1024–4096 px, ≤ 8 MB. The app
  * stores 2048 px (see BodyScanImage in the app for why). */
+/** The capture gates the app applies (5E: served with the profile, so the
+ * consolidated evaluation can move framing / distance without an app release).
+ * The app accepts them only within its own sanity bounds
+ * (BodyScanProtocolConfig.isSane) and records `server:<version>` with every
+ * capture; a dev build's local tuning takes precedence. Changing a value here
+ * = a new version string. */
+export const CAPTURE_CONFIG = {
+  version: "5a.2-default",
+  spanMin: 0.6, spanMax: 0.9, minHeadY: 0.04, maxAnkleY: 0.95, centreMin: 0.33, centreMax: 0.67,
+  maxPitch: 20, maxRoll: 6, minBrightness: 0.2, maxSubjectMotion: 0.015, maxDeviceMotion: 0.06,
+} as const;
+
 export const IMAGE_LIMITS = { minLongSide: 1024, maxLongSide: 4096, maxBytes: 8_000_000, contentType: "image/jpeg" } as const;
 /** An upload must be attached within this time of being uploaded. */
 export const UPLOAD_MAX_AGE_MS = 60 * 60 * 1000;

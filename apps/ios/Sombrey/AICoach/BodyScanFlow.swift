@@ -92,6 +92,7 @@ struct BodyScanFlow: View {
             profile.subscribe(to: "bodyScans:profile")
         }
         .onChange(of: profile.value) { _, p in
+            camera.applyServerConfig(p?.captureConfig)
             if stage == nil, let p, !showResults { stage = firstStage(p) }
         }
         .onAppear {
@@ -831,6 +832,7 @@ struct BodyScanTuningView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
                         guard c.isSane else { return }
+                        c.label = nil   // locally tuned — never recorded as the server's config
                         c.save()
                         camera.config = c
                         dismiss()
@@ -1021,7 +1023,13 @@ struct BodyScanHistoryView: View {
                     if let line = Self.contextLine(scan.context) {
                         Text(line).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
                     }
-                    if BodyScanMeasurementsView.enabled { BodyScanMeasurementsView(scanId: scan.scanId) }
+                    if BodyScanMeasurementsView.enabled {
+                        BodyScanMeasurementsView(
+                            scanId: scan.scanId,
+                            previousScanId: saved.firstIndex(where: { $0.scanId == scan.scanId }).flatMap { i in saved.indices.contains(i + 1) ? saved[i + 1].scanId : nil },
+                            captureQuality: scan.views.map(\.qualityScore).min()
+                        )
+                    }
                     if saved.count > 1 { earlier }
                     Text(BodyScanMeasurementsView.enabled
                          ? "A private, consistent record for seeing how your body changes. Sombrey doesn't estimate body fat, weight or BMI from these photos."
@@ -1115,13 +1123,22 @@ struct BodyScanHistoryView: View {
 /// note — and, for the physical test, every result with its status and reasons.
 struct BodyScanMeasurementsView: View {
     let scanId: String
+    /// 5E: the previous saved scan, for change over time.
+    var previousScanId: String? = nil
+    /// 5E: the capture-quality score (lowest of the three views).
+    var captureQuality: Double? = nil
     @State private var result = ConvexQuery<BodyScanMeasurementsDTO?>()
+    @State private var composition = ConvexQuery<BodyScanCompositionDTO?>()
+    @State private var change = ConvexQuery<BodyScanChangeDTO>()
 
     static var enabled: Bool { BodyScanDevTools.enabled }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("MEASUREMENTS").font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft)
+            if let q = BodyScanQualityPresentation.label(captureQuality) {
+                Text(q).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft)
+            }
             if let m = result.value ?? nil {
                 let lines = BodyScanMeasurementPresentation.lines(m)
                 ForEach(lines, id: \.label) { line in
@@ -1142,6 +1159,8 @@ struct BodyScanMeasurementsView: View {
                 if let note = BodyScanMeasurementPresentation.heightNote(m) {
                     Text(note).font(StudioFont.body(12, weight: .medium)).foregroundStyle(StudioColor.ink).fixedSize(horizontal: false, vertical: true)
                 }
+                compositionSection
+                changeSection
                 diagnostics(m)
             } else if result.isLoading {
                 ProgressView().tint(StudioColor.ink)
@@ -1153,7 +1172,47 @@ struct BodyScanMeasurementsView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { SombreyGlassChamber(cornerRadius: 20) }
-        .task(id: scanId) { result.subscribe(to: "bodyScans:measurements", with: ["scanId": scanId]) }
+        .task(id: scanId) {
+            result.subscribe(to: "bodyScans:measurements", with: ["scanId": scanId])
+            composition.subscribe(to: "bodyScans:composition", with: ["scanId": scanId])
+            if let previousScanId { change.subscribe(to: "bodyScans:compare", with: ["scanIdA": previousScanId, "scanIdB": scanId]) }
+        }
+    }
+
+    /// 5E: displayable composition results only (BMI from recorded values);
+    /// body fat stays hidden while experimental.
+    @ViewBuilder
+    private var compositionSection: some View {
+        if let c = composition.value ?? nil {
+            ForEach(BodyScanCompositionPresentation.lines(c), id: \.label) { line in
+                HStack {
+                    Text(line.label).font(StudioFont.body(14)).foregroundStyle(StudioColor.ink)
+                    Spacer()
+                    Text(line.text).font(StudioFont.body(13)).foregroundStyle(StudioColor.inkSoft).multilineTextAlignment(.trailing)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if let note = BodyScanCompositionPresentation.note(c) {
+                Text(note).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 5E: change since the previous scan — never more certain than the scanner is.
+    @ViewBuilder
+    private var changeSection: some View {
+        if previousScanId != nil, let d = change.value {
+            Text("SINCE YOUR PREVIOUS SCAN").font(StudioFont.body(10, weight: .semibold)).tracking(1.6).foregroundStyle(StudioColor.inkSoft).padding(.top, 6)
+            ForEach(BodyScanChangePresentation.lines(d), id: \.label) { line in
+                HStack {
+                    Text(line.label).font(StudioFont.body(14)).foregroundStyle(StudioColor.ink)
+                    Spacer()
+                    Text(line.text).font(StudioFont.body(13)).foregroundStyle(StudioColor.inkSoft)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            Text(BodyScanChangePresentation.summary(d)).font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// Dev builds only (the physical test): every result, whatever its status.
@@ -1164,8 +1223,14 @@ struct BodyScanMeasurementsView: View {
             return "\(x.name) \(x.status) \(v)\(u) \(x.unit) c\(String(format: "%.2f", x.confidence)) \(x.reasons.joined(separator: ","))"
         }
         let head = "DEV · \(m.cvVersion)/\(m.methodVersion) · scale \(m.scale.source) \(m.scale.ok ? "ok" : "none") [\(m.scale.views.joined(separator: ","))] \(m.scale.reasons.joined(separator: ","))"
+        let comp = ((composition.value ?? nil)?.results ?? []).map { r -> String in
+            let v = r.value.map { String(format: "%.1f", $0) } ?? "—"
+            let range = (r.low != nil && r.high != nil) ? String(format: " [%.1f–%.1f]", r.low!, r.high!) : ""
+            return "composition \(r.model) v\(r.modelVersion) \(r.name) \(r.status) \(v)\(range) \(r.validationStatus) shown:\(r.displayable) \(r.reasons.joined(separator: ","))"
+        }
+        let changes = (change.value?.changes ?? []).map { "change \($0.name) Δ\(String(format: "%+.1f", $0.delta)) noise \(String(format: "%.1f", $0.noise)) \($0.state)" }
         return DisclosureGroup("DEV · all results") {
-            Text(([head] + rows).joined(separator: "\n"))
+            Text(([head] + rows + comp + changes).joined(separator: "\n"))
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(StudioColor.inkFaint)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1227,9 +1292,36 @@ enum BodyScanImageLoader {
 enum BodyScanUpload {
     private struct UploadResponse: Decodable { let storageId: String }
 
-    /// Uploads one normalised JPEG through a consent-gated upload URL.
+    /// Uploads one normalised JPEG. 5E: through the authenticated
+    /// POST /body-scan-upload (the upload is bound to the user, so an upload
+    /// that's never attached is swept); the consent-gated upload URL remains
+    /// the fallback when that endpoint can't be reached.
     @MainActor
     static func upload(_ jpeg: Data) async throws -> String {
+        if let id = try? await authenticatedUpload(jpeg) { return id }
+        return try await uploadUrlUpload(jpeg)
+    }
+
+    static func authenticatedRequest(site: URL, token: String, bytes: Int) -> URLRequest {
+        var request = URLRequest(url: site.appendingPathComponent("body-scan-upload"), cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 60)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue(String(bytes), forHTTPHeaderField: "Content-Length")
+        return request
+    }
+
+    @MainActor
+    private static func authenticatedUpload(_ jpeg: Data) async throws -> String {
+        let token = try await ClerkConvexAuthProvider.convexToken()
+        let request = authenticatedRequest(site: ConvexClientProvider.siteUrl, token: token, bytes: jpeg.count)
+        let (body, response) = try await URLSession(configuration: .ephemeral).upload(for: request, from: jpeg)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(UploadResponse.self, from: body).storageId
+    }
+
+    @MainActor
+    private static func uploadUrlUpload(_ jpeg: Data) async throws -> String {
         let uploadUrl: String = try await ConvexClientProvider.client.mutation("bodyScans:generateUploadUrl")
         guard let url = URL(string: uploadUrl) else { throw URLError(.badURL) }
         var request = URLRequest(url: url)

@@ -114,6 +114,7 @@ struct BodyScanValidationView: View {
             .onChange(of: measurementKey) { _, _ in
                 unit = BodyScanValidationVocabulary.units(for: measurement)[0]
                 protocolName = measurement.protocols[0]
+                if measurement.isPercent { operatorName = "clinician" }   // DXA is never self-reported
             }
             HStack {
                 TextField("Value", text: $valueText).keyboardType(.decimalPad)

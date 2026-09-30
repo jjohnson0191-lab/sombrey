@@ -26,4 +26,11 @@ crons.hourly(
   internal.bodyScans.cleanupAbandoned,
 );
 
+/** Body Scan: uploads never attached within an hour (app closed mid-save) are deleted. */
+crons.hourly(
+  "body scan orphan upload cleanup",
+  { minuteUTC: 47 },
+  internal.bodyScans.cleanupOrphanUploads,
+);
+
 export default crons;
