@@ -1,7 +1,8 @@
 // Sombrey commerce — Phase 6A: the App Store subscription domain (pure rules).
 //
 // The source of truth is VERIFIED Apple data — a StoreKit 2 signed transaction
-// or an App Store Server Notification, verified on the server (Phase 6B).
+// or an App Store Server Notification, verified on the server (Phase 6C:
+// convex/commerce/appStore.ts).
 // Nothing here can make a subscription active from a client-supplied flag:
 // `applyVerifiedUpdate` only accepts updates whose verification method is a
 // trusted server-side one, and the stored record is only written by internal
@@ -36,6 +37,11 @@ export type VerifiedSubscriptionUpdate = {
   /** When Apple signed the data — later signed data wins; stale data is ignored. */
   signedDate: number;
   revocationDate?: number;
+  /** Phase 6C: Apple's billing grace period end (access continues until then). */
+  gracePeriodExpiresDate?: number;
+  /** Phase 6C: the Sombrey appAccountToken Apple holds for this subscription
+   * (lower-case UUID) — the account binding, checked on every update. */
+  appAccountToken?: string;
   verification: { method: string; verifiedAt: number };
 };
 
@@ -51,25 +57,54 @@ export function validateVerifiedUpdate(u: VerifiedSubscriptionUpdate, expectedPr
   if (!ID.test(u.originalTransactionId) || !ID.test(u.latestTransactionId)) return "Invalid transaction id";
   for (const n of [u.purchaseDate, u.signedDate, u.verification.verifiedAt]) if (!Number.isFinite(n) || n <= 0) return "Invalid date";
   if (u.expiresDate !== null && (!Number.isFinite(u.expiresDate) || u.expiresDate < u.purchaseDate)) return "Invalid expiry";
+  if (u.gracePeriodExpiresDate !== undefined && (!Number.isFinite(u.gracePeriodExpiresDate) || u.gracePeriodExpiresDate <= 0)) return "Invalid grace period";
+  if (u.revocationDate !== undefined && (!Number.isFinite(u.revocationDate) || u.revocationDate <= 0)) return "Invalid revocation date";
+  if (u.appAccountToken !== undefined && !UUID.test(u.appAccountToken)) return "Invalid account token";
   return null;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The fields that make up a subscription's STATE (not when it was last seen). */
+const STATE_FIELDS = ["environment", "appStoreProductId", "latestTransactionId", "status", "autoRenewEnabled", "purchaseDate",
+  "expiresDate", "revocationDate", "gracePeriodExpiresDate", "appAccountToken"] as const;
+
+export function sameState(a: Omit<SubscriptionRecord, "lastVerifiedAt" | "verificationMethod" | "signedDate">, b: typeof a): boolean {
+  return STATE_FIELDS.every((k) => (a[k] ?? null) === (b[k] ?? null));
+}
+
 /** The record after a verified update: out-of-order (older signed) data never
- * overwrites newer; a different original transaction is a different record. */
+ * overwrites newer; a different original transaction is a different record.
+ * Phase 6C: the SAME state delivered again (app + notification, retries,
+ * restore, a second device) is not a change — `changed: false`, so no
+ * duplicate history — though a newer delivery refreshes `lastVerifiedAt`
+ * (`refreshed: true`). An account token, once bound, never changes. */
 export function applyVerifiedUpdate(existing: SubscriptionRecord | null, u: VerifiedSubscriptionUpdate):
-  { changed: boolean; record: SubscriptionRecord } {
+  { changed: boolean; refreshed?: boolean; record: SubscriptionRecord } {
   if (existing && existing.originalTransactionId !== u.originalTransactionId) throw new Error("Different subscription");
+  if (existing?.appAccountToken && u.appAccountToken && existing.appAccountToken !== u.appAccountToken) throw new Error("Different account");
   if (existing && u.signedDate < existing.signedDate) return { changed: false, record: existing };
   const { verification, ...rest } = u;
-  return { changed: true, record: { ...rest, lastVerifiedAt: verification.verifiedAt, verificationMethod: verification.method as VerificationMethod } };
+  const record: SubscriptionRecord = {
+    ...rest,
+    ...(existing?.appAccountToken && !u.appAccountToken ? { appAccountToken: existing.appAccountToken } : {}),
+    lastVerifiedAt: verification.verifiedAt, verificationMethod: verification.method as VerificationMethod,
+  };
+  if (existing && sameState(existing, record)) {
+    return { changed: false, refreshed: true, record: { ...existing, signedDate: record.signedDate, lastVerifiedAt: record.lastVerifiedAt } };
+  }
+  return { changed: true, record };
 }
 
 /** Does this record grant subscriber access right now? Production data only
- * (sandbox purchases never grant access in production); active or in Apple's
- * grace period, and not past its expiry. */
+ * (sandbox purchases never grant access unless the deployment explicitly
+ * allows it); active, or in Apple's billing grace period until the grace
+ * period ends; never past its expiry. */
 export function grantsAccess(r: SubscriptionRecord, now: number, allowSandbox = false): boolean {
   if (r.environment === "sandbox" && !allowSandbox) return false;
   if (r.status !== "active" && r.status !== "in_grace_period") return false;
-  if (r.expiresDate !== null && r.expiresDate <= now) return false;
+  if (r.revocationDate !== undefined) return false;
+  const until = r.status === "in_grace_period" ? (r.gracePeriodExpiresDate ?? r.expiresDate) : r.expiresDate;
+  if (until !== null && until <= now) return false;
   return true;
 }

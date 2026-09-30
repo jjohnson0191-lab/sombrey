@@ -1,9 +1,10 @@
 import Foundation
 import StoreKit
 import Observation
+import Combine
 import ConvexMobile
 
-// Sombrey Membership — Phase 6B: the StoreKit 2 adapter.
+// Sombrey Membership — Phase 6B/6C: the StoreKit 2 adapter.
 //
 //   loadProduct()            the configured auto-renewable product (Apple's price)
 //   purchase()               StoreKit purchase with the account's appAccountToken
@@ -11,20 +12,16 @@ import ConvexMobile
 //                            purchases made elsewhere, after relaunch
 //   refreshStatus()          current entitlement + subscription status
 //   restorePurchases()       AppStore.sync() then refresh
+//   refreshServerMembership() (6C) Sombrey membership as the SERVER sees it
 //
 // Every StoreKit result is converted to the value facts in MembershipModels.swift
 // and resolved there, so the rules are tested without StoreKit. The UI never
-// touches StoreKit. Nothing here writes to Convex: verified transactions are
-// handed to `MembershipServerHandoff` (held until the 6C server verification
-// exists). The only Convex call is the client commerce-event recorder, and
-// only once the commerce backend is deployed (`CommerceBackend.available`).
-
-/// Whether the Phase 6A commerce functions exist on the backend this build
-/// talks to. False until 6C deploys them — so the app never calls a missing
-/// function or fails because of one.
-enum CommerceBackend {
-    static let available = false
-}
+// touches StoreKit. Phase 6C: verified transactions go to the server
+// (`ConvexMembershipServer` → commerce/appStore:submitTransaction), which
+// verifies Apple's signature and asks Apple for the current status; the app
+// then READS its membership from the server (commerce/access:myEntitlements).
+// Nothing here writes subscription state or decides access. All Convex calls
+// are gated by `CommerceBackend.available` (MembershipModels.swift).
 
 /// Client-side commerce events (convex/commerce/events.ts: client events only —
 /// the app can never record an activation, renewal or purchase completion).
@@ -47,6 +44,10 @@ final class MembershipManager {
     private(set) var product: MembershipProductState = .idle
     private(set) var status: MembershipStatus = .loading
     private(set) var isPurchasing = false
+    /// 6C: Sombrey membership as the server sees it — the only one that counts.
+    private(set) var serverMembership: ServerMembershipState = .unknown
+    /// 6C: the last server verification problem, in calm words (nil = none).
+    private(set) var serverError: MembershipError?
 
     let productID: String?
     /// The signed-in Sombrey account's stable id (Clerk user id), or nil.
@@ -58,7 +59,7 @@ final class MembershipManager {
 
     init(productID: String? = MembershipProductConfig.configuredProductID,
          accountID: @escaping @MainActor () -> String?,
-         handoff: MembershipServerHandoff = AwaitingServerVerification()) {
+         handoff: MembershipServerHandoff = ConvexMembershipServer()) {
         self.productID = productID
         self.accountID = accountID
         self.handoff = handoff
@@ -83,6 +84,7 @@ final class MembershipManager {
         Task {
             await refreshStatus()
             await handOffCurrentEntitlement(trigger: .launch)
+            await refreshServerMembership()
         }
     }
 
@@ -120,6 +122,9 @@ final class MembershipManager {
         defer { isPurchasing = false }
         CommerceDiagnostics.log("purchase initiated")
         await MembershipEvents.record(.purchaseInitiated)
+        // So an App Store notification that beats the app's own report can be
+        // matched to this account (the server derives the token itself).
+        await ConvexMembershipServer.linkAccount()
         do {
             let result = try await storeProduct.purchase(options: [.appAccountToken(token)])
             let facts: MembershipPurchaseResultFacts
@@ -182,9 +187,24 @@ final class MembershipManager {
         }
         await refreshStatus()
         await handOffCurrentEntitlement(trigger: .restore)
+        await refreshServerMembership()
         let outcome = MembershipResolver.restoreOutcome(status)
         CommerceDiagnostics.log("restore completed: \(outcome)")
         return outcome
+    }
+
+    /// 6C: reads Sombrey membership from the server. A successful submission is
+    /// never taken as access — only this answer is.
+    func refreshServerMembership() async {
+        guard CommerceBackend.available, accountID() != nil else { serverMembership = .unknown; return }
+        if serverMembership == .unknown { serverMembership = .loading }
+        if let e = await ConvexMembershipServer.entitlements() {
+            let new = ServerMembershipState.from(subscriptionActive: e.subscriptionActive, sources: e.subscriptionSources)
+            if new != serverMembership { CommerceDiagnostics.log("server membership: \(new.isMember ? "member" : "not a member")") }
+            serverMembership = new
+        } else {
+            serverMembership = .unavailable
+        }
     }
 
     /// A future membership surface calls this when it shows the offer.
@@ -196,13 +216,19 @@ final class MembershipManager {
         switch verification {
         case .verified(let t):
             guard t.productID == productID else { return }
-            let first = ledger.firstDelivery(of: String(t.id))
-            if first {
+            var finish = true
+            if ledger.firstDelivery(of: String(t.id)) {
                 CommerceDiagnostics.log("verified transaction \(CommerceDiagnostics.redact(String(t.id))) trigger=\(trigger.rawValue) revoked=\(t.revocationDate != nil)")
-                await submitIfNew(t, jws: verification.jwsRepresentation, trigger: trigger)
+                let result = await submitIfNew(t, jws: verification.jwsRepresentation, trigger: trigger)
+                if !result.finishesTransaction {
+                    // Not verified yet: leave it unfinished so Apple re-delivers it.
+                    ledger.forget(String(t.id))
+                    finish = false
+                }
+                await refreshServerMembership()
             }
             // Finishing is idempotent; unfinished transactions are re-delivered by Apple.
-            await t.finish()
+            if finish { await t.finish() }
         case .unverified(let t, _):
             // Never grants anything; not finished, so Apple can re-deliver it.
             CommerceDiagnostics.error("unverified transaction \(CommerceDiagnostics.redact(String(t.id))) ignored")
@@ -217,12 +243,16 @@ final class MembershipManager {
         await submitIfNew(t, jws: v.jwsRepresentation, trigger: trigger)
     }
 
-    private func submitIfNew(_ t: Transaction, jws: String, trigger: MembershipTransactionHandoff.Trigger) async {
+    @discardableResult
+    private func submitIfNew(_ t: Transaction, jws: String, trigger: MembershipTransactionHandoff.Trigger) async -> MembershipServerResult {
         let f = Self.facts(t)
-        await handoff.submit(MembershipTransactionHandoff(
+        let result = await handoff.submit(MembershipTransactionHandoff(
             signedTransaction: jws, transactionID: f.transactionID, originalTransactionID: f.originalTransactionID,
             productID: f.productID, environment: f.environment, appAccountToken: f.appAccountToken, trigger: trigger, observedAt: Date()
         ))
+        serverError = result.userFacingError
+        CommerceDiagnostics.log("server verification: \(Self.describe(result)) trigger=\(trigger.rawValue)")
+        return result
     }
 
     // MARK: StoreKit → facts
@@ -300,6 +330,17 @@ final class MembershipManager {
         return .unknown(code: "other")
     }
 
+    private static func describe(_ r: MembershipServerResult) -> String {
+        switch r {
+        case .recorded: return "recorded"
+        case .unchanged: return "unchanged"
+        case .notConfigured: return "not configured"
+        case .rejected(let e): return "rejected \(e)"
+        case .retryLater: return "retry later"
+        case .notSent: return "not sent"
+        }
+    }
+
     private static func describe(_ s: MembershipStatus) -> String {
         switch s {
         case .active(let a): return "active grace=\(a.inGracePeriod) env=\(a.environment)"
@@ -307,5 +348,51 @@ final class MembershipManager {
         case .error(let e): return "error \(e)"
         default: return String(describing: s)
         }
+    }
+}
+
+// MARK: - Sombrey server (Phase 6C)
+
+/// The app's side of server verification. Sends ONLY Apple's signed
+/// transaction to commerce/appStore:submitTransaction (authenticated by the
+/// signed-in Clerk session); the server derives everything else itself.
+/// Errors are never shown raw: they become `MembershipServerResult`s.
+struct ConvexMembershipServer: MembershipServerHandoff {
+    private struct Reply: Decodable, Sendable { let result: String; let reason: String? }
+    struct Entitlements: Decodable, Sendable { let subscriptionActive: Bool; let subscriptionSources: [String] }
+
+    func submit(_ handoff: MembershipTransactionHandoff) async -> MembershipServerResult {
+        guard CommerceBackend.available, handoff.verifiableByServer else { return .notSent }
+        do {
+            let reply = try await Self.send(handoff.signedTransaction)
+            return .from(result: reply.result, reason: reply.reason)
+        } catch {
+            CommerceDiagnostics.error("server verification unavailable: \(String(describing: type(of: error)))")
+            return .retryLater
+        }
+    }
+
+    @MainActor private static func send(_ signedTransaction: String) async throws -> Reply {
+        try await ConvexClientProvider.client.action("commerce/appStore:submitTransaction", with: ["signedTransaction": signedTransaction])
+    }
+
+    /// The server's membership answer, or nil when it can't be read.
+    @MainActor static func entitlements() async -> Entitlements? {
+        guard CommerceBackend.available else { return nil }
+        do {
+            for try await e in ConvexClientProvider.client.subscribe(to: "commerce/access:myEntitlements", with: nil, yielding: Entitlements.self).values {
+                return e
+            }
+        } catch {
+            CommerceDiagnostics.error("server membership unavailable: \(String(describing: type(of: error)))")
+        }
+        return nil
+    }
+
+    /// Links this account's App Store token on the server before a purchase
+    /// (no arguments: the server computes the token from the session).
+    @MainActor static func linkAccount() async {
+        guard CommerceBackend.available else { return }
+        try? await ConvexClientProvider.client.mutation("commerce/access:linkAppStoreAccount")
     }
 }

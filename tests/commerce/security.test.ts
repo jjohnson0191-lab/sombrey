@@ -10,7 +10,10 @@ import { join } from "node:path";
 const CONVEX = join(import.meta.dirname, "../../convex");
 const read = (p: string) => readFileSync(join(CONVEX, p), "utf8");
 const exported = (src: string, kind: string) => [...src.matchAll(new RegExp(`export const (\\w+) = ${kind}\\(`, "g"))].map((m) => m[1]);
-const PROTECTED = ["commerceOrders", "commerceSubscriptions", "commerceSubscriptionHistory", "bandOwnership"];
+const PROTECTED = ["commerceOrders", "commerceSubscriptions", "commerceSubscriptionHistory", "bandOwnership", "commerceAppStoreNotifications", "commerceAppAccountTokens"];
+/** The only files allowed to write protected rows: the internal functions and
+ * (6C) the shared subscription writer they — and only they — call. */
+const TRUSTED_WRITERS = ["commerce/internal.ts", "commerce/subscriptionStore.ts"];
 
 function allConvexFiles(dir = CONVEX, rel = ""): string[] {
   return readdirSync(join(dir), { withFileTypes: true }).flatMap((d) => {
@@ -24,10 +27,15 @@ function allConvexFiles(dir = CONVEX, rel = ""): string[] {
 test("the only client-callable commerce functions are read-only queries and client events", () => {
   const access = read("commerce/access.ts");
   assert.deepEqual(exported(access, "query").sort(), ["myEntitlements", "myOrders", "mySubscription", "publicConfig"]);
-  assert.deepEqual(exported(access, "mutation"), ["recordEvent"]);
+  assert.deepEqual(exported(access, "mutation").sort(), ["linkAppStoreAccount", "recordEvent"]);
   assert.deepEqual(exported(access, "action"), []);
   assert.ok(!/\.patch\(|\.replace\(|\.delete\(/.test(access), "access.ts never edits a row");
-  assert.ok(!/insert\("(commerceOrders|commerceSubscriptions|commerceSubscriptionHistory|bandOwnership)"/.test(access));
+  assert.ok(!/insert\("(commerceOrders|commerceSubscriptions|commerceSubscriptionHistory|bandOwnership|commerceAppStoreNotifications|commerceAppAccountTokens)"/.test(access));
+  // 6C: linking takes NO client input — the token comes from the authenticated identity.
+  const link = access.slice(access.indexOf("export const linkAppStoreAccount"), access.indexOf("/** Client-side events only"));
+  assert.match(link, /args: \{\}/);
+  assert.match(link, /appAccountTokenFor\(identity\.subject\)/);
+  assert.ok(!/writeVerifiedSubscription|applyNotification/.test(access), "access.ts can't reach the subscription writer");
 });
 
 test("every state change is an internal function", () => {
@@ -35,19 +43,26 @@ test("every state change is an internal function", () => {
   assert.deepEqual(exported(internal, "mutation"), [], "no public mutation in internal.ts");
   assert.deepEqual(exported(internal, "query"), []);
   assert.deepEqual(exported(internal, "action"), []);
-  assert.deepEqual(exported(internal, "internalMutation").sort(), ["applyPaymentUpdate", "applyVerifiedSubscription", "createOrder", "setQuote", "updateFulfillment", "updateReturn"]);
+  assert.deepEqual(exported(internal, "internalMutation").sort(), [
+    "applyAppStoreNotification", "applyPaymentUpdate", "applyVerifiedSubscription", "createOrder", "reserveAppStoreSubmission", "setQuote", "updateFulfillment", "updateReturn",
+  ]);
 });
 
 test("nothing outside the trusted module writes orders, subscriptions or ownership", () => {
   for (const file of allConvexFiles()) {
-    if (file === "commerce/internal.ts") continue;
+    if (TRUSTED_WRITERS.includes(file)) continue;
     const src = read(file);
     for (const table of PROTECTED) {
       const writes = new RegExp(`insert\\("${table}"`).test(src);
       assert.ok(!writes, `${file} inserts into ${table}`);
     }
+    // 6C: the shared writer is reachable only through internal functions.
+    // (access.ts imports only the token link and the row mapper — checked above.)
+    if (/from "[^"]*subscriptionStore(\.ts)?"/.test(src)) assert.equal(file, "commerce/access.ts", `${file} imports the subscription writer`);
   }
-  // users.ts may only delete the user's ownership rows (account deletion) and anonymise events.
+  const store = read("commerce/subscriptionStore.ts");
+  assert.deepEqual([...store.matchAll(/export const (\w+) = (query|mutation|action|internal\w+)\(/g)], [], "the writer module registers no Convex functions");
+  // users.ts may only delete the user's ownership rows and token link (account deletion) and anonymise events.
   const users = read("users.ts");
   assert.ok(/bandOwnership"\)\.withIndex\("by_user"/.test(users));
   assert.ok(!/commerceOrders|commerceSubscriptions/.test(users.replace(/\/\/.*$/gm, "")), "financial records are retained on account deletion, never deleted there");
@@ -76,24 +91,35 @@ function swiftFiles(dir = IOS): string[] {
     d.isDirectory() ? swiftFiles(join(dir, d.name)) : d.name.endsWith(".swift") ? [join(dir, d.name)] : []);
 }
 
-test("6B: the app never calls backend-only commerce functions or claims a server event", () => {
+test("6B/6C: the app never calls backend-only commerce functions or claims a server event", () => {
   const all = swiftFiles().map((f) => [f, readFileSync(f, "utf8")] as const);
   for (const [f, src] of all) {
-    assert.ok(!/commerce\/internal|applyVerifiedSubscription|applyPaymentUpdate|updateFulfillment|createOrder|setQuote/.test(src), `${f} references a backend-only commerce function`);
+    assert.ok(!/commerce\/internal|applyVerifiedSubscription|applyAppStoreNotification|reserveAppStoreSubmission|processNotification|applyPaymentUpdate|updateFulfillment|createOrder|setQuote/.test(src), `${f} references a backend-only commerce function`);
     for (const serverEvent of ["subscription_activated", "subscription_renewed", "subscription_cancelled", "subscription_expired", "band_checkout_completed", "band_order_completed", "band_returned"]) {
       assert.ok(!src.includes(`"${serverEvent}"`), `${f} names the server-only event ${serverEvent}`);
     }
   }
   const convexCalls = all.flatMap(([, src]) => [...src.matchAll(/"commerce\/[a-zA-Z]+:[a-zA-Z]+"/g)].map((m) => m[0]));
-  assert.deepEqual([...new Set(convexCalls)], ['"commerce/access:recordEvent"'], "the only commerce call is the client event recorder");
+  assert.deepEqual([...new Set(convexCalls)].sort(), [
+    '"commerce/access:linkAppStoreAccount"', '"commerce/access:myEntitlements"', '"commerce/access:recordEvent"', '"commerce/appStore:submitTransaction"',
+  ], "6C: client events, the argument-free account link, the server's membership answer, and Apple-signed transactions — nothing else");
 });
 
-test("6B: an unverified transaction can't produce access, and nothing is sent until 6C", () => {
+test("6B/6C: an unverified transaction can't produce access; only Apple's signed transaction is sent; access is read from the server", () => {
   const models = readFileSync(join(IOS, "Commerce/MembershipModels.swift"), "utf8");
   const manager = readFileSync(join(IOS, "Commerce/MembershipManager.swift"), "utf8");
   assert.ok(/guard let t = best\.transaction\.verifiedValue else \{ return \.unverified \}/.test(models));
   assert.ok(/case \.success\(\.unverified\): return \.failed\(\.unverified\)/.test(models));
   assert.ok(/case \.unverified\(let t, _\):[\s\S]{0,200}ignored/.test(manager), "unverified updates are ignored (and not finished)");
-  assert.ok(/static let available = false/.test(manager), "commerce backend calls stay off until 6C deploys it");
+  // Backend calls stay off until a real product id is configured (never for local StoreKit testing).
+  assert.match(models, /static func enabled\(productID: String\?\) -> Bool \{\s*guard let productID else \{ return false \}\s*return productID != MembershipProductConfig\.storeKitTestingProductID/);
+  assert.match(manager, /guard CommerceBackend\.available, handoff\.verifiableByServer else \{ return \.notSent \}/);
+  // The submission carries ONLY the signed transaction — no product, price, expiry, status or account id.
+  const submit = manager.match(/action\("commerce\/appStore:submitTransaction", with: (\[[^\]]*\])\)/)?.[1];
+  assert.equal(submit, '["signedTransaction": signedTransaction]');
+  // A submission result is never access: membership comes only from the server's entitlement read.
+  assert.ok(!/serverMembership = \.member/.test(manager), "the app never sets itself a member");
+  assert.match(manager, /serverMembership = new/);
+  assert.match(models, /case "rejected": return \.rejected/);
   assert.ok(!/\bprint\(|jwsRepresentation\)"|signedTransaction\)"/.test(manager + models), "no raw payload logging");
 });

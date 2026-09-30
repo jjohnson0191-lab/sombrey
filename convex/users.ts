@@ -1149,6 +1149,9 @@ export const deleteSelfAccount = mutation({
     // storeOrders (see above). Band ownership state is deleted; commerce
     // events keep only their counts (the account link is removed).
     await purgeDocs(ctx, await ctx.db.query("bandOwnership").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+    // Phase 6C: the App Store account-token link is removed (the subscription
+    // record, a financial record, keeps its own copy).
+    await purgeDocs(ctx, await ctx.db.query("commerceAppAccountTokens").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     for (const e of await ctx.db.query("commerceEvents").withIndex("by_user_and_at", (q) => q.eq("userId", userId)).collect()) {
       await ctx.db.patch(e._id, { userId: undefined });
     }

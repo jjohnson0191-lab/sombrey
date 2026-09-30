@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import {
-  commerceEventName, fulfillmentStatus, orderLine, ownershipStatus, paymentStatus, returnStatus,
+  commerceEventName, fulfillmentStatus, orderLine, ownershipStatus, paymentStatus, returnStatus, subscriptionHistoryEvent,
   shipment, shippingAddress, subscriptionStatus,
 } from "./commerce/validators";
 import { v } from "convex/values";
@@ -632,7 +632,8 @@ export default defineSchema({
 
   // One row per App Store subscription (original transaction), written ONLY
   // from verified Apple data (StoreKit 2 server verification / App Store
-  // Server Notifications — Phase 6B). Never from a client flag.
+  // Server Notifications — Phase 6C, convex/commerce/subscriptionStore.ts).
+  // Never from a client flag. No signed payloads, prices or payment data.
   commerceSubscriptions: defineTable({
     userId: v.id("users"),
     provider: v.literal("app_store"),
@@ -646,6 +647,8 @@ export default defineSchema({
     purchaseDate: v.number(),
     expiresDate: v.union(v.number(), v.null()),
     revocationDate: v.optional(v.number()),
+    gracePeriodExpiresDate: v.optional(v.number()),   // 6C: Apple billing grace period end
+    appAccountToken: v.optional(v.string()),           // 6C: the account binding Apple signed
     signedDate: v.number(),
     lastVerifiedAt: v.number(),
     verificationMethod: v.string(),
@@ -664,8 +667,51 @@ export default defineSchema({
     signedDate: v.number(),
     verificationMethod: v.string(),
     recordedAt: v.number(),
+    // Phase 6C: what happened (Apple's notification type, or "verified_with_apple"
+    // for an app submission) and where it came from.
+    event: v.optional(subscriptionHistoryEvent),
+    source: v.optional(v.union(v.literal("app_submission"), v.literal("server_notification"))),
+    appStoreProductId: v.optional(v.string()),
+    autoRenewEnabled: v.optional(v.boolean()),
+    revocationDate: v.optional(v.number()),
+    gracePeriodExpiresDate: v.optional(v.number()),
+    notificationUUID: v.optional(v.string()),
+    notificationType: v.optional(v.string()),
+    notificationSubtype: v.optional(v.string()),
   }).index("by_subscription", ["subscriptionId"])
     .index("by_user", ["userId"]),
+
+  // Phase 6C: which Sombrey account an App Store appAccountToken belongs to.
+  // The token is derived ON THE SERVER from the authenticated Clerk user
+  // (commerce/accountToken.ts) — so a verified App Store Server Notification
+  // can be matched to its account. One row per account; deleted with it.
+  commerceAppAccountTokens: defineTable({
+    userId: v.id("users"),
+    appAccountToken: v.string(),
+    createdAt: v.number(),
+    // Submissions to Apple in the current hour (commerce/appStore.ts throttle).
+    submissionWindowStart: v.optional(v.number()),
+    submissionCount: v.optional(v.number()),
+  }).index("by_token", ["appAccountToken"])
+    .index("by_user", ["userId"]),
+
+  // Phase 6C: every VERIFIED App Store Server Notification, once, by Apple's
+  // notificationUUID — duplicate deliveries are recognised and change nothing.
+  // Identity and outcome only; the signed payload is not stored.
+  commerceAppStoreNotifications: defineTable({
+    notificationUUID: v.string(),
+    notificationType: v.string(),
+    subtype: v.optional(v.string()),
+    environment: v.union(v.literal("production"), v.literal("sandbox")),
+    signedDate: v.number(),
+    receivedAt: v.number(),
+    outcome: v.union(v.literal("applied"), v.literal("unchanged"), v.literal("stale"), v.literal("ignored"), v.literal("unmatched"), v.literal("rejected")),
+    reason: v.optional(v.string()),
+    originalTransactionId: v.optional(v.string()),
+    userId: v.optional(v.id("users")),
+    subscriptionId: v.optional(v.id("commerceSubscriptions")),
+  }).index("by_uuid", ["notificationUUID"])
+    .index("by_original_transaction", ["originalTransactionId"]),
 
   // A Band's journey from purchase to activation/connection (or return).
   // Separate from orders (paid ≠ connected) and from wearableDevices (the

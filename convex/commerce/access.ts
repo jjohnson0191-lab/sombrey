@@ -6,6 +6,12 @@
 //   mySubscription → the user's own subscription state (no transaction ids)
 //   recordEvent    → a client-side commerce event (closed list, validated,
 //                    rate-limited; money events are server-only)
+//   linkAppStoreAccount → (6C, no arguments) records the caller's App Store
+//                    appAccountToken, DERIVED HERE from the authenticated
+//                    identity, so Apple's notifications can find the account
+//
+// Phase 6C: the App Store submission action lives in commerce/appStore.ts
+// (it verifies Apple's signature and asks Apple for the current status).
 //
 // There is deliberately NO client mutation that creates, pays, ships,
 // delivers, returns, assigns or prices an order, touches a subscription or
@@ -21,7 +27,9 @@ import { COMMERCE_CONFIG, publicCommerceConfig } from "./config";
 import { computeEntitlements } from "./entitlements";
 import { validateEvent } from "./events";
 import { EVENTS_PER_HOUR } from "./events";
-import { toSubscriptionRecord } from "./records";
+import { linkAccountToken, toSubscriptionRecord } from "./subscriptionStore";
+import { appAccountTokenFor } from "./accountToken";
+import { sandboxGrantsAccess } from "./appStoreConfig";
 
 async function currentUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users"> | null> {
   const identity = await ctx.auth.getUserIdentity();
@@ -54,7 +62,7 @@ export const myEntitlements = query({
       subscriptions: subscriptions.map(toSubscriptionRecord),
       legacyPremium: hasPremiumAccess(user),
       pairedDevices: paired.length,
-    }, COMMERCE_CONFIG, Date.now());
+    }, COMMERCE_CONFIG, Date.now(), { allowSandbox: sandboxGrantsAccess(process.env) });
   },
 });
 
@@ -83,8 +91,26 @@ export const mySubscription = query({
     const subs = await ctx.db.query("commerceSubscriptions").withIndex("by_user", (q) => q.eq("userId", user._id)).collect();
     return subs.map((s) => ({
       productId: s.productId, environment: s.environment, status: s.status, autoRenewEnabled: s.autoRenewEnabled,
-      purchaseDate: s.purchaseDate, expiresDate: s.expiresDate, lastVerifiedAt: s.lastVerifiedAt,
+      purchaseDate: s.purchaseDate, expiresDate: s.expiresDate, gracePeriodExpiresDate: s.gracePeriodExpiresDate ?? null,
+      revoked: s.revocationDate !== undefined, lastVerifiedAt: s.lastVerifiedAt,
     }));
+  },
+});
+
+/** Phase 6C: link the caller's App Store appAccountToken to their account.
+ * Takes NO arguments — the token is computed from the authenticated identity's
+ * Clerk user id (the same algorithm as the app), so no one can link a token to
+ * another account. Called before a purchase so an early App Store notification
+ * can be matched; idempotent. */
+export const linkAppStoreAccount = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const user = await requireUser(ctx);
+    const token = identity ? await appAccountTokenFor(identity.subject) : null;
+    if (!token) throw new ConvexError({ code: "UNAUTHENTICATED", message: "Not logged in" });
+    await linkAccountToken(ctx.db, user._id, token, Date.now());
+    return { linked: true as const };
   },
 });
 

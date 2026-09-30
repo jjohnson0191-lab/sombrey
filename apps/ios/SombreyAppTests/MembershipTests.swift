@@ -2,9 +2,10 @@ import Testing
 import Foundation
 @testable import SombreyApp
 
-/// Sombrey Membership (StoreKit 2, Phase 6B): the StoreKit-independent rules —
+/// Sombrey Membership (StoreKit 2, Phase 6B/6C): the StoreKit-independent rules —
 /// product loading, purchase outcomes, entitlement resolution, restore,
-/// repeated deliveries, account association and errors. All inputs are
+/// repeated deliveries, account association, errors, and (6C) the server
+/// verification results and server-side membership. All inputs are
 /// SYNTHETIC facts (no StoreKit objects, no real transactions); StoreKit itself
 /// is exercised locally with the StoreKit testing file (docs/COMMERCE_6B.md).
 struct MembershipTests {
@@ -157,13 +158,68 @@ struct MembershipTests {
 
     @Test func errorsAreStructuredAndNeverRawStoreKitText() {
         let all: [MembershipError] = [.notConfigured, .productUnavailable, .wrongProductType, .storeUnavailable, .notSignedIn, .userCancelled, .pending,
-                                      .unverified, .revoked, .expired, .purchaseNotAllowed, .unknown(code: "storekit_other")]
+                                      .unverified, .revoked, .expired, .purchaseNotAllowed, .otherAccount, .serverUnavailable, .unknown(code: "storekit_other")]
         for e in all {
             #expect(!e.userMessage.isEmpty)
             #expect(!e.userMessage.contains("StoreKit") && !e.userMessage.contains("Error"), "\(e)")
         }
         #expect(MembershipError.userCancelled.userMessage.contains("haven't been charged"))
         #expect(MembershipError.unverified.userMessage.contains("haven't been given access"))
+    }
+
+    // MARK: Server verification (6C)
+
+    @Test func serverResultsMapFromTheServersCoarseAnswer() {
+        #expect(MembershipServerResult.from(result: "recorded", reason: nil) == .recorded)
+        #expect(MembershipServerResult.from(result: "unchanged", reason: nil) == .unchanged)
+        #expect(MembershipServerResult.from(result: "not_configured", reason: nil) == .notConfigured)
+        #expect(MembershipServerResult.from(result: "retry_later", reason: nil) == .retryLater)
+        #expect(MembershipServerResult.from(result: "rejected", reason: "other_account") == .rejected(.otherAccount))
+        #expect(MembershipServerResult.from(result: "rejected", reason: "not_verifiable") == .rejected(.unverified))
+        #expect(MembershipServerResult.from(result: "something_new", reason: nil) == .retryLater, "an unknown answer is never success")
+    }
+
+    @Test func onlyAnUnverifiedYetResultLeavesTheTransactionUnfinished() {
+        #expect(!MembershipServerResult.retryLater.finishesTransaction, "Apple re-delivers it — a free retry")
+        for r: MembershipServerResult in [.recorded, .unchanged, .notConfigured, .notSent, .rejected(.otherAccount), .rejected(.unverified)] {
+            #expect(r.finishesTransaction, "\(r)")
+        }
+        #expect(MembershipServerResult.rejected(.otherAccount).userFacingError == .otherAccount)
+        #expect(MembershipServerResult.retryLater.userFacingError == .serverUnavailable)
+        #expect(MembershipServerResult.recorded.userFacingError == nil)
+        #expect(MembershipError.otherAccount.userMessage.contains("different Sombrey account"))
+    }
+
+    @Test func aSuccessfulSubmissionIsNotMembershipOnlyTheServersAnswerIs() {
+        // Membership comes from the server's entitlement read, never from a submission result.
+        #expect(!ServerMembershipState.unknown.isMember)
+        #expect(!ServerMembershipState.loading.isMember)
+        #expect(!ServerMembershipState.unavailable.isMember, "can't read it → not a member")
+        #expect(ServerMembershipState.from(subscriptionActive: false, sources: []) == .notMember)
+        let m = ServerMembershipState.from(subscriptionActive: true, sources: ["app_store"])
+        #expect(m.isMember && m.hasVerifiedAppStoreSubscription)
+        let legacy = ServerMembershipState.from(subscriptionActive: true, sources: ["legacy_premium"])
+        #expect(legacy.isMember && !legacy.hasVerifiedAppStoreSubscription)
+    }
+
+    @Test func theBackendIsOnlyCalledWithARealProductId() {
+        #expect(!CommerceBackend.enabled(productID: nil), "not configured → no commerce calls")
+        #expect(!CommerceBackend.enabled(productID: MembershipProductConfig.storeKitTestingProductID), "local StoreKit testing never reaches the backend")
+        #expect(CommerceBackend.enabled(productID: "com.example.membership"))
+        #expect(!CommerceBackend.available, "no product id is configured in this build")
+    }
+
+    @Test func localTestingTransactionsAreNotSentAndUnverifiedYetOnesAreRetried() {
+        func handoff(_ env: String) -> MembershipTransactionHandoff {
+            MembershipTransactionHandoff(signedTransaction: "x.y.z", transactionID: "1", originalTransactionID: "1", productID: Self.pid,
+                                         environment: env, appAccountToken: nil, trigger: .purchase, observedAt: Self.now)
+        }
+        #expect(!handoff("xcode").verifiableByServer && !handoff("unknown").verifiableByServer)
+        #expect(handoff("sandbox").verifiableByServer && handoff("production").verifiableByServer)
+        var ledger = MembershipTransactionLedger()
+        #expect(ledger.firstDelivery(of: "2000000000000009"))
+        ledger.forget("2000000000000009")
+        #expect(ledger.firstDelivery(of: "2000000000000009"), "after retry-later the next delivery is handled again")
     }
 
     @Test func diagnosticsRedactTransactionIds() {

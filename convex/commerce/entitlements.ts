@@ -38,7 +38,8 @@ export type Entitlements = {
   capabilities: Capability[];
 };
 
-export function computeEntitlements(input: EntitlementInput, config: CommerceConfig, now: number): Entitlements {
+export function computeEntitlements(input: EntitlementInput, config: CommerceConfig, now: number,
+  opts: { allowSandbox?: boolean } = {}): Entitlements {
   const bandSources: string[] = [];
   if (ownsBand(input.ownership.filter((r) => r.source === "order"), { countLegacyPairing: false })) bandSources.push("order");
   if (ownsBand(input.ownership.filter((r) => r.source === "staff_grant"), { countLegacyPairing: false })) bandSources.push("staff_grant");
@@ -46,7 +47,7 @@ export function computeEntitlements(input: EntitlementInput, config: CommerceCon
     bandSources.push("legacy_pairing");
   }
   const subscriptionSources: string[] = [];
-  if (input.subscriptions.some((s) => grantsAccess(s, now))) subscriptionSources.push("app_store");
+  if (input.subscriptions.some((s) => grantsAccess(s, now, opts.allowSandbox ?? false))) subscriptionSources.push("app_store");
   if (config.legacyAccessGrantsSubscriberCapabilities && input.legacyPremium) subscriptionSources.push("legacy_premium");
 
   const band = bandSources.length > 0, sub = subscriptionSources.length > 0;

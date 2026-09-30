@@ -4,6 +4,7 @@
  *
  * Routes:
  *   POST /mailgun-inbound  — Mailgun inbound email webhook
+ *   POST /apple/app-store-notifications — App Store Server Notifications V2 (Phase 6C)
  */
 
 import { httpRouter } from "convex/server";
@@ -111,4 +112,39 @@ http.route({
 });
 
 // REQUIRED: must be the default export
+/**
+ * App Store Server Notifications V2 (Sombrey commerce, Phase 6C).
+ *
+ * Apple POSTs {"signedPayload": "<JWS>"}. Nothing in the request is trusted
+ * until commerce/appStore:processNotification has verified Apple's signature
+ * (x5c chain to Apple Root CA - G3, bundle id, environment, app Apple ID);
+ * it then records the notification once by notificationUUID and applies it
+ * through the backend-only subscription mutation. Anyone can reach this URL,
+ * but only data signed by Apple for com.sombrey.app can change anything.
+ *
+ * App Store Connect → App → App Information → App Store Server Notifications:
+ *   Version 2, URL <convex-site-url>/apple/app-store-notifications
+ * (docs/COMMERCE_6C.md §9 — not configured yet).
+ */
+const MAX_NOTIFICATION_BYTES = 64 * 1024;
+http.route({
+  path: "/apple/app-store-notifications",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const declared = Number(request.headers.get("content-length") ?? "0");
+    if (declared > MAX_NOTIFICATION_BYTES) return new Response("Payload too large", { status: 413 });
+    const text = await request.text();
+    if (text.length > MAX_NOTIFICATION_BYTES) return new Response("Payload too large", { status: 413 });
+    let signedPayload: unknown;
+    try {
+      signedPayload = (JSON.parse(text) as { signedPayload?: unknown })?.signedPayload;
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
+    if (typeof signedPayload !== "string" || !signedPayload) return new Response("Bad request", { status: 400 });
+    const r = await ctx.runAction(internal.commerce.appStore.processNotification, { signedPayload });
+    return new Response(r.httpStatus === 200 ? "OK" : r.httpStatus === 503 ? "Try again later" : "Bad request", { status: r.httpStatus });
+  }),
+});
+
 export default http;

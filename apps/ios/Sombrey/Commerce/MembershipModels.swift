@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 import os
 
-// Sombrey Membership — Phase 6B: the StoreKit-independent core.
+// Sombrey Membership — Phase 6B/6C: the StoreKit-independent core.
 //
 // Everything here is plain value logic: the product configuration, the
 // membership status model, how StoreKit observations resolve into that
@@ -15,7 +15,9 @@ import os
 //   • an UNVERIFIED transaction never produces an active membership;
 //   • this is the phone's LOCAL reading of Apple's entitlement. The Sombrey
 //     entitlement (convex/commerce, myEntitlements) is only granted from
-//     server-verified Apple data (Phase 6C) — nothing here writes to Convex.
+//     server-verified Apple data (Phase 6C): the app sends Apple's signed
+//     transaction, the server verifies it with Apple, and the app then READS
+//     the result (`ServerMembershipState`) — it never writes or claims access.
 //
 // Plain logic (Foundation + CryptoKit) — tested in SombreyAppTests/MembershipTests.swift.
 
@@ -43,6 +45,20 @@ enum MembershipProductConfig {
     static var configuredProductID: String? {
         productID(from: Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)
     }
+}
+
+/// Whether this build talks to Sombrey's commerce backend (client events,
+/// App Store verification, server membership). Phase 6C: on only when the
+/// build carries a REAL App Store product id — which is set only after the
+/// 6C backend is deployed to the Convex deployment this app uses
+/// (docs/COMMERCE_6C.md §10). Off when not configured (every build today) and
+/// for local StoreKit testing, so the app never calls a function that isn't there.
+enum CommerceBackend {
+    static func enabled(productID: String?) -> Bool {
+        guard let productID else { return false }
+        return productID != MembershipProductConfig.storeKitTestingProductID
+    }
+    static var available: Bool { enabled(productID: MembershipProductConfig.configuredProductID) }
 }
 
 // MARK: - StoreKit-independent facts
@@ -119,6 +135,8 @@ enum MembershipError: Error, Equatable, Sendable {
     case revoked
     case expired
     case purchaseNotAllowed     // parental controls / device restrictions
+    case otherAccount           // 6C: the App Store purchase belongs to a different Sombrey account
+    case serverUnavailable      // 6C: Sombrey couldn't confirm the purchase with Apple yet
     case unknown(code: String)  // anything else — never shown raw
 
     /// Calm, plain words a future Sombrey surface can show (never a raw StoreKit error).
@@ -133,6 +151,8 @@ enum MembershipError: Error, Equatable, Sendable {
         case .revoked: return "This membership was refunded or revoked by Apple."
         case .expired: return "Your membership has ended."
         case .purchaseNotAllowed: return "Purchases aren't allowed on this device."
+        case .otherAccount: return "This App Store membership belongs to a different Sombrey account. Sign in with that account to use it."
+        case .serverUnavailable: return "We couldn't confirm your membership just now. It will update automatically."
         case .unknown: return "Something went wrong with the App Store. Try again."
         }
     }
@@ -286,6 +306,9 @@ struct MembershipTransactionLedger: Sendable {
         seen.insert(transactionID)
         return true
     }
+
+    /// 6C: the server couldn't verify it yet — handle its next delivery again.
+    mutating func forget(_ transactionID: String) { seen.remove(transactionID) }
 }
 
 // MARK: - Account association
@@ -314,12 +337,12 @@ enum MembershipAccountToken {
     }
 }
 
-// MARK: - Server handoff (Phase 6C)
+// MARK: - Server verification (Phase 6C)
 
-/// What the server needs to verify a transaction itself: Apple's signed JWS
-/// (verified server-side against Apple's certificate chain in 6C) plus a few
-/// unsigned hints for routing. The phone's own verification is never trusted
-/// by the server.
+/// A transaction for the server to verify ITSELF. Only `signedTransaction`
+/// (Apple's JWS) is sent: the server reads every fact — product, dates,
+/// environment, account token — from Apple's signed data and from Apple's
+/// server, never from these local fields (kept for diagnostics and routing).
 struct MembershipTransactionHandoff: Equatable, Sendable {
     enum Trigger: String, Sendable { case purchase, update, restore, launch }
     let signedTransaction: String       // JWS — never logged
@@ -330,22 +353,73 @@ struct MembershipTransactionHandoff: Equatable, Sendable {
     let appAccountToken: UUID?
     let trigger: Trigger
     let observedAt: Date
+
+    /// Local StoreKit testing (Xcode) data isn't signed by Apple; no server can verify it.
+    var verifiableByServer: Bool { environment == "production" || environment == "sandbox" }
 }
 
-/// The seam Phase 6C fills with a real Convex action that verifies and stores
-/// the transaction. Nothing may write subscription state from the client.
-protocol MembershipServerHandoff: Sendable {
-    func submit(_ handoff: MembershipTransactionHandoff) async
-}
+/// What Sombrey's server said about a submitted transaction. `recorded` and
+/// `unchanged` mean Apple confirmed the subscription and Sombrey stored
+/// APPLE's state — they are NOT access: access is read separately from the
+/// server (`ServerMembershipState`).
+enum MembershipServerResult: Equatable, Sendable {
+    case recorded
+    case unchanged
+    case notConfigured                 // the server can't verify App Store purchases yet
+    case rejected(MembershipError)     // .otherAccount, or .unverified (Apple didn't confirm it)
+    case retryLater                    // Apple or Sombrey unreachable — Apple re-delivers, launch resubmits
+    case notSent                       // this build doesn't talk to the commerce backend / local testing data
 
-/// Phase 6B: no server verification exists yet, so verified transactions are
-/// held (latest per original transaction, in memory) and nothing is sent.
-actor AwaitingServerVerification: MembershipServerHandoff {
-    private(set) var pending: [String: MembershipTransactionHandoff] = [:]
-    func submit(_ handoff: MembershipTransactionHandoff) async {
-        pending[handoff.originalTransactionID] = handoff
-        CommerceDiagnostics.log("handoff held for server verification (6C): trigger=\(handoff.trigger.rawValue) env=\(handoff.environment)")
+    /// The server's coarse answer (commerce/appStore:submitTransaction) → a result.
+    static func from(result: String, reason: String?) -> MembershipServerResult {
+        switch result {
+        case "recorded": return .recorded
+        case "unchanged": return .unchanged
+        case "not_configured": return .notConfigured
+        case "retry_later": return .retryLater
+        case "rejected": return .rejected(reason == "other_account" ? .otherAccount : .unverified)
+        default: return .retryLater
+        }
     }
+
+    /// Finish the StoreKit transaction unless it should be tried again: an
+    /// unfinished transaction is re-delivered by Apple (a free retry).
+    var finishesTransaction: Bool { self != .retryLater }
+
+    /// The error a membership surface may show (calm words; nil = nothing to say).
+    var userFacingError: MembershipError? {
+        switch self {
+        case .rejected(let e): return e
+        case .retryLater: return .serverUnavailable
+        case .recorded, .unchanged, .notConfigured, .notSent: return nil
+        }
+    }
+}
+
+/// Sends a transaction to the server for verification (Phase 6C: a Convex
+/// action). Nothing may write subscription state from the client.
+protocol MembershipServerHandoff: Sendable {
+    func submit(_ handoff: MembershipTransactionHandoff) async -> MembershipServerResult
+}
+
+/// Sombrey membership AS THE SERVER SEES IT (commerce/access:myEntitlements) —
+/// the only membership that grants anything. Apple-verified subscriptions
+/// appear as the "app_store" source.
+enum ServerMembershipState: Equatable, Sendable {
+    case unknown                        // not asked (backend off in this build, signed out)
+    case loading
+    case member(sources: [String])
+    case notMember
+    case unavailable                    // couldn't be read — never treated as membership
+
+    static func from(subscriptionActive: Bool, sources: [String]) -> ServerMembershipState {
+        subscriptionActive ? .member(sources: sources) : .notMember
+    }
+
+    /// True only when the server says so.
+    var isMember: Bool { if case .member = self { return true } else { return false } }
+    /// True when the membership comes from a server-verified App Store subscription.
+    var hasVerifiedAppStoreSubscription: Bool { if case .member(let s) = self { return s.contains("app_store") } else { return false } }
 }
 
 // MARK: - Diagnostics

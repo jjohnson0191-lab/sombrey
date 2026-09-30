@@ -54,3 +54,11 @@ export const commerceEventName = v.union(
   v.literal("band_returned"), v.literal("subscription_activated"), v.literal("subscription_renewed"),
   v.literal("subscription_cancelled"), v.literal("subscription_expired"),
 );
+// Phase 6C: what a subscription history row records (appStoreRules.ts HISTORY_EVENTS).
+export const subscriptionHistoryEvent = v.union(
+  v.literal("purchased"), v.literal("resubscribed"), v.literal("renewed"), v.literal("billing_recovered"),
+  v.literal("auto_renew_enabled"), v.literal("auto_renew_disabled"), v.literal("renewal_preference_changed"),
+  v.literal("billing_retry"), v.literal("grace_period"), v.literal("grace_period_expired"), v.literal("expired"),
+  v.literal("refunded"), v.literal("refund_reversed"), v.literal("revoked"), v.literal("renewal_extended"),
+  v.literal("offer_redeemed"), v.literal("verified_with_apple"),
+);

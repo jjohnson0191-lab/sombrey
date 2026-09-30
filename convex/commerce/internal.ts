@@ -1,9 +1,10 @@
 // Sombrey commerce (Phase 6A) — TRUSTED state changes. Internal functions only:
 // callable by other backend code (a verified payment-provider webhook, the
 // App Store server-notification handler, an owner tool) — never by a client.
-// Nothing calls them yet: the payment provider (6C/6E), StoreKit 2 (6B) and
-// activation (6G) will. Each one enforces the domain's transition rules, so
-// even trusted code can't mark an unpaid order delivered or re-price an order.
+// Phase 6C calls the subscription ones from commerce/appStore.ts after Apple's
+// signatures are verified; the payment provider (6E) and activation (6G) will
+// call the rest. Each one enforces the domain's transition rules, so even
+// trusted code can't mark an unpaid order delivered or re-price an order.
 
 import { ConvexError, v } from "convex/values";
 import { internalMutation } from "../_generated/server";
@@ -12,10 +13,9 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { COMMERCE_CONFIG } from "./config";
 import { FULFILLMENT_TRANSITIONS, PAYMENT_TRANSITIONS, RETURN_TRANSITIONS, buildOrderDraft, canTransition, formatOrderNumber, orderTotal, returnEligibility } from "./orders";
 import { transitionOwnership, type OwnershipStatus } from "./ownership";
-import { applyVerifiedUpdate, validateVerifiedUpdate } from "./subscriptionState";
 import { validateEvent, type CommerceEventName } from "./events";
-import { toSubscriptionRecord } from "./records";
-import { fulfillmentStatus, paymentStatus, returnStatus, shipment, shippingAddress, subscriptionStatus } from "./validators";
+import { applyNotification, linkAccountToken, writeVerifiedSubscription, type StoreConfig } from "./subscriptionStore";
+import { fulfillmentStatus, paymentStatus, returnStatus, shipment, shippingAddress, subscriptionHistoryEvent as historyEvent, subscriptionStatus } from "./validators";
 
 async function serverEvent(ctx: MutationCtx, name: CommerceEventName, userId: Id<"users">, extra: { productId?: string; countryCode?: string; amountCents?: number; currency?: string; orderId?: Id<"commerceOrders"> } = {}) {
   const { orderId, ...rest } = extra;
@@ -146,55 +146,65 @@ export const updateReturn = internalMutation({
   },
 });
 
-/** A VERIFIED App Store subscription update (Phase 6B: from the server-side
- * StoreKit 2 verification or an App Store Server Notification). */
+const verifiedUpdate = v.object({
+  provider: v.literal("app_store"),
+  environment: v.union(v.literal("production"), v.literal("sandbox")),
+  appStoreProductId: v.string(),
+  originalTransactionId: v.string(),
+  latestTransactionId: v.string(),
+  status: subscriptionStatus,
+  autoRenewEnabled: v.boolean(),
+  purchaseDate: v.number(),
+  expiresDate: v.union(v.number(), v.null()),
+  signedDate: v.number(),
+  revocationDate: v.optional(v.number()),
+  gracePeriodExpiresDate: v.optional(v.number()),
+  appAccountToken: v.optional(v.string()),
+  verification: v.object({ method: v.string(), verifiedAt: v.number() }),
+});
+
+function storeConfig(): StoreConfig {
+  const m = COMMERCE_CONFIG.products.membership;
+  return { membershipProductId: m.id, appStoreProductIds: m.appStoreProductId ? [m.appStoreProductId] : [], configVersion: COMMERCE_CONFIG.version };
+}
+
+/** A VERIFIED App Store subscription update — Phase 6C: from an app submission
+ * that commerce/appStore.ts verified with Apple (signature, bundle, product,
+ * environment, account token, and current status from the App Store Server API). */
 export const applyVerifiedSubscription = internalMutation({
   args: {
     userId: v.id("users"),
-    update: v.object({
-      provider: v.literal("app_store"),
-      environment: v.union(v.literal("production"), v.literal("sandbox")),
-      appStoreProductId: v.string(),
-      originalTransactionId: v.string(),
-      latestTransactionId: v.string(),
-      status: subscriptionStatus,
-      autoRenewEnabled: v.boolean(),
-      purchaseDate: v.number(),
-      expiresDate: v.union(v.number(), v.null()),
-      signedDate: v.number(),
-      revocationDate: v.optional(v.number()),
-      verification: v.object({ method: v.string(), verifiedAt: v.number() }),
-    }),
+    update: verifiedUpdate,
+    event: v.optional(historyEvent),
   },
   handler: async (ctx, args) => {
-    const membership = COMMERCE_CONFIG.products.membership;
-    const expected = membership.appStoreProductId ? [membership.appStoreProductId] : [];
-    const problem = validateVerifiedUpdate(args.update, expected);
-    if (problem) throw new ConvexError({ code: "INVALID", message: problem });
-    const existing = await ctx.db.query("commerceSubscriptions").withIndex("by_original_transaction", (q) => q.eq("originalTransactionId", args.update.originalTransactionId)).unique();
-    if (existing && existing.userId !== args.userId) throw new ConvexError({ code: "FORBIDDEN", message: "That subscription belongs to another account" });
-    const { changed, record } = applyVerifiedUpdate(existing ? toSubscriptionRecord(existing) : null, args.update);
-    if (!changed) return { changed: false };
-    const now = Date.now();
-    let id: Id<"commerceSubscriptions">;
-    if (existing) {
-      await ctx.db.patch(existing._id, { ...record, updatedAt: now });
-      id = existing._id;
-    } else {
-      id = await ctx.db.insert("commerceSubscriptions", { userId: args.userId, productId: membership.id, ...record, createdAt: now, updatedAt: now });
-    }
-    await ctx.db.insert("commerceSubscriptionHistory", {
-      subscriptionId: id, userId: args.userId, latestTransactionId: record.latestTransactionId, status: record.status,
-      expiresDate: record.expiresDate, signedDate: record.signedDate, verificationMethod: record.verificationMethod, recordedAt: now,
-    });
-    const before = existing?.status;
-    const name: CommerceEventName | null =
-      !existing && record.status === "active" ? "subscription_activated"
-        : existing && existing.latestTransactionId !== record.latestTransactionId && record.status === "active" ? "subscription_renewed"
-          : before !== record.status && record.status === "expired" ? "subscription_expired"
-            : existing && existing.autoRenewEnabled && !record.autoRenewEnabled ? "subscription_cancelled"
-              : null;
-    if (name) await serverEvent(ctx, name, args.userId, { productId: membership.id });
-    return { changed: true };
+    const w = await writeVerifiedSubscription(ctx.db, { userId: args.userId, update: args.update, event: args.event ?? "verified_with_apple", source: { kind: "app_submission" } }, storeConfig(), Date.now());
+    return { changed: w.result === "created" || w.result === "updated", result: w.result };
   },
+});
+
+/** A VERIFIED App Store Server Notification (commerce/appStore.ts
+ * processNotification): recorded once by notificationUUID and applied in the
+ * same transaction — duplicate deliveries change nothing. */
+export const applyAppStoreNotification = internalMutation({
+  args: {
+    notification: v.object({
+      notificationUUID: v.string(),
+      notificationType: v.string(),
+      subtype: v.optional(v.string()),
+      environment: v.union(v.literal("production"), v.literal("sandbox")),
+      signedDate: v.number(),
+    }),
+    apply: v.optional(v.object({ update: verifiedUpdate, event: historyEvent })),
+    skipped: v.optional(v.object({ outcome: v.union(v.literal("ignored"), v.literal("rejected")), reason: v.string(), originalTransactionId: v.optional(v.string()) })),
+  },
+  handler: async (ctx, args) => applyNotification(ctx.db, args, storeConfig(), Date.now()),
+});
+
+/** Links the server-derived appAccountToken to its account and takes one
+ * submission from the account's hourly budget (commerce/appStore.ts, after
+ * authenticating the caller). */
+export const reserveAppStoreSubmission = internalMutation({
+  args: { userId: v.id("users"), appAccountToken: v.string() },
+  handler: async (ctx, args) => linkAccountToken(ctx.db, args.userId, args.appAccountToken, Date.now(), { countSubmission: true }),
 });
