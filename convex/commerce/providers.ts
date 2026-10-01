@@ -146,3 +146,25 @@ export const WEBHOOK_TOLERANCE_MS = 5 * 60 * 1000;
 export function webhookTimestampAcceptable(signedAtMs: unknown, nowMs: number, toleranceMs = WEBHOOK_TOLERANCE_MS): boolean {
   return typeof signedAtMs === "number" && Number.isFinite(signedAtMs) && signedAtMs > 0 && Math.abs(nowMs - signedAtMs) <= toleranceMs;
 }
+
+// ─── 6J: every provider call is bounded and shape-checked ────────────────────
+/** A provider that hangs must not hold an action open until Convex kills it:
+ * after this long the call is treated as a provider error (a safe, retryable
+ * state — every provider call is idempotent by key). */
+export const PROVIDER_TIMEOUT_MS = 20_000;
+
+/** Calls a provider; a throw, a timeout or a reply that isn't an object with a
+ * boolean `ok` (or, for list replies, an array) becomes `provider_error`. */
+export async function callProvider<T>(call: () => Promise<T>, timeoutMs = PROVIDER_TIMEOUT_MS): Promise<T | ProviderRefusal> {
+  const refusal: ProviderRefusal = { ok: false, reason: "provider_error" };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<ProviderRefusal>((resolve) => { timer = setTimeout(() => resolve(refusal), timeoutMs); });
+  try {
+    const r = await Promise.race([call().catch((): ProviderRefusal => refusal), timeout]);
+    if (Array.isArray(r)) return r;
+    if (!r || typeof r !== "object" || typeof (r as { ok?: unknown }).ok !== "boolean") return refusal;
+    return r;
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -24,7 +24,7 @@ import {
   type FulfillmentLine, type InspectionCondition, type ReturnRecordStatus,
 } from "./fulfillment.ts";
 import { RETURN_TRANSITIONS, canTransition } from "./orders.ts";
-import { serverEvent, KEY } from "./fulfillmentStore.ts";
+import { serverEvent, skuOf, KEY } from "./fulfillmentStore.ts";
 import { endOwnershipForReturn, validateReturnedDevices } from "./deviceStore.ts";
 
 type Db = MutationCtx["db"];
@@ -110,6 +110,11 @@ export async function authorizeReturn(db: Db, returnId: Id<"commerceReturns">, n
 export async function rejectReturn(db: Db, staffUserId: Id<"users">, returnId: Id<"commerceReturns">, reason: string, now: number) {
   const r = await returnOf(db, returnId);
   if (r.status === "rejected") return { changed: false };
+  // 6J: once a unit has been taken back (its ownership ended at receipt), a
+  // rejection would leave the customer with neither the Band nor a refund.
+  for (const id of r.deviceIds ?? []) {
+    if ((await db.get(id))?.status === "returned") throw fail("INVALID", "This return's Band has already been taken back — approve the refund instead");
+  }
   await move(db, r, "rejected", "staff", now, { rejection: { reason: reason.slice(0, 60), at: now, byUserId: staffUserId } });
   return { changed: true };
 }
@@ -123,7 +128,14 @@ export async function receiveReturn(db: Db, staffUserId: Id<"users">, returnId: 
   if (r.status === "received") return { changed: false };
   if (deviceIds.length) await validateReturnedDevices(db, r.orderId, r.lines, deviceIds);
   const order = await move(db, r, "received", "staff", now, { inspection: { condition, at: now, byUserId: staffUserId }, ...(deviceIds.length ? { deviceIds } : {}) });
-  if (deviceIds.length && config.devices.ownershipEndsOnReturnAt === "received") await endOwnershipForReturn(db, r.orderId, deviceIds, config, now);
+  // 6J: a unit is taken back at receipt only when its condition is one the
+  // return policy refunds; anything else stays the customer's while staff
+  // decide (a rejected return goes back to its owner).
+  // (A unit whose ownership already ended — replaced — is simply booked back in.)
+  const refundable = order.returnPolicy.eligibleConditions.includes(condition);
+  const takeBack: Id<"commerceDevices">[] = [];
+  for (const id of deviceIds) if ((await db.get(id))?.status === "replaced" || (refundable && config.devices.ownershipEndsOnReturnAt === "received")) takeBack.push(id);
+  if (takeBack.length) await endOwnershipForReturn(db, r.orderId, takeBack, config, now);
   await serverEvent(db, config, "return_received", order, now, { productId: r.lines[0]?.productId, source: condition });
   return { changed: true };
 }
@@ -166,4 +178,23 @@ export async function completeRefund(db: Db, orderId: Id<"commerceOrders">, amou
   if (r.deviceIds?.length && config.devices.ownershipEndsOnReturnAt === "refunded") await endOwnershipForReturn(db, orderId, r.deviceIds, config, now);
   await serverEvent(db, config, "refund_completed", order, now, { productId: r.lines[0]?.productId, amountCents, currency: r.refund.currency });
   return { linked: true };
+}
+
+// ─── 6J: what the provider-facing actions read (staff-checked by the caller) ──
+
+/** What staff:createReturnLabel sends the provider. */
+export async function returnLabelJob(db: QueryCtx["db"], returnId: Id<"commerceReturns">, config: CommerceConfig) {
+  const r = await db.get(returnId);
+  if (!r || r.status !== "authorized") throw fail("INVALID", "Return labels are for authorized returns");
+  const o = (await db.get(r.orderId))!;
+  return { orderNumber: o.orderNumber, address: o.shippingAddress, items: r.lines.map((l) => skuOf(config, l)) };
+}
+
+/** What staff:issueRefund asks the payment provider for. */
+export async function refundJob(db: QueryCtx["db"], returnId: Id<"commerceReturns">) {
+  const r = await db.get(returnId);
+  if (!r?.refund || r.status !== "refund_approved") throw fail("INVALID", "No approved refund");
+  const o = (await db.get(r.orderId))!;
+  if (!o.paymentAttempt?.providerRef) throw fail("INVALID", "No captured payment to refund");
+  return { providerRef: o.paymentAttempt.providerRef, amountCents: r.refund.amountCents, currency: r.refund.currency, idempotencyKey: r.refund.idempotencyKey };
 }

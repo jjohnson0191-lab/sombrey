@@ -24,9 +24,10 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
 import { COMMERCE_CONFIG } from "./config";
 import { orderQuote, shippingAddress } from "./validators";
-import { attachProviderRef, cancelCheckout as cancelCheckoutRecord, createOrderRecord, ownOrder, recordQuote, reservePaymentAttempt, updateAddress } from "./checkoutStore";
-import { computeQuote, reusableQuote, type OrderQuote } from "./quotes";
+import { quoteDraft, attachProviderRef, cancelCheckout as cancelCheckoutRecord, createOrderRecord, ownOrder, recordQuote, reservePaymentAttempt, updateAddress } from "./checkoutStore";
+import type { OrderQuote } from "./quotes";
 import { providersFor } from "./providers";
+import { beginPaymentFlow, requestQuoteFlow, type BeginPaymentResult } from "./flows";
 
 async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> {
   const identity = await ctx.auth.getUserIdentity();
@@ -76,52 +77,33 @@ export const cancelCheckout = mutation({
 
 export const requestQuote = action({
   args: { orderId: v.id("commerceOrders") },
-  handler: async (ctx, args): Promise<ReturnType<typeof publicQuote>> => {
-    const draft = await ctx.runQuery(internal.commerce.checkout.draftForQuote, { orderId: args.orderId });
-    if (draft.recentQuote) return publicQuote(draft.recentQuote as OrderQuote);
-    const quote = await computeQuote(draft, providersFor(COMMERCE_CONFIG), COMMERCE_CONFIG, Date.now(), crypto.randomUUID(), COMMERCE_CONFIG.version);
-    await ctx.runMutation(internal.commerce.checkout.storeQuote, { orderId: args.orderId, quote });
-    return publicQuote(quote);
-  },
+  handler: async (ctx, args): Promise<ReturnType<typeof publicQuote>> => publicQuote(await requestQuoteFlow({
+    draft: async () => {
+      const d = await ctx.runQuery(internal.commerce.checkout.draftForQuote, { orderId: args.orderId });
+      return { ...d, recentQuote: d.recentQuote as OrderQuote | null };
+    },
+    providers: providersFor(COMMERCE_CONFIG), config: COMMERCE_CONFIG, now: Date.now(), quoteId: crypto.randomUUID(),
+    store: (quote) => ctx.runMutation(internal.commerce.checkout.storeQuote, { orderId: args.orderId, quote }),
+  })),
 });
 
-export type BeginPaymentResult =
-  | { status: "ready"; provider: string; clientHandoff: Record<string, string> }
-  | { status: "payment_unavailable" | "quote_missing" | "quote_expired" | "quote_incomplete" | "payment_in_progress" | "not_open" | "checkout_outdated" };
+export type { BeginPaymentResult } from "./flows";
 
 export const beginPayment = action({
   args: { orderId: v.id("commerceOrders") },
-  handler: async (ctx, args): Promise<BeginPaymentResult> => {
-    const payment = providersFor(COMMERCE_CONFIG).payment;
-    // No provider is integrated yet: nothing is reserved, nothing is charged.
-    if (!payment) return { status: "payment_unavailable" };
-    const r = await ctx.runMutation(internal.commerce.checkout.reservePayment, { orderId: args.orderId, provider: payment.name });
-    if (r.kind === "refused") return { status: r.reason };
-    const session = await payment.createSession({
-      orderNumber: r.orderNumber, amountCents: r.attempt.amountCents, currency: r.attempt.currency,
-      idempotencyKey: r.attempt.idempotencyKey, methods: [...COMMERCE_CONFIG.checkout.methods],
-    }).catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    // The attempt stays reserved: a retry uses the same idempotency key, so the
-    // provider returns the same session rather than a second charge.
-    if (!session.ok) return { status: "payment_unavailable" };
-    await ctx.runMutation(internal.commerce.checkout.attachRef, { orderId: args.orderId, idempotencyKey: r.attempt.idempotencyKey, providerRef: session.providerRef });
-    return { status: "ready", provider: payment.name, clientHandoff: session.clientHandoff };
-  },
+  handler: async (ctx, args): Promise<BeginPaymentResult> => beginPaymentFlow({
+    payment: providersFor(COMMERCE_CONFIG).payment,
+    methods: [...COMMERCE_CONFIG.checkout.methods],
+    reserve: (provider) => ctx.runMutation(internal.commerce.checkout.reservePayment, { orderId: args.orderId, provider }),
+    attach: (idempotencyKey, providerRef) => ctx.runMutation(internal.commerce.checkout.attachRef, { orderId: args.orderId, idempotencyKey, providerRef }),
+  }),
 });
 
 // ─── Internal steps of the actions above (the caller's identity carries through) ──
 
 export const draftForQuote = internalQuery({
   args: { orderId: v.id("commerceOrders") },
-  handler: async (ctx, args) => {
-    const user = await requireUser(ctx);
-    const o = await ctx.db.get(args.orderId);
-    if (!o || o.userId !== user._id) throw new ConvexError({ code: "NOT_FOUND", message: "Order not found" });
-    if (o.paymentStatus !== "awaiting_payment" || o.cancelledAt !== undefined || o.paymentAttempt !== undefined) {
-      throw new ConvexError({ code: "INVALID", message: "This order can't be re-quoted" });
-    }
-    return { lines: o.lines, currency: o.currency, subtotalCents: o.subtotalCents, shippingAddress: o.shippingAddress, recentQuote: reusableQuote(o.quote, Date.now(), COMMERCE_CONFIG) };
-  },
+  handler: async (ctx, args) => quoteDraft(ctx.db, (await requireUser(ctx))._id, args.orderId, COMMERCE_CONFIG, Date.now()),
 });
 
 export const storeQuote = internalMutation({

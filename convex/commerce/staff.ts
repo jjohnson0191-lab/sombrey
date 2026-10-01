@@ -20,9 +20,10 @@ import { staffMay, type StaffLevel } from "./staffAccess";
 import { COMMERCE_CONFIG, physicalProduct } from "./config";
 import { inspectionCondition } from "./validators";
 import { logCommerce } from "./observability";
-import { normalizeCreatedShipment, normalizeProviderShipmentEvent, shipmentAttention, TERMINAL_SHIPMENT } from "./fulfillment";
-import { cancelFulfillment as cancelFulfillmentRecord, cancelPaidOrderBeforeShipment, createFulfillment as createFulfillmentRecord, recordShipment, recordSubmission } from "./fulfillmentStore";
-import { approveRefund as approveRefundRecord, authorizeReturn as authorizeReturnRecord, markRefundRequested, receiveReturn as receiveReturnRecord, rejectReturn as rejectReturnRecord } from "./returnsStore";
+import { shipmentAttention, TERMINAL_SHIPMENT } from "./fulfillment";
+import { issueRefundFlow, refreshTrackingFlow, returnLabelFlow, submitFulfillmentFlow } from "./flows";
+import { cancelFulfillment as cancelFulfillmentRecord, cancelPaidOrderBeforeShipment, createFulfillment as createFulfillmentRecord, recordProviderShipment as recordProviderShipmentRecord, recordShipment, submissionJob, trackingRef } from "./fulfillmentStore";
+import { approveRefund as approveRefundRecord, authorizeReturn as authorizeReturnRecord, markRefundRequested, receiveReturn as receiveReturnRecord, refundJob as refundJobRecord, rejectReturn as rejectReturnRecord, returnLabelJob } from "./returnsStore";
 import { providersFor } from "./providers";
 import { orderStage } from "./quotes";
 
@@ -134,24 +135,13 @@ export const cancelPaidOrder = mutation({
 export const submitFulfillment = action({
   args: { fulfillmentId: v.id("commerceFulfillments") },
   handler: async (ctx, args): Promise<{ status: "submitted" | "fulfillment_unavailable" | "provider_refused" }> => {
-    const provider = providersFor(COMMERCE_CONFIG).fulfillment;
     await ctx.runQuery(internal.commerce.staff.checkStaff, { level: "fulfillment" });
-    if (!provider) return { status: "fulfillment_unavailable" };
-    const job = await ctx.runQuery(internal.commerce.staff.fulfillmentJob, { fulfillmentId: args.fulfillmentId });
-    // 6I: a retry after a lost response finds it already submitted — same answer, no second call.
-    if (job.alreadySubmitted) return { status: "submitted" };
     // The same key on every retry: the provider returns the same shipment, never a second one.
-    const idempotencyKey = `ship:${args.fulfillmentId}:1`;
-    const raw = await provider.createShipment({ idempotencyKey, orderNumber: job.orderNumber, direction: "outbound", address: job.address, items: job.items })
-      .catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    // 6I: a malformed response is a refusal — nothing half-filled is stored.
-    const created = normalizeCreatedShipment(raw);
-    if (!created) {
-      logCommerce("fulfillment_submit_refused", { fulfillmentId: args.fulfillmentId, provider: provider.name, reason: raw && !raw.ok ? raw.reason : "malformed_response" }, "warn");
-      return { status: "provider_refused" };
-    }
-    await ctx.runMutation(internal.commerce.staff.recordProviderShipment, { fulfillmentId: args.fulfillmentId, idempotencyKey, provider: provider.name, created });
-    return { status: "submitted" };
+    return submitFulfillmentFlow({
+      provider: providersFor(COMMERCE_CONFIG).fulfillment, fulfillmentId: args.fulfillmentId, log: logCommerce,
+      job: () => ctx.runQuery(internal.commerce.staff.fulfillmentJob, { fulfillmentId: args.fulfillmentId }),
+      record: (idempotencyKey, created) => ctx.runMutation(internal.commerce.staff.recordProviderShipment, { fulfillmentId: args.fulfillmentId, idempotencyKey, provider: providersFor(COMMERCE_CONFIG).fulfillment!.name, created }),
+    });
   },
 });
 
@@ -159,22 +149,13 @@ export const submitFulfillment = action({
 export const refreshTracking = action({
   args: { shipmentId: v.id("commerceShipments") },
   handler: async (ctx, args): Promise<{ status: "refreshed" | "tracking_unavailable" | "provider_refused"; applied?: number; skipped?: number }> => {
-    const provider = providersFor(COMMERCE_CONFIG).fulfillment;
     await ctx.runQuery(internal.commerce.staff.checkStaff, { level: "fulfillment" });
-    if (!provider) return { status: "tracking_unavailable" };
-    const ref = await ctx.runQuery(internal.commerce.staff.shipmentRef, { shipmentId: args.shipmentId });
-    const events = await provider.getTracking(ref).catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    if (!Array.isArray(events)) return { status: "provider_refused" };
-    let applied = 0, skipped = 0;
-    for (const raw of events) {
-      // 6I: one malformed event is skipped on its own; it can't fail the batch.
-      const event = normalizeProviderShipmentEvent(raw);
-      if (!event || event.providerRef !== ref) { skipped++; continue; }
-      const r = await ctx.runMutation(internal.commerce.internal.applyShipmentEvent, { provider: provider.name, event });
-      if (r.outcome === "applied") applied++;
-    }
-    if (skipped) logCommerce("tracking_events_skipped", { shipmentId: args.shipmentId, provider: provider.name, skipped, applied }, "warn");
-    return { status: "refreshed", applied, skipped };
+    const provider = providersFor(COMMERCE_CONFIG).fulfillment;
+    return refreshTrackingFlow({
+      provider, shipmentId: args.shipmentId, log: logCommerce,
+      shipmentRef: () => ctx.runQuery(internal.commerce.staff.shipmentRef, { shipmentId: args.shipmentId }),
+      apply: (event) => ctx.runMutation(internal.commerce.internal.applyShipmentEvent, { provider: provider!.name, event }),
+    });
   },
 });
 
@@ -209,17 +190,13 @@ export const receiveReturn = mutation({
 export const createReturnLabel = action({
   args: { returnId: v.id("commerceReturns") },
   handler: async (ctx, args): Promise<{ status: "created" | "returns_unavailable" | "provider_refused" }> => {
-    const provider = providersFor(COMMERCE_CONFIG).fulfillment;
     await ctx.runQuery(internal.commerce.staff.checkStaff, { level: "fulfillment" });
-    if (!provider) return { status: "returns_unavailable" };
-    const job = await ctx.runQuery(internal.commerce.staff.returnJob, { returnId: args.returnId });
-    const idempotencyKey = `return:${args.returnId}:1`;
-    const raw = await provider.createShipment({ idempotencyKey, orderNumber: job.orderNumber, direction: "return", address: job.address, items: job.items })
-      .catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    const created = normalizeCreatedShipment(raw);
-    if (!created) return { status: "provider_refused" };
-    await ctx.runMutation(internal.commerce.staff.recordReturnShipment, { returnId: args.returnId, idempotencyKey, provider: provider.name, created });
-    return { status: "created" };
+    const provider = providersFor(COMMERCE_CONFIG).fulfillment;
+    return returnLabelFlow({
+      provider, returnId: args.returnId,
+      job: () => ctx.runQuery(internal.commerce.staff.returnJob, { returnId: args.returnId }),
+      record: (idempotencyKey, created) => ctx.runMutation(internal.commerce.staff.recordReturnShipment, { returnId: args.returnId, idempotencyKey, provider: provider!.name, created }),
+    });
   },
 });
 
@@ -237,15 +214,12 @@ export const approveRefund = mutation({
 export const issueRefund = action({
   args: { returnId: v.id("commerceReturns") },
   handler: async (ctx, args): Promise<{ status: "requested" | "refund_unavailable" | "provider_refused" }> => {
-    const payment = providersFor(COMMERCE_CONFIG).payment;
     await ctx.runQuery(internal.commerce.staff.checkStaff, { level: "money" });
-    if (!payment) return { status: "refund_unavailable" };
-    const job = await ctx.runQuery(internal.commerce.staff.refundJob, { returnId: args.returnId });
-    const r = await payment.refund({ providerRef: job.providerRef, amountCents: job.amountCents, currency: job.currency, idempotencyKey: job.idempotencyKey })
-      .catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    if (!r.ok) return { status: "provider_refused" };
-    await ctx.runMutation(internal.commerce.staff.recordRefundRequested, { returnId: args.returnId, refundRef: r.refundRef });
-    return { status: "requested" };
+    return issueRefundFlow({
+      payment: providersFor(COMMERCE_CONFIG).payment,
+      job: () => ctx.runQuery(internal.commerce.staff.refundJob, { returnId: args.returnId }),
+      markRequested: (refundRef) => ctx.runMutation(internal.commerce.staff.recordRefundRequested, { returnId: args.returnId, refundRef }),
+    });
   },
 });
 
@@ -260,12 +234,7 @@ export const fulfillmentJob = internalQuery({
   args: { fulfillmentId: v.id("commerceFulfillments") },
   handler: async (ctx, args) => {
     await requireStaff(ctx, "fulfillment");
-    const f = await ctx.db.get(args.fulfillmentId);
-    if (f && f.status !== "pending" && f.providerRef !== undefined) return { alreadySubmitted: true as const };
-    if (!f || f.status !== "pending") throw new ConvexError({ code: "INVALID", message: "Only a pending fulfilment can be submitted" });
-    const o = (await ctx.db.get(f.orderId))!;
-    if (o.paymentStatus !== "paid" && !(f.kind === "replacement" && o.paymentStatus === "partially_refunded")) throw new ConvexError({ code: "NOT_FULFILLABLE", message: "This order can't be shipped" });
-    return { alreadySubmitted: false as const, orderNumber: o.orderNumber, address: o.shippingAddress, items: f.lines.map((l) => ({ ...l, sku: physicalProduct(COMMERCE_CONFIG, l.productId)?.sku ?? l.productId })) };
+    return await submissionJob(ctx.db, args.fulfillmentId, COMMERCE_CONFIG);
   },
 });
 
@@ -273,9 +242,7 @@ export const shipmentRef = internalQuery({
   args: { shipmentId: v.id("commerceShipments") },
   handler: async (ctx, args) => {
     await requireStaff(ctx, "fulfillment");
-    const s = await ctx.db.get(args.shipmentId);
-    if (!s || TERMINAL_SHIPMENT.includes(s.status)) throw new ConvexError({ code: "INVALID", message: "Nothing to refresh" });
-    return s.providerRef;
+    return await trackingRef(ctx.db, args.shipmentId);
   },
 });
 
@@ -283,10 +250,7 @@ export const returnJob = internalQuery({
   args: { returnId: v.id("commerceReturns") },
   handler: async (ctx, args) => {
     await requireStaff(ctx, "fulfillment");
-    const r = await ctx.db.get(args.returnId);
-    if (!r || r.status !== "authorized") throw new ConvexError({ code: "INVALID", message: "Return labels are for authorized returns" });
-    const o = (await ctx.db.get(r.orderId))!;
-    return { orderNumber: o.orderNumber, address: o.shippingAddress, items: r.lines.map((l) => ({ ...l, sku: physicalProduct(COMMERCE_CONFIG, l.productId)?.sku ?? l.productId })) };
+    return await returnLabelJob(ctx.db, args.returnId, COMMERCE_CONFIG);
   },
 });
 
@@ -294,11 +258,7 @@ export const refundJob = internalQuery({
   args: { returnId: v.id("commerceReturns") },
   handler: async (ctx, args) => {
     await requireStaff(ctx, "money");
-    const r = await ctx.db.get(args.returnId);
-    if (!r?.refund || r.status !== "refund_approved") throw new ConvexError({ code: "INVALID", message: "No approved refund" });
-    const o = (await ctx.db.get(r.orderId))!;
-    if (!o.paymentAttempt?.providerRef) throw new ConvexError({ code: "INVALID", message: "No captured payment to refund" });
-    return { providerRef: o.paymentAttempt.providerRef, amountCents: r.refund.amountCents, currency: r.refund.currency, idempotencyKey: r.refund.idempotencyKey };
+    return await refundJobRecord(ctx.db, args.returnId);
   },
 });
 
@@ -311,9 +271,7 @@ export const recordProviderShipment = internalMutation({
   args: { fulfillmentId: v.id("commerceFulfillments"), idempotencyKey: v.string(), provider: v.string(), created: createdShipment },
   handler: async (ctx, args) => {
     await requireStaff(ctx, "fulfillment");
-    const now = Date.now();
-    await recordSubmission(ctx.db, args.fulfillmentId, { provider: args.provider, providerRef: args.created.providerRef, ...(args.created.location ? { location: args.created.location } : {}) }, now);
-    return await recordShipment(ctx.db, { direction: "outbound", fulfillmentId: args.fulfillmentId, idempotencyKey: args.idempotencyKey, provider: args.provider, created: args.created }, COMMERCE_CONFIG, now);
+    return await recordProviderShipmentRecord(ctx.db, args, COMMERCE_CONFIG, Date.now());
   },
 });
 

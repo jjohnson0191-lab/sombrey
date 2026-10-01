@@ -12,13 +12,13 @@
 // Tested against an in-memory database in tests/commerce/fulfillment.test.ts.
 
 import { ConvexError } from "convex/values";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { knownProductIds, type CommerceConfig } from "./config.ts";
+import { knownProductIds, physicalProduct, type CommerceConfig } from "./config.ts";
 import { validateEvent, type CommerceEventName } from "./events.ts";
 import {
   FULFILLMENT_RECORD_TRANSITIONS, RETURN_RECORD_TRANSITIONS, applyCarrierEvent, canFulfill, impliedOrderFulfillment,
-  nextOrderFulfillment, rollUpFulfillment, safeTrackingUrl, unfulfilledLines, type FulfillmentLine, type FulfillmentRecordStatus, type ShipmentState,
+  nextOrderFulfillment, rollUpFulfillment, safeTrackingUrl, TERMINAL_SHIPMENT, unfulfilledLines, type FulfillmentLine, type FulfillmentRecordStatus, type ShipmentState,
 } from "./fulfillment.ts";
 import { FULFILLMENT_TRANSITIONS, canTransition } from "./orders.ts";
 import type { CreatedShipment, ProviderShipmentEvent } from "./providers.ts";
@@ -283,3 +283,33 @@ export async function cancelPaidOrderBeforeShipment(db: Db, orderId: Id<"commerc
   await db.patch(order._id, { fulfillmentStatus: "cancelled", updatedAt: now });
   return { changed: true };
 }
+
+// ─── 6J: what the provider-facing actions read and write (staff-checked by the caller) ──
+
+const skuOf = (config: CommerceConfig, l: { productId: string; quantity: number }) => ({ ...l, sku: physicalProduct(config, l.productId)?.sku ?? l.productId });
+
+/** What staff:submitFulfillment sends the provider — or "already submitted"
+ * (the earlier response was lost after it was recorded). */
+export async function submissionJob(db: QueryCtx["db"], fulfillmentId: Id<"commerceFulfillments">, config: CommerceConfig) {
+  const f = await db.get(fulfillmentId);
+  if (f && f.status !== "pending" && f.providerRef !== undefined) return { alreadySubmitted: true as const };
+  if (!f || f.status !== "pending") throw fail("INVALID", "Only a pending fulfilment can be submitted");
+  const o = (await db.get(f.orderId))!;
+  if (o.paymentStatus !== "paid" && !(f.kind === "replacement" && o.paymentStatus === "partially_refunded")) throw fail("NOT_FULFILLABLE", "This order can't be shipped");
+  return { alreadySubmitted: false as const, orderNumber: o.orderNumber, address: o.shippingAddress, items: f.lines.map((l) => skuOf(config, l)) };
+}
+
+/** The provider's reference for a shipment that can still change. */
+export async function trackingRef(db: QueryCtx["db"], shipmentId: Id<"commerceShipments">): Promise<string> {
+  const s = await db.get(shipmentId);
+  if (!s || TERMINAL_SHIPMENT.includes(s.status)) throw fail("INVALID", "Nothing to refresh");
+  return s.providerRef;
+}
+
+/** The provider created the outbound shipment: the fulfilment is submitted and the shipment recorded. */
+export async function recordProviderShipment(db: Db, args: { fulfillmentId: Id<"commerceFulfillments">; idempotencyKey: string; provider: string; created: CreatedShipment }, config: CommerceConfig, now: number) {
+  await recordSubmission(db, args.fulfillmentId, { provider: args.provider, providerRef: args.created.providerRef, ...(args.created.location ? { location: args.created.location } : {}) }, now);
+  return await recordShipment(db, { direction: "outbound", fulfillmentId: args.fulfillmentId, idempotencyKey: args.idempotencyKey, provider: args.provider, created: args.created }, config, now);
+}
+
+export { skuOf };

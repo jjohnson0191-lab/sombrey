@@ -169,10 +169,12 @@ test("a malformed 'shipment created' response is a refusal — nothing half-fill
   await assert.rejects(recordShipment(db as never, { direction: "outbound", fulfillmentId, idempotencyKey: "ship-malformed-1", provider: "test-ship", created: { ...ok, carrier: "" } as never }, C, T), /Malformed provider response/);
   assert.equal(db.rows("commerceShipments").length, 0);
   // Wiring: the actions normalize before any mutation; a lost submit response is answered, not re-sent.
-  const staff = src("staff.ts");
-  assert.match(staff, /const created = normalizeCreatedShipment\(raw\)/);
-  assert.match(staff, /const event = normalizeProviderShipmentEvent\(raw\);\s*\n\s*if \(!event \|\| event\.providerRef !== ref\) \{ skipped\+\+; continue; \}/);
-  assert.match(staff, /if \(job\.alreadySubmitted\) return \{ status: "submitted" \}/);
+  // (6J: the actions' orchestration lives in flows.ts, exercised end to end in journeys.test.ts.)
+  const flows = src("flows.ts"), staff = src("staff.ts");
+  assert.match(flows, /const created = normalizeCreatedShipment\(raw\)/);
+  assert.match(flows, /const event = normalizeProviderShipmentEvent\(raw\);\s*\n\s*if \(!event \|\| event\.providerRef !== ref\) \{ skipped\+\+; continue; \}/);
+  assert.match(flows, /if \(job\.alreadySubmitted\) return \{ status: "submitted" \}/);
+  for (const f of ["submitFulfillmentFlow", "refreshTrackingFlow", "returnLabelFlow", "issueRefundFlow"]) assert.match(staff, new RegExp(`return ${f}\\(`));
 });
 
 test("shipment event ids: a replay is a duplicate; the same id with different contents is a conflict", async () => {
@@ -274,7 +276,9 @@ test("a quote made seconds ago is reused, not re-asked — never across a config
   assert.equal(reusableQuote(null, T, C), null);
   assert.equal(reusableQuote({ ...(q as object), configVersion: "old" } as never, T + 1, C), null);
   assert.equal(reusableQuote({ ...(q as object), expiresAt: T + 1 } as never, T + 2, C), null);
-  assert.match(readFileSync(join(import.meta.dirname, "../../convex/commerce/checkout.ts"), "utf8"), /if \(draft\.recentQuote\) return publicQuote\(draft\.recentQuote as OrderQuote\);/);
+  // (6J: the reuse runs in flows.ts:requestQuoteFlow, which the requestQuote action calls — behaviour tested in journeys.test.ts.)
+  assert.match(src("flows.ts"), /if \(draft\.recentQuote\) return draft\.recentQuote;/);
+  assert.match(readFileSync(join(import.meta.dirname, "../../convex/commerce/checkout.ts"), "utf8"), /publicQuote\(await requestQuoteFlow\(/);
 });
 
 test("the orders list reads an approved return's real stage, like the order detail does", () => {

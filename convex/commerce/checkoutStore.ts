@@ -19,11 +19,11 @@
 // Tested against an in-memory database in tests/commerce/checkout.test.ts.
 
 import { ConvexError } from "convex/values";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { knownProductIds, type CommerceConfig } from "./config.ts";
 import { PAYMENT_TRANSITIONS, buildOrderDraft, canTransition, formatOrderNumber, validateAddress, type PaymentStatus, type ShippingAddress } from "./orders.ts";
-import { draftStillCurrent, quoteUsable, type OrderQuote } from "./quotes.ts";
+import { draftStillCurrent, quoteUsable, reusableQuote, type OrderQuote } from "./quotes.ts";
 import { validateEvent, type CommerceEventName } from "./events.ts";
 import { completeRefund } from "./returnsStore.ts";
 
@@ -61,6 +61,15 @@ function sameCheckoutRequest(o: Order, items: Array<{ productId: string; quantit
   if (!sameItems) return false;
   if (o.updatedAt !== o.createdAt) return true;
   return ADDRESS_FIELDS.every((k) => (o.shippingAddress[k] ?? null) === (address[k] ?? null));
+}
+
+/** 6J: what checkout:requestQuote prices — only the customer's own open checkout
+ * (a quote made seconds ago comes back as `recentQuote`, 6I). */
+export async function quoteDraft(db: QueryCtx["db"], userId: Id<"users">, orderId: Id<"commerceOrders">, config: CommerceConfig, now: number) {
+  const o = await db.get(orderId);
+  if (!o || o.userId !== userId) throw fail("NOT_FOUND", "Order not found");
+  if (o.paymentStatus !== "awaiting_payment" || o.cancelledAt !== undefined || o.paymentAttempt !== undefined) throw fail("INVALID", "This order can't be re-quoted");
+  return { lines: o.lines, currency: o.currency, subtotalCents: o.subtotalCents, shippingAddress: o.shippingAddress, recentQuote: reusableQuote(o.quote, now, config) };
 }
 
 /** Still a checkout: unpaid, not cancelled, no payment started. */
@@ -129,12 +138,15 @@ export async function recordQuote(db: Db, userId: Id<"users">, orderId: Id<"comm
 
 export type PaymentReservation =
   | { kind: "new" | "existing"; attempt: NonNullable<Order["paymentAttempt"]>; orderNumber: string }
-  | { kind: "refused"; reason: "quote_missing" | "quote_expired" | "quote_incomplete" | "payment_in_progress" | "not_open" | "checkout_outdated" };
+  | { kind: "refused"; reason: "quote_missing" | "quote_expired" | "quote_incomplete" | "payment_in_progress" | "not_open" | "checkout_outdated" | "already_paid" };
 
 /** Freezes the quoted total for exactly one payment attempt. The same quote
  * returns the same attempt (and the same provider idempotency key). */
 export async function reservePaymentAttempt(db: Db, userId: Id<"users">, orderId: Id<"commerceOrders">, provider: string, config: CommerceConfig, now: number): Promise<PaymentReservation> {
   const o = await ownOrder(db, userId, orderId);
+  // 6J: the provider's verified event can beat the app's retry — a paid order
+  // never hands out its payment session again.
+  if (["authorized", "paid", "partially_refunded", "refunded"].includes(o.paymentStatus)) return { kind: "refused", reason: "already_paid" };
   if (o.paymentAttempt) {
     return o.quote && o.paymentAttempt.quoteId === o.quote.quoteId
       ? { kind: "existing", attempt: o.paymentAttempt, orderNumber: o.orderNumber }

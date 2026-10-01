@@ -19,7 +19,7 @@
 
 import { physicalProduct, type CommerceConfig } from "./config.ts";
 import { orderTotal, type FulfillmentStatus, type OrderLine, type PaymentStatus, type ReturnStatus, type ShippingAddress } from "./orders.ts";
-import type { ProviderQuote, ProviderRefusal, Providers, QuoteLine } from "./providers.ts";
+import { callProvider, type ProviderQuote, type ProviderRefusal, type Providers, type QuoteLine } from "./providers.ts";
 
 export type QuoteUnavailableReason =
   | "provider_not_configured" | "no_service_to_destination" | "provider_error" | "invalid_request"
@@ -46,7 +46,7 @@ export type OrderQuote = {
 /** The largest single shipping or tax amount accepted from a provider ($100,000). */
 export const MAX_PROVIDER_AMOUNT_CENTS = 10_000_000;
 
-type DraftForQuote = { lines: OrderLine[]; currency: string; subtotalCents: number; shippingAddress: ShippingAddress };
+export type DraftForQuote = { lines: OrderLine[]; currency: string; subtotalCents: number; shippingAddress: ShippingAddress };
 
 /** Is an unpaid draft still priced as the configuration prices it today? If the
  * Band's price, currency or availability changed, the customer starts again —
@@ -67,23 +67,27 @@ function component(r: ProviderQuote | ProviderRefusal, provider: string, currenc
   return { status: "quoted", amountCents: r.amountCents, provider, reference: String(r.reference).slice(0, 120), detail: String(r.detail).slice(0, 80) };
 }
 
-/** Quotes a draft. Providers that throw are treated as errors, not as zero. */
-export async function computeQuote(d: DraftForQuote, providers: Providers, config: CommerceConfig, now: number, quoteId: string, configVersion: string): Promise<OrderQuote> {
+/** 6J: a provider's own quote expiry is honoured only when it's a real future time. */
+const validExpiry = (t: unknown, now: number): t is number => typeof t === "number" && Number.isFinite(t) && t > now;
+
+/** Quotes a draft. Providers that throw, hang or reply malformed are treated as errors, not as zero. */
+export async function computeQuote(d: DraftForQuote, providers: Providers, config: CommerceConfig, now: number, quoteId: string, configVersion: string, timeoutMs?: number): Promise<OrderQuote> {
   const lines: QuoteLine[] = d.lines.map((l) => ({ productId: l.productId, sku: physicalProduct(config, l.productId)?.sku ?? l.productId, quantity: l.quantity, unitPriceCents: l.unitPriceCents }));
   const destination = { countryCode: d.shippingAddress.countryCode, region: d.shippingAddress.region, postalCode: d.shippingAddress.postalCode, city: d.shippingAddress.city };
   const expiries = [now + config.checkout.quoteTtlMinutes * 60_000];
   let shipping: ComponentQuote = { status: "unavailable", reason: "provider_not_configured" };
   if (providers.shipping) {
-    const r = await providers.shipping.quote({ destination, lines, currency: d.currency }).catch((): ProviderRefusal => ({ ok: false, reason: "provider_error" }));
-    shipping = component(r, providers.shipping.name, d.currency);
-    if (r.ok && r.expiresAt) expiries.push(r.expiresAt);
+    const sp = providers.shipping;
+    const r = await callProvider(() => sp.quote({ destination, lines, currency: d.currency }), timeoutMs);
+    shipping = component(r, sp.name, d.currency);
+    if (shipping.status === "quoted" && r.ok && validExpiry(r.expiresAt, now)) expiries.push(r.expiresAt);
   }
   let tax: ComponentQuote = { status: "unavailable", reason: providers.tax ? "awaiting_shipping_quote" : "provider_not_configured" };
   if (providers.tax && shipping.status === "quoted") {
-    const r = await providers.tax.quote({ destination, lines, subtotalCents: d.subtotalCents, shippingCents: shipping.amountCents, currency: d.currency })
-      .catch((): ProviderRefusal => ({ ok: false, reason: "provider_error" }));
-    tax = component(r, providers.tax.name, d.currency);
-    if (r.ok && r.expiresAt) expiries.push(r.expiresAt);
+    const tp = providers.tax, shippingCents = shipping.amountCents;
+    const r = await callProvider(() => tp.quote({ destination, lines, subtotalCents: d.subtotalCents, shippingCents, currency: d.currency }), timeoutMs);
+    tax = component(r, tp.name, d.currency);
+    if (tax.status === "quoted" && r.ok && validExpiry(r.expiresAt, now)) expiries.push(r.expiresAt);
   }
   const total = orderTotal(d.subtotalCents, shipping.status === "quoted" ? shipping.amountCents : null, tax.status === "quoted" ? tax.amountCents : null);
   const totalCents = total !== null && Number.isSafeInteger(total) ? total : null;
