@@ -29,6 +29,13 @@ export const COMMERCE_EVENTS = {
   // 6D: the user met a locked feature (source = the feature id). Recorded at
   // most once per feature per app session by the app; never PII.
   feature_access_denied: "client",
+  // 6H: what customers look at and start (no addresses, codes or device ids;
+  // "checkout started" is band_purchase_initiated, "purchase started" is
+  // subscription_purchase_initiated — both above).
+  restore_purchases_started: "client",
+  order_viewed: "client",
+  tracking_viewed: "client",
+  device_activation_started: "client",
   band_checkout_completed: "server",
   band_order_completed: "server",
   band_returned: "server",

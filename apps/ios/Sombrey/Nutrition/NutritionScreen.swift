@@ -66,7 +66,7 @@ struct NutritionPanel: View {
         }
         .sheet(isPresented: $showingAddMeal) { AddMealView() }
         .fullScreenCover(isPresented: $showingMacroCalculator) { MacroCalculatorFlow() }
-        .sheet(isPresented: $showingAccess) { SombreyAccessSheet() }
+        .sheet(isPresented: $showingAccess) { MembershipView() }
         .sheet(isPresented: $showingMealSchedule) { MealScheduleView() }
     }
 

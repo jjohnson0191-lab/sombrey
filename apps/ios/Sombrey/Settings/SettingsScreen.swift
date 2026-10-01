@@ -11,16 +11,25 @@ import UIKit
 /// the content isn't published, and never invent policy text.
 struct SettingsScreen: View {
     @Environment(EntitlementStore.self) private var entitlements
-    @State private var showingAccess = false
+    @State private var showingMembership = false
+    @State private var showingBand = false
+    @State private var showingOrders = false
 
-    /// One short line from the server's membership summary.
-    private var accessDetail: String {
+    /// Short lines from the server's answer (never a local guess).
+    private var membershipDetail: String {
         switch entitlements.state {
-        case .ready(let e):
-            let member = e.subscriptionActive ? "Member" : "Not a member"
-            return e.ownsBand ? "Band · \(member)" : member
+        case .ready(let e): return e.subscriptionActive ? "Active" : "Not a member"
         case .checking: return "Checking…"
-        case .unavailable, .notEnforced: return ""
+        case .unavailable: return "Unavailable"
+        case .notEnforced: return ""
+        }
+    }
+    private var bandDetail: String {
+        switch entitlements.state {
+        case .ready(let e): return e.ownsBand ? "On your account" : "None"
+        case .checking: return "Checking…"
+        case .unavailable: return "Unavailable"
+        case .notEnforced: return ""
         }
     }
     @Environment(AppState.self) private var appState
@@ -58,8 +67,10 @@ struct SettingsScreen: View {
 
                 settingsGroup("ACCOUNT") {
                     if entitlements.enforced {
-                        // Commerce 6D: the server's answer — status, restore, what's included.
-                        row("Membership & Band", detail: accessDetail) { showingAccess = true }
+                        // Commerce 6H: Membership, the Band and orders — each from the server.
+                        row("Membership", detail: membershipDetail) { showingMembership = true }
+                        row("Sombrey Band", detail: bandDetail) { showingBand = true }
+                        row("Orders") { showingOrders = true }
                     } else {
                         row("Subscription", detail: "Not available yet") { placeholder = .subscription }
                     }
@@ -153,7 +164,9 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showingWeatherInfo) {
             WeatherPrivacyView()
         }
-        .sheet(isPresented: $showingAccess) { SombreyAccessSheet() }
+        .sheet(isPresented: $showingMembership) { MembershipView() }
+        .sheet(isPresented: $showingBand) { BandView() }
+        .sheet(isPresented: $showingOrders) { OrdersView() }
         .sheet(isPresented: $showingNotificationSettings) {
             NotificationSettingsView()
         }

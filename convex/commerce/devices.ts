@@ -37,7 +37,7 @@ export function normalizeHardwareId(kind: HardwareIdKind, raw: unknown): string 
 
 /** "…A1B2" — enough to tell a customer's devices apart, not to identify one. */
 export function redactHardwareId(id: string): string {
-  const compact = id.replace(/[:\-]/g, "");
+  const compact = id.replace(/[:-]/g, "");
   return compact.length <= 4 ? "…" : `…${compact.slice(-4)}`;
 }
 

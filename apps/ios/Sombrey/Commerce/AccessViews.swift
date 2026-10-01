@@ -65,7 +65,14 @@ struct AccessGateCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { SombreyGlassChamber(cornerRadius: 24) }
         .sensoryFeedback(StudioHaptic.expand, trigger: showingAccess)
-        .sheet(isPresented: $showingAccess) { SombreyAccessSheet() }
+        .sheet(isPresented: $showingAccess) {
+            // 6H: straight to the product that unlocks it; both → the overview.
+            switch unlock {
+            case .membership: MembershipView()
+            case .band: BandView()
+            case .bandAndMembership: SombreyAccessSheet()
+            }
+        }
         .task { await entitlements.noteLocked(feature) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("access.gate.\(feature.rawValue)")
@@ -99,7 +106,15 @@ struct AccessStatusCard: View {
 /// The server's public commerce configuration (prices are provisional and
 /// live in convex/commerce/config.ts — never in the app).
 struct PublicCommerceConfigDTO: Decodable, Equatable {
-    struct Product: Decodable, Equatable { let priceCents: Int; let currency: String }
+    struct Product: Decodable, Equatable {
+        let priceCents: Int
+        let currency: String
+        /// 6H: the server's id, name, generation, and whether the Band can be bought in the app now.
+        let id: String?
+        let displayName: String?
+        let generation: String?
+        let checkoutAvailable: Bool?
+    }
     let band: Product
     let membership: Product
     let featureUnlocks: [String: String?]

@@ -167,6 +167,12 @@ export function canFulfill(order: { paymentStatus: PaymentStatus; returnStatus: 
 
 // ─── Customer tracking (real states only) ────────────────────────────────────
 
+/** 6H: an order is shown only to its owner — anyone else gets nothing (no
+ * existence leak). The one gate every customer order view goes through. */
+export function visibleToCustomer<O extends { userId: string }>(order: O | null | undefined, viewerUserId: string): O | null {
+  return order && order.userId === viewerUserId ? order : null;
+}
+
 export type TrackingStep = "confirmed" | "preparing" | "shipped" | "in_transit" | "out_for_delivery" | "delivered";
 
 export function customerTracking(order: { paymentStatus: PaymentStatus; fulfillmentStatus: FulfillmentStatus },

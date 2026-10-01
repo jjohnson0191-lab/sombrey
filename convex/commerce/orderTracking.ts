@@ -20,7 +20,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 import { COMMERCE_CONFIG } from "./config";
 import { fulfillmentLine, returnReason } from "./validators";
-import { customerTracking } from "./fulfillment";
+import { customerTracking, visibleToCustomer } from "./fulfillment";
 import { cancelReturn as cancelReturnRecord, requestReturn as requestReturnRecord, returnOptions as returnOptionsFor } from "./returnsStore";
 import { orderStage } from "./quotes";
 
@@ -36,8 +36,8 @@ export const orderTracking = query({
   args: { orderId: v.id("commerceOrders") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const o = await ctx.db.get(args.orderId);
-    if (!o || o.userId !== user._id) throw new ConvexError({ code: "NOT_FOUND", message: "Order not found" });
+    const o = visibleToCustomer(await ctx.db.get(args.orderId), user._id);
+    if (!o) throw new ConvexError({ code: "NOT_FOUND", message: "Order not found" });
     const shipments = (await ctx.db.query("commerceShipments").withIndex("by_order", (q) => q.eq("orderId", o._id)).collect()).filter((s) => s.direction === "outbound");
     const returns = await ctx.db.query("commerceReturns").withIndex("by_order", (q) => q.eq("orderId", o._id)).collect();
     const active = returns.find((r) => !["cancelled", "rejected", "refunded"].includes(r.status));

@@ -334,7 +334,7 @@ export function publicCommerceConfig(c: CommerceConfig) {
     provisional: c.provisional,
     currency: c.currency,
     band: {
-      id: c.products.band.id, sku: c.products.band.sku, displayName: c.products.band.displayName, priceCents: c.products.band.priceCents,
+      id: c.products.band.id, sku: c.products.band.sku, displayName: c.products.band.displayName, generation: c.products.band.hardwareGeneration, priceCents: c.products.band.priceCents,
       currency: c.products.band.currency, active: c.products.band.active,
       // 6E: whether a Band can actually be bought now (a payment provider exists).
       checkoutAvailable: c.products.band.active && c.checkout.provider !== null,

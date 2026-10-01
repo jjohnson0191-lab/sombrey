@@ -115,8 +115,9 @@ test("6B/6C: the app never calls backend-only commerce functions or claims a ser
   }
   const convexCalls = all.flatMap(([, src]) => [...src.matchAll(/"commerce\/[a-zA-Z]+:[a-zA-Z]+"/g)].map((m) => m[0]));
   assert.deepEqual([...new Set(convexCalls)].sort(), [
-    '"commerce/access:linkAppStoreAccount"', '"commerce/access:myEntitlements"', '"commerce/access:publicConfig"', '"commerce/access:recordEvent"', '"commerce/appStore:submitTransaction"',
-  ], "6C/6D: client events, the argument-free account link, the server's entitlement answer, public prices, and Apple-signed transactions — nothing else");
+    '"commerce/access:linkAppStoreAccount"', '"commerce/access:myEntitlements"', '"commerce/access:myOrders"', '"commerce/access:publicConfig"', '"commerce/access:recordEvent"',
+    '"commerce/appStore:submitTransaction"', '"commerce/myDevices:activateDevice"', '"commerce/myDevices:myDevices"', '"commerce/orderTracking:orderTracking"', '"commerce/orderTracking:returnOptions"',
+  ], "6C–6H: client events, the argument-free account link, the server's entitlement answer, public prices, Apple-signed transactions, and (6H) the caller's OWN orders, tracking, return options and devices, and code activation — nothing that writes commerce state from the client");
   assert.match(read("commerce/access.ts"), /export const publicConfig = query\(\{\s*args: \{\},/, "public config is a read with no input");
 });
 
