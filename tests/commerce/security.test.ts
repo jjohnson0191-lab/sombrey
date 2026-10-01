@@ -10,10 +10,10 @@ import { join } from "node:path";
 const CONVEX = join(import.meta.dirname, "../../convex");
 const read = (p: string) => readFileSync(join(CONVEX, p), "utf8");
 const exported = (src: string, kind: string) => [...src.matchAll(new RegExp(`export const (\\w+) = ${kind}\\(`, "g"))].map((m) => m[1]);
-const PROTECTED = ["commerceOrders", "commerceSubscriptions", "commerceSubscriptionHistory", "bandOwnership", "commerceAppStoreNotifications", "commerceAppAccountTokens"];
+const PROTECTED = ["commerceOrders", "commerceSubscriptions", "commerceSubscriptionHistory", "bandOwnership", "commerceAppStoreNotifications", "commerceAppAccountTokens", "commercePaymentEvents"];
 /** The only files allowed to write protected rows: the internal functions and
  * (6C) the shared subscription writer they — and only they — call. */
-const TRUSTED_WRITERS = ["commerce/internal.ts", "commerce/subscriptionStore.ts"];
+const TRUSTED_WRITERS = ["commerce/internal.ts", "commerce/subscriptionStore.ts", "commerce/checkoutStore.ts"];
 
 function allConvexFiles(dir = CONVEX, rel = ""): string[] {
   return readdirSync(join(dir), { withFileTypes: true }).flatMap((d) => {
@@ -45,7 +45,7 @@ test("every state change is an internal function", () => {
   assert.deepEqual(exported(internal, "action"), []);
   assert.deepEqual(exported(internal, "internalMutation").sort(), [
     "applyAppStoreNotification", "applyPaymentUpdate", "applyVerifiedSubscription", "createOrder", "grantBandOwnership", "reserveAppStoreSubmission",
-    "revokeBandOwnership", "setQuote", "updateFulfillment", "updateReturn",
+    "revokeBandOwnership", "updateFulfillment", "updateReturn",
   ]);
 });
 
@@ -58,6 +58,9 @@ test("nothing outside the trusted module writes orders, subscriptions or ownersh
       assert.ok(!writes, `${file} inserts into ${table}`);
     }
     // 6C: the shared writer is reachable only through internal functions.
+    // 6E: the checkout writer is reachable only through the customer API (user from
+    // the token) and the internal functions.
+    if (/from "[^"]*checkoutStore(\.ts)?"/.test(src)) assert.ok(["commerce/checkout.ts", "commerce/internal.ts"].includes(file), `${file} imports the checkout writer`);
     // Only the read side may import the store module, and only its token link / row mapper.
     if (/from "[^"]*subscriptionStore(\.ts)?"/.test(src)) {
       assert.ok(["commerce/access.ts", "commerce/gate.ts"].includes(file), `${file} imports the subscription writer`);

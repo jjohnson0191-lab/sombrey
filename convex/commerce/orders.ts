@@ -8,7 +8,7 @@
 //
 // State is three independent machines — payment, fulfillment, return — each
 // with an explicit transition table. Only trusted backend/provider flows
-// move them (convex/commerce/ordersApi.ts: internal mutations only).
+// move them (internal mutations and 6E's checkout store — never a client flag).
 //
 // Pure — tested in tests/commerce/orders.test.ts.
 
@@ -23,7 +23,9 @@ export const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   authorized: ["paid", "failed", "cancelled"],
   paid: ["refunded", "partially_refunded"],
   partially_refunded: ["refunded"],
-  failed: ["awaiting_payment", "cancelled"],
+  // 6E: a provider may report a failed charge and later the same payment as
+  // paid (a retry) — a VERIFIED "paid" after "failed" is recorded.
+  failed: ["awaiting_payment", "paid", "cancelled"],
   cancelled: [],
   refunded: [],
 };

@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import {
-  commerceEventName, fulfillmentStatus, orderLine, ownershipStatus, paymentStatus, returnStatus, subscriptionHistoryEvent,
+  commerceEventName, fulfillmentStatus, orderLine, orderQuote, ownershipStatus, paymentAttempt, paymentStatus, returnStatus, subscriptionHistoryEvent,
   shipment, shippingAddress, subscriptionStatus,
 } from "./commerce/validators";
 import { v } from "convex/values";
@@ -626,9 +626,32 @@ export default defineSchema({
     updatedAt: v.number(),
     paidAt: v.optional(v.number()),
     deliveredAt: v.optional(v.number()),
+    // Phase 6E — customer checkout (convex/commerce/checkout.ts):
+    // the client's request key (one checkout per key per account — double taps
+    // and retries return the same order), the latest server-computed quote, the
+    // open payment attempt, and when the customer cancelled before paying.
+    checkoutRequestKey: v.optional(v.string()),
+    quote: v.optional(orderQuote),
+    paymentAttempt: v.optional(paymentAttempt),
+    cancelledAt: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_order_number", ["orderNumber"])
-    .index("by_payment_status", ["paymentStatus"]),
+    .index("by_payment_status", ["paymentStatus"])
+    .index("by_user_and_request_key", ["userId", "checkoutRequestKey"]),
+
+  // Phase 6E: every VERIFIED payment-provider event, once, by the provider's
+  // event id — duplicate webhooks change nothing. No card data, no payload.
+  commercePaymentEvents: defineTable({
+    provider: v.string(),
+    eventId: v.string(),
+    orderId: v.optional(v.id("commerceOrders")),
+    type: v.string(),
+    amountCents: v.number(),
+    currency: v.string(),
+    outcome: v.union(v.literal("applied"), v.literal("unchanged"), v.literal("rejected")),
+    reason: v.optional(v.string()),
+    receivedAt: v.number(),
+  }).index("by_provider_event", ["provider", "eventId"]),
 
   // One row per App Store subscription (original transaction), written ONLY
   // from verified Apple data (StoreKit 2 server verification / App Store

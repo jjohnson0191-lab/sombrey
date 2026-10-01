@@ -2,8 +2,9 @@
 // callable by other backend code (a verified payment-provider webhook, the
 // App Store server-notification handler, an owner tool) — never by a client.
 // Phase 6C calls the subscription ones from commerce/appStore.ts after Apple's
-// signatures are verified; the payment provider (6E) and activation (6G) will
-// call the rest. Each one enforces the domain's transition rules, so even
+// signatures are verified; 6E's applyPaymentUpdate is called only after a
+// payment provider verified its webhook (no provider is integrated yet);
+// fulfilment (6F) and activation (6G) will call the rest. Each one enforces the domain's transition rules, so even
 // trusted code can't mark an unpaid order delivered or re-price an order.
 
 import { ConvexError, v } from "convex/values";
@@ -11,11 +12,12 @@ import { internalMutation } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { COMMERCE_CONFIG } from "./config";
-import { FULFILLMENT_TRANSITIONS, PAYMENT_TRANSITIONS, RETURN_TRANSITIONS, buildOrderDraft, canTransition, formatOrderNumber, orderTotal, returnEligibility } from "./orders";
+import { FULFILLMENT_TRANSITIONS, RETURN_TRANSITIONS, canTransition, returnEligibility } from "./orders";
+import { applyVerifiedPayment, createOrderRecord } from "./checkoutStore";
 import { OWNED_STATUSES, transitionOwnership, type OwnershipStatus } from "./ownership";
 import { validateEvent, type CommerceEventName } from "./events";
 import { applyNotification, linkAccountToken, writeVerifiedSubscription, type StoreConfig } from "./subscriptionStore";
-import { fulfillmentStatus, paymentStatus, returnStatus, shipment, shippingAddress, subscriptionHistoryEvent as historyEvent, subscriptionStatus } from "./validators";
+import { fulfillmentStatus, returnStatus, shipment, shippingAddress, subscriptionHistoryEvent as historyEvent, subscriptionStatus } from "./validators";
 
 async function serverEvent(ctx: MutationCtx, name: CommerceEventName, userId: Id<"users">, extra: { productId?: string; countryCode?: string; amountCents?: number; currency?: string; orderId?: Id<"commerceOrders"> } = {}) {
   const { orderId, ...rest } = extra;
@@ -30,8 +32,9 @@ async function getOrder(ctx: MutationCtx, orderId: Id<"commerceOrders">): Promis
   return o;
 }
 
-/** A priced order for a user, awaiting payment — the future checkout's first
- * step. Prices come from the config, never from the caller. */
+/** A priced order for a user, awaiting payment — for trusted flows (staff,
+ * support). Customers use commerce/checkout:startBandCheckout. Both go through
+ * the same writer (checkoutStore.ts); prices come from the config, never the caller. */
 export const createOrder = internalMutation({
   args: {
     userId: v.id("users"),
@@ -41,61 +44,23 @@ export const createOrder = internalMutation({
   handler: async (ctx, args) => {
     const user = await ctx.db.get(args.userId);
     if (!user) throw new ConvexError({ code: "NOT_FOUND", message: "User not found" });
-    const r = buildOrderDraft(COMMERCE_CONFIG, { items: args.items, shippingAddress: args.shippingAddress });
-    if (!r.ok) throw new ConvexError({ code: "INVALID", message: r.error });
-    let orderNumber = formatOrderNumber(Math.random);
-    for (let i = 0; i < 5 && (await ctx.db.query("commerceOrders").withIndex("by_order_number", (q) => q.eq("orderNumber", orderNumber)).first()); i++) {
-      orderNumber = formatOrderNumber(Math.random);
-    }
-    const now = Date.now();
-    const { returnStatus: _r, ...draft } = r.draft;
-    const id = await ctx.db.insert("commerceOrders", {
-      userId: user._id, orderNumber, ...draft, returnStatus: "none",
-      returnPolicy: { windowDays: COMMERCE_CONFIG.returns.windowDays, eligibleConditions: [...COMMERCE_CONFIG.returns.eligibleConditions] },
-      shipments: [], createdAt: now, updatedAt: now,
-    });
-    return { orderId: id, orderNumber };
+    const r = await createOrderRecord(ctx.db, { userId: user._id, items: args.items, shippingAddress: args.shippingAddress }, COMMERCE_CONFIG, Date.now(), Math.random);
+    return { orderId: r.orderId, orderNumber: r.orderNumber };
   },
 });
 
-/** Shipping and tax as quoted by the provider — only before payment; the total follows. */
-export const setQuote = internalMutation({
-  args: { orderId: v.id("commerceOrders"), shippingCents: v.number(), taxCents: v.number() },
-  handler: async (ctx, args) => {
-    const o = await getOrder(ctx, args.orderId);
-    if (o.paymentStatus !== "awaiting_payment") throw new ConvexError({ code: "INVALID", message: "An order's amounts can't change once payment has started" });
-    const total = orderTotal(o.subtotalCents, args.shippingCents, args.taxCents);
-    if (total === null) throw new ConvexError({ code: "INVALID", message: "Invalid amounts" });
-    await ctx.db.patch(o._id, { shippingCents: args.shippingCents, taxCents: args.taxCents, totalCents: total, updatedAt: Date.now() });
-  },
-});
-
-/** A VERIFIED payment-provider update (from its webhook, after signature checks). */
+/** A VERIFIED payment-provider event (Phase 6E) — called only after the
+ * provider's PaymentProvider.verifyWebhook accepted the signature. Applied once
+ * per provider event id; the amount must equal the frozen quoted total; the 6A
+ * payment transition table decides what may change. Paying does NOT create Band
+ * ownership (Phase 6G — order ≠ ownership ≠ pairing). */
 export const applyPaymentUpdate = internalMutation({
   args: {
     orderId: v.id("commerceOrders"),
-    to: paymentStatus,
-    provider: v.object({ name: v.string(), checkoutSessionId: v.optional(v.string()), paymentId: v.optional(v.string()) }),
+    provider: v.string(),
+    event: v.object({ eventId: v.string(), providerRef: v.string(), type: v.string(), amountCents: v.number(), currency: v.string() }),
   },
-  handler: async (ctx, args) => {
-    const o = await getOrder(ctx, args.orderId);
-    if (o.paymentStatus === args.to) return { changed: false };
-    if (!canTransition(PAYMENT_TRANSITIONS, o.paymentStatus, args.to)) throw new ConvexError({ code: "INVALID", message: `Payment can't go from ${o.paymentStatus} to ${args.to}` });
-    if (args.to === "paid" && o.totalCents === null) throw new ConvexError({ code: "INVALID", message: "An order can't be paid before its total is known" });
-    const now = Date.now();
-    await ctx.db.patch(o._id, { paymentStatus: args.to, provider: args.provider, updatedAt: now, ...(args.to === "paid" ? { paidAt: now } : {}) });
-    if (args.to === "paid") {
-      // Paid → one ownership record per Band bought (purchased ≠ connected).
-      for (const line of o.lines) for (let i = 0; i < line.quantity; i++) {
-        await ctx.db.insert("bandOwnership", {
-          userId: o.userId, source: "order", orderId: o._id, status: "purchased",
-          history: [{ status: "purchased", at: now, by: "provider" }], createdAt: now, updatedAt: now,
-        });
-      }
-      await serverEvent(ctx, "band_checkout_completed", o.userId, { productId: o.lines[0]?.productId, countryCode: o.shippingAddress.countryCode, amountCents: o.totalCents!, currency: o.currency, orderId: o._id });
-    }
-    return { changed: true };
-  },
+  handler: async (ctx, args) => applyVerifiedPayment(ctx.db, args, COMMERCE_CONFIG, Date.now()),
 });
 
 async function moveOwnershipForOrder(ctx: MutationCtx, orderId: Id<"commerceOrders">, to: OwnershipStatus, by: "system" | "provider" | "staff") {

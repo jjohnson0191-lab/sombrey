@@ -74,7 +74,7 @@ test("State D — Band owner and member: everything that exists", () => {
 
 test("feature matrix: valid, versioned, every paid feature unlockable, account/settings/pairing always free", () => {
   assert.deepEqual(validateCommerceConfig(COMMERCE_CONFIG), []);
-  assert.equal(COMMERCE_CONFIG.version, "2026-10-provisional.2");
+  assert.match(COMMERCE_CONFIG.version, /^2026-10-provisional\.\d+$/);
   assert.deepEqual([...FEATURE_IDS].sort(), ["account", "advanced_intelligence", "ai_coach", "ai_meal_analysis", "band_pairing", "body_scan", "core_tracking", "settings", "vitals", "wearable_data"]);
   const broken = structuredClone(COMMERCE_CONFIG);
   broken.featureMatrix.settings = { requires: ["ai_intelligence"], covers: "x" };

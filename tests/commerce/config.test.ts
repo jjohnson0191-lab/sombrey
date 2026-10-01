@@ -24,7 +24,12 @@ test("the provisional launch model (PROVISIONAL — SUBJECT TO CHANGE)", () => {
   assert.equal(c.shipping.rateTable, null);
   assert.equal(c.tax.rates, null);
   assert.deepEqual([c.returns.windowDays, c.returns.eligibleConditions, c.returns.subscriptionRefunds], [30, ["unused"], "none_offered"]);
-  assert.deepEqual(c.checkout, { methods: ["apple_pay", "google_pay", "card"], provider: null });
+  assert.deepEqual(c.checkout, {
+    methods: ["apple_pay", "google_pay", "card"], provider: null, shippingQuoteProvider: null, taxQuoteProvider: null,
+    quoteTtlMinutes: 15, maxOpenCheckoutsPerUser: 3,
+  }, "6E: no payment, shipping or tax provider is chosen — nothing is invented");
+  assert.deepEqual(c.inventory, { provider: null }, "6E: no inventory source — stock is not tracked");
+  assert.deepEqual([c.products.band.sku, c.products.band.category, c.products.band.hardwareGeneration], ["SOMBREY_BAND_V1", "physical_band", "V1"]);
 });
 
 test("invalid configurations are caught before they can ship", () => {

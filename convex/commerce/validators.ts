@@ -53,6 +53,7 @@ export const commerceEventName = v.union(
   v.literal("subscription_purchase_initiated"), v.literal("subscription_checkout_abandoned"), v.literal("feature_access_denied"), v.literal("band_checkout_completed"), v.literal("band_order_completed"),
   v.literal("band_returned"), v.literal("subscription_activated"), v.literal("subscription_renewed"),
   v.literal("subscription_cancelled"), v.literal("subscription_expired"),
+  v.literal("band_quote_requested"), v.literal("band_payment_started"),
 );
 // Phase 6C: what a subscription history row records (appStoreRules.ts HISTORY_EVENTS).
 export const subscriptionHistoryEvent = v.union(
@@ -62,3 +63,35 @@ export const subscriptionHistoryEvent = v.union(
   v.literal("refunded"), v.literal("refund_reversed"), v.literal("revoked"), v.literal("renewal_extended"),
   v.literal("offer_redeemed"), v.literal("verified_with_apple"),
 );
+
+// Phase 6E: a shipping+tax quote, as stored on an order (providers never invent values).
+const unavailableReason = v.union(
+  v.literal("provider_not_configured"), v.literal("no_service_to_destination"), v.literal("provider_error"), v.literal("invalid_request"),
+  v.literal("currency_mismatch"), v.literal("invalid_amount"), v.literal("awaiting_shipping_quote"),
+);
+const componentQuote = v.union(
+  v.object({ status: v.literal("quoted"), amountCents: v.number(), provider: v.string(), reference: v.string(), detail: v.string() }),
+  v.object({ status: v.literal("unavailable"), reason: unavailableReason }),
+);
+export const orderQuote = v.object({
+  quoteId: v.string(),
+  complete: v.boolean(),
+  subtotalCents: v.number(),
+  shipping: componentQuote,
+  tax: componentQuote,
+  totalCents: v.union(v.number(), v.null()),
+  currency: v.string(),
+  configVersion: v.string(),
+  createdAt: v.number(),
+  expiresAt: v.number(),
+});
+// Phase 6E: the one payment attempt an order may have open (idempotent per quote).
+export const paymentAttempt = v.object({
+  provider: v.string(),
+  idempotencyKey: v.string(),          // server-derived: order + quote
+  quoteId: v.string(),
+  amountCents: v.number(),             // the quote's total, frozen
+  currency: v.string(),
+  providerRef: v.optional(v.string()), // the provider's session/payment id
+  startedAt: v.number(),
+});

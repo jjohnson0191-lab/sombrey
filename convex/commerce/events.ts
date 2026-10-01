@@ -36,6 +36,12 @@ export const COMMERCE_EVENTS = {
   subscription_renewed: "server",
   subscription_cancelled: "server",
   subscription_expired: "server",
+  // 6E: physical checkout milestones the SERVER observes (country + product
+  // only — never an address, a name or payment details; no amount: these
+  // aren't revenue). Revenue is band_checkout_completed, from a verified
+  // provider event only.
+  band_quote_requested: "server",
+  band_payment_started: "server",
 } as const satisfies Record<string, "client" | "server">;
 
 export type CommerceEventName = keyof typeof COMMERCE_EVENTS;

@@ -37,8 +37,14 @@ export type FeatureRule = {
 };
 
 export type PhysicalProduct = {
+  /** Stable internal product id — used by orders and events; never changes. */
   id: string;
   type: "physical";
+  /** Phase 6E: what this physical product is, and its stock-keeping unit. */
+  category: "physical_band";
+  sku: string;
+  /** The hardware generation sold under this SKU (customer-facing name: "Sombrey Band V1"). */
+  hardwareGeneration: string;
   displayName: string;
   description: string;
   priceCents: number;
@@ -91,9 +97,21 @@ export type CommerceConfig = {
   checkout: {
     /** Payment methods the eventual physical checkout must offer. */
     methods: Array<"apple_pay" | "google_pay" | "card">;
-    /** Undecided (docs/COMMERCE_6A.md §12). null = no provider integrated. */
+    /** Payment provider — undecided (docs/COMMERCE_6E.md §7). null = none
+     * integrated: no payment can start, nothing is ever marked paid. */
     provider: null;
+    /** Phase 6E: shipping and tax quote providers — undecided. null = no
+     * quote: shipping, tax and the total stay unknown (never invented). */
+    shippingQuoteProvider: null;
+    taxQuoteProvider: null;
+    /** How long a shipping+tax quote may be paid against. */
+    quoteTtlMinutes: number;
+    /** Open (unpaid, uncancelled) checkouts one account may hold at once. */
+    maxOpenCheckoutsPerUser: number;
   };
+  /** Phase 6E: no inventory source exists. null = stock is NOT tracked — the
+   * app must never show stock levels ("In stock", "Only 3 left"). */
+  inventory: { provider: null };
   /** Which capabilities each commercial state grants. */
   capabilityMatrix: Record<CommercialState, Capability[]>;
   /** Phase 6D: which capabilities each app feature needs (docs/COMMERCE_6D.md §3). */
@@ -109,13 +127,16 @@ export type CommerceConfig = {
 
 /** PROVISIONAL — SUBJECT TO CHANGE. Launch assumptions, 2026-10. */
 export const COMMERCE_CONFIG: CommerceConfig = {
-  version: "2026-10-provisional.2",
+  version: "2026-10-provisional.3",
   provisional: true,
   currency: "USD",
   products: {
     band: {
       id: "sombrey_band",
       type: "physical",
+      category: "physical_band",
+      sku: "SOMBREY_BAND_V1",
+      hardwareGeneration: "V1",
       displayName: "Sombrey Band",
       description: "The Sombrey wearable band.",
       priceCents: 100_00,
@@ -143,7 +164,15 @@ export const COMMERCE_CONFIG: CommerceConfig = {
   tax: { paidBy: "customer", rates: null },
   returns: { windowDays: 30, eligibleConditions: ["unused"], subscriptionRefunds: "none_offered" },
   subscriptionPolicy: { startsWhen: "purchase_agreed", cancellable: "any_time_by_customer" },
-  checkout: { methods: ["apple_pay", "google_pay", "card"], provider: null },
+  checkout: {
+    methods: ["apple_pay", "google_pay", "card"],
+    provider: null,
+    shippingQuoteProvider: null,
+    taxQuoteProvider: null,
+    quoteTtlMinutes: 15,
+    maxOpenCheckoutsPerUser: 3,
+  },
+  inventory: { provider: null },
   capabilityMatrix: {
     none: [],
     band_owner: ["band_experience", "vitals"],
@@ -213,6 +242,12 @@ export function validateCommerceConfig(c: CommerceConfig): string[] {
   if (!Number.isInteger(c.returns.windowDays) || c.returns.windowDays < 0 || c.returns.windowDays > 365) p.push("returns: windowDays 0–365");
   if (!c.returns.eligibleConditions.length) p.push("returns: at least one eligible condition");
   if (!c.checkout.methods.length) p.push("checkout: at least one payment method");
+  if (!Number.isInteger(c.checkout.quoteTtlMinutes) || c.checkout.quoteTtlMinutes < 1 || c.checkout.quoteTtlMinutes > 60) p.push("checkout: quoteTtlMinutes 1–60");
+  if (!Number.isInteger(c.checkout.maxOpenCheckoutsPerUser) || c.checkout.maxOpenCheckoutsPerUser < 1 || c.checkout.maxOpenCheckoutsPerUser > 10) p.push("checkout: maxOpenCheckoutsPerUser 1–10");
+  if (!/^[A-Z0-9_]{3,40}$/.test(c.products.band.sku)) p.push("band: sku must be UPPER_SNAKE");
+  if (c.products.band.category !== "physical_band") p.push("band: category");
+  // Overflow guard: the largest possible subtotal must stay an exact integer.
+  if (!Number.isSafeInteger(c.products.band.priceCents * c.products.band.maxQuantityPerOrder)) p.push("band: price × max quantity overflows");
   for (const [state, caps] of Object.entries(c.capabilityMatrix)) {
     for (const cap of caps) if (!CAPABILITIES.includes(cap)) p.push(`capabilityMatrix.${state}: unknown ${cap}`);
   }
@@ -245,7 +280,12 @@ export function publicCommerceConfig(c: CommerceConfig) {
     version: c.version,
     provisional: c.provisional,
     currency: c.currency,
-    band: { id: c.products.band.id, displayName: c.products.band.displayName, priceCents: c.products.band.priceCents, currency: c.products.band.currency, active: c.products.band.active },
+    band: {
+      id: c.products.band.id, sku: c.products.band.sku, displayName: c.products.band.displayName, priceCents: c.products.band.priceCents,
+      currency: c.products.band.currency, active: c.products.band.active,
+      // 6E: whether a Band can actually be bought now (a payment provider exists).
+      checkoutAvailable: c.products.band.active && c.checkout.provider !== null,
+    },
     membership: {
       id: c.products.membership.id, displayName: c.products.membership.displayName, priceCents: c.products.membership.priceCents,
       currency: c.products.membership.currency, interval: c.products.membership.interval, trialDays: c.products.membership.trial.enabled ? c.products.membership.trial.days : 0,

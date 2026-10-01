@@ -3,7 +3,10 @@
 //   publicConfig   → prices, countries and policies to display (anyone)
 //   myEntitlements → what the signed-in user may access (computed, never stored;
 //                    6D: per-feature access, membership summary, offers)
-//   myOrders       → the user's own orders (no provider internals)
+//   myOrders       → the user's own orders (no provider internals; 6E: stage + quote summary)
+//
+// Phase 6E: Band checkout (start, address, quote, payment, cancel) lives in
+// commerce/checkout.ts — same rules: the user from the token, nothing priced by the client.
 //   mySubscription → the user's own subscription state (no transaction ids)
 //   recordEvent    → a client-side commerce event (closed list, validated,
 //                    rate-limited; money events are server-only)
@@ -26,6 +29,7 @@ import type { Doc } from "../_generated/dataModel";
 import { COMMERCE_CONFIG, FEATURE_IDS, publicCommerceConfig } from "./config";
 import { unlockFor } from "./entitlements";
 import { entitlementsFor } from "./gate";
+import { orderStage } from "./quotes";
 import { validateEvent } from "./events";
 import { EVENTS_PER_HOUR } from "./events";
 import { linkAccountToken } from "./subscriptionStore";
@@ -69,7 +73,15 @@ export const myOrders = query({
   handler: async (ctx) => {
     const user = await requireUser(ctx);
     const orders = await ctx.db.query("commerceOrders").withIndex("by_user", (q) => q.eq("userId", user._id)).order("desc").take(50);
+    const now = Date.now();
     return orders.map((o) => ({
+      // 6E: the id lets an interrupted checkout resume; the stage is derived from
+      // the payment/fulfilment/return machines; the quote shows amounts only.
+      orderId: o._id, stage: orderStage({ ...o, quote: o.quote ?? null, paymentAttempt: o.paymentAttempt ?? null }, now),
+      quote: o.quote ? {
+        complete: o.quote.complete, totalCents: o.quote.totalCents, expiresAt: o.quote.expiresAt,
+        shipping: o.quote.shipping.status, tax: o.quote.tax.status,
+      } : null,
       orderNumber: o.orderNumber, createdAt: o.createdAt, currency: o.currency, lines: o.lines,
       subtotalCents: o.subtotalCents, shippingCents: o.shippingCents, taxCents: o.taxCents, totalCents: o.totalCents,
       paymentStatus: o.paymentStatus, fulfillmentStatus: o.fulfillmentStatus, returnStatus: o.returnStatus,
