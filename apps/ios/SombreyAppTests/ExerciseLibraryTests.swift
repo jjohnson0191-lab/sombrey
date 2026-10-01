@@ -201,3 +201,45 @@ struct WorkoutHistoryTimingTests {
         #expect(WorkoutHistory.merge(workouts: [m], sessions: []) { _ in "" }[0].detail == "250 kcal (your figure)")
     }
 }
+
+/// The library never presents a failed request as an empty library, and
+/// never stays "loading" once the server has answered.
+struct ExerciseLibraryStateTests {
+    private func state(fetching: Bool = false, loaded: Bool = true, facetsFailed: Bool = false, total: Double = 387,
+                       requestFailed: Bool = false, query: Bool = false) -> LibraryEmptyPresentation {
+        LibraryEmptyPresentation.of(fetching: fetching, facetsLoaded: loaded, facetsFailed: facetsFailed, total: total,
+                                    sourceRequestFailed: requestFailed, hasQuery: query)
+    }
+
+    @Test func loadingUntilTheServerAnswers() {
+        #expect(state(loaded: false) == .loading)
+        #expect(state(fetching: true, loaded: false) == .loading)
+    }
+
+    @Test func failuresAreFailuresNotAnEmptyLibrary() {
+        #expect(state(facetsFailed: true) == .failed, "the facets query failed (auth, network, server)")
+        #expect(state(loaded: false, facetsFailed: true) == .failed)
+        #expect(state(loaded: false, requestFailed: true) == .failed)
+        #expect(state(total: 0, requestFailed: true) == .failed, "a failed fetch on an empty library is an error, not 'no exercises'")
+    }
+
+    @Test func genuinelyEmptyOnlyWhenTheServerSaysSo() {
+        #expect(state(total: 0) == .noExercisesYet, "answered: 0 exercises, nothing failed")
+        #expect(state(fetching: true, total: 0) == .finding)
+    }
+
+    @Test func aPopulatedLibraryNeverReadsAsUnavailable() {
+        #expect(state(total: 387, requestFailed: true) == .prompt, "the source being unreachable doesn't hide what the library holds")
+        #expect(state(total: 387, query: true) == .noMatch)
+    }
+
+    /// The shapes production's exerciseLibrary:facets / :search return (verified 2026-10-01).
+    @Test func productionShapedRepliesDecode() throws {
+        let facets = #"{"total":387,"muscleGroups":["chest","back","shoulders","arms","legs","core","cardio"],"equipment":[{"key":"band","label":"Band"}],"difficulties":["beginner","intermediate","advanced"],"categories":["balance","cardio","flexibility","plyometric","strength"]}"#
+        let f = try JSONDecoder().decode(LibraryFacets.self, from: Data(facets.utf8))
+        #expect(f.total == 387)
+        let search = #"{"hasMore":true,"items":[{"_id":"m97b","category":"strength","description":"3/4 Sit-up is a beginner exercise.","difficulty":"beginner","equipment":["Body Weight"],"hasMedia":false,"mediaUrl":null,"muscleGroup":"core","name":"3/4 Sit-up","primaryMuscles":["Abs"]}]}"#
+        let r = try JSONDecoder().decode(LibrarySearchResult.self, from: Data(search.utf8))
+        #expect(r.items.count == 1 && r.hasMore && r.items[0].mediaUrl == nil)
+    }
+}

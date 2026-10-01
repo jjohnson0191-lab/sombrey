@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import ConvexMobile
+import os
 
 // MARK: - Wire shapes (Sombrey exercise library — `convex/exerciseLibrary.ts`)
 
@@ -169,8 +170,12 @@ final class ExerciseSearchModel {
     let results = ConvexQuery<LibrarySearchResult>()
     let facets = ConvexQuery<LibraryFacets>()
     private(set) var isFetchingMore = false
-    /// The last on-demand fetch couldn't reach the exercise source.
+    /// The last on-demand fetch couldn't reach the exercise source
+    /// (the server answered "unavailable"/"busy", or the request failed).
     private(set) var sourceUnavailable = false
+    /// The last on-demand fetch itself failed (network/auth/server error) —
+    /// distinct from the server answering that no source is configured.
+    private(set) var sourceRequestFailed = false
 
     static let pageSize = 40
     private var limit = pageSize
@@ -197,9 +202,23 @@ final class ExerciseSearchModel {
     /// Filters that live in the filter sheet (muscle has its own tabs).
     var sheetFilterCount: Int { [equipment, difficulty, category].compactMap { $0 }.count }
 
-    /// Try again after a failure.
+    /// Try again after a failure: re-runs the real requests — the facets
+    /// subscription too (a failed Convex subscription ends and never
+    /// recovers on its own), the search and the on-demand fetch.
     func retry() {
+        facets.subscribe(to: "exerciseLibrary:facets")
         schedule(immediately: true)
+    }
+
+    /// What the library shows when there are no results to list.
+    var emptyPresentation: LibraryEmptyPresentation {
+        LibraryEmptyPresentation.of(
+            fetching: isFetchingMore,
+            facetsLoaded: facets.value != nil,
+            facetsFailed: facets.errorMessage != nil,
+            total: facets.value?.total ?? 0,
+            sourceRequestFailed: sourceRequestFailed,
+            hasQuery: !term.trimmingCharacters(in: .whitespaces).isEmpty || hasFilters)
     }
 
     /// Next page: more of what the library holds, and the next page from the
@@ -251,8 +270,12 @@ final class ExerciseSearchModel {
             if let equip { args["equipment"] = equip }
             let result: LibraryRefreshResult = try await ConvexClientProvider.client.action("exerciseLibrary:refresh", with: args)
             sourceUnavailable = result.status == "unavailable" || result.status == "busy"
+            sourceRequestFailed = false
+            if sourceUnavailable { ExerciseLibraryDiagnostics.log("refresh: server answered \(result.status) (no exercise source reachable from this deployment)") }
         } catch {
             sourceUnavailable = true
+            sourceRequestFailed = true
+            ExerciseLibraryDiagnostics.error("refresh failed: \(String(describing: error))")
         }
     }
 }
@@ -352,6 +375,12 @@ struct ExerciseSearchPanel<Trailing: View>: View {
             results
         }
         .task { model.start() }
+        .onChange(of: model.facets.errorMessage) { _, error in
+            if let error { ExerciseLibraryDiagnostics.error("exerciseLibrary:facets failed: \(error)") }
+        }
+        .onChange(of: model.results.errorMessage) { _, error in
+            if let error { ExerciseLibraryDiagnostics.error("exerciseLibrary:search failed: \(error)") }
+        }
         .sheet(isPresented: $showingFilters) {
             LibraryFilterSheet(model: model)
                 .presentationDetents([.medium, .large])
@@ -451,18 +480,25 @@ struct ExerciseSearchPanel<Trailing: View>: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        let trimmed = model.term.trimmingCharacters(in: .whitespaces)
-        if model.isFetchingMore {
+        switch model.emptyPresentation {
+        case .finding:
             LibraryState(title: "Finding exercises…", working: true)
-        } else if model.sourceUnavailable && (model.facets.value?.total ?? 0) == 0 {
-            LibraryState(title: "The library isn't ready yet.",
-                         message: "Exercises appear here as soon as it is. Workouts you've already logged aren't affected.",
+        case .loading:
+            LibraryState(title: "Loading Exercise Library…", working: true)
+        case .failed:
+            LibraryState(title: "We couldn't load the Exercise Library.",
+                         message: "Check your connection and try again. Workouts you've already logged aren't affected.",
                          action: ("Try again", { model.retry() }))
-        } else if !trimmed.isEmpty || model.hasFilters {
+        case .noExercisesYet:
+            LibraryState(title: "No exercises available yet.",
+                         message: "Exercises appear here as soon as the library is connected. Workouts you've already logged aren't affected.",
+                         action: ("Try again", { model.retry() }))
+        case .noMatch:
+            let trimmed = model.term.trimmingCharacters(in: .whitespaces)
             LibraryState(title: trimmed.isEmpty ? "No exercises match these filters." : "No exercises match that search.",
                          message: "Try another muscle, movement, or equipment.",
                          action: model.hasFilters ? ("Clear filters", { model.clearFilters() }) : nil)
-        } else {
+        case .prompt:
             LibraryState(title: "Search for an exercise to begin.", message: "Try a movement (\u{201C}squat\u{201D}), a muscle (\u{201C}glutes\u{201D}) or equipment (\u{201C}dumbbell\u{201D}).")
         }
     }
@@ -853,4 +889,35 @@ struct ExercisePickerSheet: View {
             }
         }
     }
+}
+
+// MARK: - Library state (no rules hidden in the view)
+
+/// What the library shows in place of results. Never "empty" when a request
+/// failed, and never "loading" once the server has answered.
+enum LibraryEmptyPresentation: Equatable, Sendable {
+    case finding
+    case loading
+    case failed
+    case noExercisesYet
+    case noMatch
+    case prompt
+
+    static func of(fetching: Bool, facetsLoaded: Bool, facetsFailed: Bool, total: Double,
+                   sourceRequestFailed: Bool, hasQuery: Bool) -> LibraryEmptyPresentation {
+        if facetsFailed { return .failed }
+        if !facetsLoaded { return sourceRequestFailed ? .failed : .loading }
+        if fetching { return .finding }
+        if total == 0 { return sourceRequestFailed ? .failed : .noExercisesYet }
+        return hasQuery ? .noMatch : .prompt
+    }
+}
+
+/// Development diagnostics for the library's requests (Console.app,
+/// subsystem "com.sombrey.app", category "exercise-library"). Error
+/// descriptions only — never user data.
+enum ExerciseLibraryDiagnostics {
+    private static let logger = Logger(subsystem: "com.sombrey.app", category: "exercise-library")
+    static func log(_ message: String) { logger.log("\(message, privacy: .public)") }
+    static func error(_ message: String) { logger.error("\(message, privacy: .public)") }
 }
