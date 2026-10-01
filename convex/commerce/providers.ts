@@ -64,6 +64,9 @@ export type PaymentSession = {
 export type VerifiedPaymentEvent = {
   eventId: string;
   providerRef: string;
+  /** 6I: the idempotency key Sombrey passed to createSession, as echoed in the
+   * provider's signed event metadata — binds the event to its attempt. */
+  idempotencyKey?: string;
   type: "authorized" | "paid" | "failed" | "cancelled" | "refunded" | "partially_refunded";
   amountCents: number;
   currency: string;
@@ -130,4 +133,16 @@ export function providersFor(config: CommerceConfig): Providers {
   // implementation is returned here. Until then nothing is invented.
   void config.checkout.provider; void config.checkout.shippingQuoteProvider; void config.checkout.taxQuoteProvider; void config.fulfillment.provider;
   return { shipping: null, tax: null, payment: null, fulfillment: null };
+}
+
+// ─── 6I: webhook replay window ───────────────────────────────────────────────
+/** Webhook signatures typically cover a timestamp; an adapter's verifyWebhook
+ * MUST reject a correctly signed delivery whose timestamp is outside this
+ * window (replays of old captured requests), and anything with no timestamp.
+ * Event-id de-duplication (commercePaymentEvents / commerceShipmentEvents)
+ * catches replays inside the window. 5 minutes is the common provider default. */
+export const WEBHOOK_TOLERANCE_MS = 5 * 60 * 1000;
+
+export function webhookTimestampAcceptable(signedAtMs: unknown, nowMs: number, toleranceMs = WEBHOOK_TOLERANCE_MS): boolean {
+  return typeof signedAtMs === "number" && Number.isFinite(signedAtMs) && signedAtMs > 0 && Math.abs(nowMs - signedAtMs) <= toleranceMs;
 }

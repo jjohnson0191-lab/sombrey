@@ -174,6 +174,7 @@ struct MembershipView: View {
             if e.membership.status == "expired" || e.membership.status == "revoked" || e.membership.status == "refunded" {
                 Text("Your Band, your data and your history stay as they are.").font(StudioFont.body(12)).foregroundStyle(StudioColor.inkSoft)
             }
+            if entitlements.refreshFailed { CommerceNotice(text: CommerceUnavailable.lastConfirmed) { entitlements.refresh() } }
         case .checking: CommerceLoading()
         case .unavailable: CommerceNotice(text: CommerceUnavailable.membership) { entitlements.refresh() }
         case .notEnforced: CommerceNotice(text: CommerceUnavailable.membership)
@@ -272,6 +273,7 @@ struct BandView: View {
         case .checking: CommerceLoading()
         case .unavailable, .notEnforced: CommerceNotice(text: CommerceUnavailable.band) { entitlements.refresh() }
         case .ready(let e):
+            if entitlements.refreshFailed { CommerceNotice(text: CommerceUnavailable.lastConfirmed) { entitlements.refresh() } }
             switch BandOwnership.from(ownsBand: e.ownsBand, devices: devices.value) {
             case .owned:
                 let list = devices.value ?? []
@@ -406,13 +408,18 @@ struct OrdersView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if orders.errorMessage != nil {
+                    // 6I: a failed refresh keeps the orders already loaded, marked as such.
+                    switch LoadPresentation.of(hasValue: orders.value != nil, isEmpty: (orders.value ?? []).isEmpty, failed: orders.errorMessage != nil) {
+                    case .unavailable:
                         CommerceNotice(text: CommerceUnavailable.orders) { orders.subscribe(to: "commerce/access:myOrders") }
-                    } else if orders.isLoading && orders.value == nil {
+                    case .loading:
                         CommerceLoading()
-                    } else if (orders.value ?? []).isEmpty {
+                    case .empty:
                         Text("No orders yet.").font(StudioFont.body(14)).foregroundStyle(StudioColor.inkSoft).padding(.top, 8)
-                    } else {
+                    case .current, .lastLoaded:
+                        if orders.errorMessage != nil {
+                            CommerceNotice(text: CommerceUnavailable.lastLoadedOrders) { orders.subscribe(to: "commerce/access:myOrders") }
+                        }
                         ForEach(orders.value ?? []) { o in
                             NavigationLink { OrderDetailView(order: o) } label: { row(o) }
                                 .buttonStyle(.plain)
@@ -461,14 +468,19 @@ struct OrderDetailView: View {
                     Text(OrderStatusCopy.stage(tracking.value?.stage ?? order.stage)).font(StudioFont.body(14, weight: .medium)).foregroundStyle(StudioColor.ink)
                     if let total = order.totalCents { Text("Total \(PriceText.format(cents: total, currency: order.currency))").font(StudioFont.body(13)).foregroundStyle(StudioColor.inkSoft) }
                 }
-                if tracking.errorMessage != nil {
+                // 6I: a failed refresh keeps the last loaded detail, marked as such.
+                switch LoadPresentation.of(hasValue: tracking.value != nil, isEmpty: false, failed: tracking.errorMessage != nil) {
+                case .unavailable:
                     CommerceSection(eyebrow: "DELIVERY") { CommerceNotice(text: CommerceUnavailable.orders) { subscribe() } }
-                } else if let t = tracking.value {
-                    progress(t)
-                    trackingSection(t)
-                    returnsSection(t)
-                } else {
+                case .loading:
                     CommerceLoading()
+                case .current, .lastLoaded, .empty:
+                    if tracking.errorMessage != nil { CommerceNotice(text: CommerceUnavailable.lastLoadedOrders) { subscribe() } }
+                    if let t = tracking.value {
+                        progress(t)
+                        trackingSection(t)
+                        returnsSection(t)
+                    }
                 }
             }
             .padding(.horizontal, 24)

@@ -63,7 +63,11 @@ export async function createFulfillment(db: Db, args: {
   if (!KEY.test(args.idempotencyKey)) throw fail("INVALID", "Invalid idempotency key");
   const existing = await db.query("commerceFulfillments").withIndex("by_idempotency_key", (q) => q.eq("idempotencyKey", args.idempotencyKey)).first();
   if (existing) {
-    if (existing.orderId !== args.orderId) throw fail("CONFLICT", "That key belongs to another fulfilment");
+    // 6I: the same key must mean the same request.
+    const sameLines = !args.lines || (args.lines.length === existing.lines.length && args.lines.every((l) => existing.lines.some((x) => x.productId === l.productId && x.quantity === l.quantity)));
+    if (existing.orderId !== args.orderId || existing.kind !== args.kind || existing.replacesFulfillmentId !== args.replacesFulfillmentId || !sameLines) {
+      throw fail("CONFLICT", "That key belongs to a different fulfilment");
+    }
     return { fulfillmentId: existing._id, created: false };
   }
   const order = await getOrder(db, args.orderId);
@@ -134,9 +138,18 @@ export async function recordShipment(db: Db, args: {
 }, config: CommerceConfig, now: number): Promise<{ shipmentId: Id<"commerceShipments">; created: boolean }> {
   if (!KEY.test(args.idempotencyKey)) throw fail("INVALID", "Invalid idempotency key");
   const existing = await db.query("commerceShipments").withIndex("by_idempotency_key", (q) => q.eq("idempotencyKey", args.idempotencyKey)).first();
-  if (existing) return { shipmentId: existing._id, created: false };
   const c = args.created;
+  if (existing) {
+    // 6I: a retry after a lost response is the same shipment; anything else is a conflict.
+    if (existing.direction !== args.direction || existing.fulfillmentId !== args.fulfillmentId || existing.returnId !== args.returnId
+      || existing.provider !== args.provider || existing.providerRef !== c.providerRef) throw fail("CONFLICT", "That key belongs to a different shipment");
+    return { shipmentId: existing._id, created: false };
+  }
+  // 6I: a malformed provider response is refused, never stored half-filled.
   if (typeof c.providerRef !== "string" || !c.providerRef || c.providerRef.length > 120) throw fail("INVALID", "Provider reference missing");
+  for (const field of [c.carrier, c.service]) {
+    if (typeof field !== "string" || !field.trim() || field.length > 60) throw fail("INVALID", "Malformed provider response");
+  }
   let order: Order;
   if (args.direction === "outbound") {
     const f = args.fulfillmentId ? await db.get(args.fulfillmentId) : null;
@@ -151,7 +164,7 @@ export async function recordShipment(db: Db, args: {
     orderId: order._id, userId: order.userId, direction: args.direction,
     ...(args.fulfillmentId ? { fulfillmentId: args.fulfillmentId } : {}), ...(args.returnId ? { returnId: args.returnId } : {}),
     provider: args.provider, providerRef: c.providerRef, idempotencyKey: args.idempotencyKey,
-    carrier: String(c.carrier).slice(0, 60), service: String(c.service).slice(0, 60),
+    carrier: c.carrier.trim(), service: c.service.trim(),
     destinationCountry: order.shippingAddress.countryCode, status: "label_created",
     ...(c.trackingNumber && TRACKING.test(c.trackingNumber) ? { trackingNumber: c.trackingNumber } : {}),
     ...(safeTrackingUrl(c.trackingUrl) ? { trackingUrl: safeTrackingUrl(c.trackingUrl) } : {}),
@@ -167,7 +180,7 @@ const stateOf = (s: Doc<"commerceShipments">): ShipmentState => ({
   trackingNumber: s.trackingNumber, trackingUrl: s.trackingUrl, estimatedDeliveryAt: s.estimatedDeliveryAt,
 });
 
-export type ShipmentEventOutcome = "applied" | "stale" | "after_terminal" | "unknown_status" | "invalid" | "unknown_shipment" | "duplicate";
+export type ShipmentEventOutcome = "applied" | "stale" | "after_terminal" | "unknown_status" | "invalid" | "unknown_shipment" | "duplicate" | "conflict";
 
 /** A carrier event the provider VERIFIED. Recorded once per (provider, event id);
  * applied only if it's newer than what the shipment already shows. */
@@ -176,9 +189,13 @@ export async function applyShipmentEvent(db: Db, args: { provider: string; event
   const e = args.event;
   if (typeof e.eventId !== "string" || !e.eventId || e.eventId.length > 200) throw fail("INVALID", "Event id missing");
   const seen = await db.query("commerceShipmentEvents").withIndex("by_provider_event", (q) => q.eq("provider", args.provider).eq("eventId", e.eventId)).first();
-  if (seen) return { outcome: "duplicate" };
+  if (seen) {
+    // 6I: the same event id with different contents is never applied.
+    const same = seen.type === String(e.type).slice(0, 40) && seen.occurredAt === (Number.isFinite(e.occurredAt) ? e.occurredAt : 0);
+    return same ? { outcome: "duplicate" } : { outcome: "conflict", reason: "event_id_reused_with_different_contents" };
+  }
   const shipment = await db.query("commerceShipments").withIndex("by_provider_ref", (q) => q.eq("provider", args.provider).eq("providerRef", e.providerRef)).first();
-  const record = async (outcome: Exclude<ShipmentEventOutcome, "duplicate">, reason?: string) => {
+  const record = async (outcome: Exclude<ShipmentEventOutcome, "duplicate" | "conflict">, reason?: string) => {
     await db.insert("commerceShipmentEvents", {
       provider: args.provider, eventId: e.eventId, ...(shipment ? { shipmentId: shipment._id } : {}),
       type: String(e.type).slice(0, 40), providerStatus: String(e.providerStatus ?? "").slice(0, 120),

@@ -314,12 +314,18 @@ export function validateCommerceConfig(c: CommerceConfig): string[] {
  * fulfilment/return rule looks products up here, so future hardware is a
  * config entry, not a code change. */
 export function physicalProduct(c: CommerceConfig, productId: string): PhysicalProduct | undefined {
-  return [c.products.band].find((p) => p.id === productId);
+  return physicalProducts(c).find((p) => p.id === productId);
+}
+
+/** 6I: every physical product in the configuration — a future Band V2/Pro is a
+ * new entry under `products`, found here without code changes. */
+export function physicalProducts(c: CommerceConfig): PhysicalProduct[] {
+  return (Object.values(c.products) as Array<PhysicalProduct | SubscriptionProduct>).filter((p): p is PhysicalProduct => p.type === "physical");
 }
 
 /** Every product id the commerce events may name. */
 export function knownProductIds(c: CommerceConfig): string[] {
-  return [c.products.band.id, c.products.membership.id];
+  return (Object.values(c.products) as Array<{ id: string }>).map((p) => p.id);
 }
 
 /** Whether a country is a configured shipping destination. */

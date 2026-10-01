@@ -79,7 +79,7 @@ export const DEVICE_TRANSITIONS: Record<DeviceStatus, DeviceStatus[]> = {
   registered: ["assigned", "retired"],
   assigned: ["registered", "activated", "returned", "retired"],
   activated: ["replaced", "returned", "deactivated"],
-  replaced: ["retired"],
+  replaced: ["returned", "retired"],   // 6I: the old unit can still be sent back
   returned: ["retired"],
   deactivated: ["retired"],
   retired: [],

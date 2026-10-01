@@ -26,7 +26,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
-import { COMMERCE_CONFIG, FEATURE_IDS, publicCommerceConfig } from "./config";
+import { COMMERCE_CONFIG, FEATURE_IDS, knownProductIds, publicCommerceConfig } from "./config";
 import { unlockFor } from "./entitlements";
 import { entitlementsFor } from "./gate";
 import { orderStage } from "./quotes";
@@ -74,10 +74,19 @@ export const myOrders = query({
     const user = await requireUser(ctx);
     const orders = await ctx.db.query("commerceOrders").withIndex("by_user", (q) => q.eq("userId", user._id)).order("desc").take(50);
     const now = Date.now();
+    // 6I: an approved return reads "approved" or "on its way" the same here as in
+    // the order's detail (only orders with an approved return need the lookup).
+    const activeReturn = new Map<string, string>();
+    for (const o of orders) {
+      if (o.returnStatus !== "approved") continue;
+      const rs = await ctx.db.query("commerceReturns").withIndex("by_order", (q) => q.eq("orderId", o._id)).collect();
+      const active = rs.find((r) => !["cancelled", "rejected", "refunded"].includes(r.status));
+      if (active) activeReturn.set(o._id, active.status);
+    }
     return orders.map((o) => ({
       // 6E: the id lets an interrupted checkout resume; the stage is derived from
       // the payment/fulfilment/return machines; the quote shows amounts only.
-      orderId: o._id, stage: orderStage({ ...o, quote: o.quote ?? null, paymentAttempt: o.paymentAttempt ?? null }, now),
+      orderId: o._id, stage: orderStage({ ...o, quote: o.quote ?? null, paymentAttempt: o.paymentAttempt ?? null, activeReturn: activeReturn.get(o._id) ?? null }, now),
       quote: o.quote ? {
         complete: o.quote.complete, totalCents: o.quote.totalCents, expiresAt: o.quote.expiresAt,
         shipping: o.quote.shipping.status, tax: o.quote.tax.status,
@@ -134,7 +143,7 @@ export const recordEvent = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const problem = validateEvent(args, "client", [COMMERCE_CONFIG.products.band.id, COMMERCE_CONFIG.products.membership.id]);
+    const problem = validateEvent(args, "client", knownProductIds(COMMERCE_CONFIG));
     if (problem) throw new ConvexError({ code: "INVALID", message: problem });
     const now = Date.now();
     const recent = await ctx.db.query("commerceEvents")

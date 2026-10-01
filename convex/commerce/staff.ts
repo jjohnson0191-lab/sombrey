@@ -19,7 +19,8 @@ import { internal } from "../_generated/api";
 import { staffMay, type StaffLevel } from "./staffAccess";
 import { COMMERCE_CONFIG, physicalProduct } from "./config";
 import { inspectionCondition } from "./validators";
-import { shipmentAttention, TERMINAL_SHIPMENT } from "./fulfillment";
+import { logCommerce } from "./observability";
+import { normalizeCreatedShipment, normalizeProviderShipmentEvent, shipmentAttention, TERMINAL_SHIPMENT } from "./fulfillment";
 import { cancelFulfillment as cancelFulfillmentRecord, cancelPaidOrderBeforeShipment, createFulfillment as createFulfillmentRecord, recordShipment, recordSubmission } from "./fulfillmentStore";
 import { approveRefund as approveRefundRecord, authorizeReturn as authorizeReturnRecord, markRefundRequested, receiveReturn as receiveReturnRecord, rejectReturn as rejectReturnRecord } from "./returnsStore";
 import { providersFor } from "./providers";
@@ -137,11 +138,18 @@ export const submitFulfillment = action({
     await ctx.runQuery(internal.commerce.staff.checkStaff, { level: "fulfillment" });
     if (!provider) return { status: "fulfillment_unavailable" };
     const job = await ctx.runQuery(internal.commerce.staff.fulfillmentJob, { fulfillmentId: args.fulfillmentId });
+    // 6I: a retry after a lost response finds it already submitted — same answer, no second call.
+    if (job.alreadySubmitted) return { status: "submitted" };
     // The same key on every retry: the provider returns the same shipment, never a second one.
     const idempotencyKey = `ship:${args.fulfillmentId}:1`;
-    const created = await provider.createShipment({ idempotencyKey, orderNumber: job.orderNumber, direction: "outbound", address: job.address, items: job.items })
+    const raw = await provider.createShipment({ idempotencyKey, orderNumber: job.orderNumber, direction: "outbound", address: job.address, items: job.items })
       .catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    if (!created.ok) return { status: "provider_refused" };
+    // 6I: a malformed response is a refusal — nothing half-filled is stored.
+    const created = normalizeCreatedShipment(raw);
+    if (!created) {
+      logCommerce("fulfillment_submit_refused", { fulfillmentId: args.fulfillmentId, provider: provider.name, reason: raw && !raw.ok ? raw.reason : "malformed_response" }, "warn");
+      return { status: "provider_refused" };
+    }
     await ctx.runMutation(internal.commerce.staff.recordProviderShipment, { fulfillmentId: args.fulfillmentId, idempotencyKey, provider: provider.name, created });
     return { status: "submitted" };
   },
@@ -150,19 +158,23 @@ export const submitFulfillment = action({
 /** Ask the provider for a shipment's latest events (recovery after missed webhooks). */
 export const refreshTracking = action({
   args: { shipmentId: v.id("commerceShipments") },
-  handler: async (ctx, args): Promise<{ status: "refreshed" | "tracking_unavailable" | "provider_refused"; applied?: number }> => {
+  handler: async (ctx, args): Promise<{ status: "refreshed" | "tracking_unavailable" | "provider_refused"; applied?: number; skipped?: number }> => {
     const provider = providersFor(COMMERCE_CONFIG).fulfillment;
     await ctx.runQuery(internal.commerce.staff.checkStaff, { level: "fulfillment" });
     if (!provider) return { status: "tracking_unavailable" };
     const ref = await ctx.runQuery(internal.commerce.staff.shipmentRef, { shipmentId: args.shipmentId });
     const events = await provider.getTracking(ref).catch(() => ({ ok: false as const, reason: "provider_error" as const }));
     if (!Array.isArray(events)) return { status: "provider_refused" };
-    let applied = 0;
-    for (const event of events) {
+    let applied = 0, skipped = 0;
+    for (const raw of events) {
+      // 6I: one malformed event is skipped on its own; it can't fail the batch.
+      const event = normalizeProviderShipmentEvent(raw);
+      if (!event || event.providerRef !== ref) { skipped++; continue; }
       const r = await ctx.runMutation(internal.commerce.internal.applyShipmentEvent, { provider: provider.name, event });
       if (r.outcome === "applied") applied++;
     }
-    return { status: "refreshed", applied };
+    if (skipped) logCommerce("tracking_events_skipped", { shipmentId: args.shipmentId, provider: provider.name, skipped, applied }, "warn");
+    return { status: "refreshed", applied, skipped };
   },
 });
 
@@ -202,9 +214,10 @@ export const createReturnLabel = action({
     if (!provider) return { status: "returns_unavailable" };
     const job = await ctx.runQuery(internal.commerce.staff.returnJob, { returnId: args.returnId });
     const idempotencyKey = `return:${args.returnId}:1`;
-    const created = await provider.createShipment({ idempotencyKey, orderNumber: job.orderNumber, direction: "return", address: job.address, items: job.items })
+    const raw = await provider.createShipment({ idempotencyKey, orderNumber: job.orderNumber, direction: "return", address: job.address, items: job.items })
       .catch(() => ({ ok: false as const, reason: "provider_error" as const }));
-    if (!created.ok) return { status: "provider_refused" };
+    const created = normalizeCreatedShipment(raw);
+    if (!created) return { status: "provider_refused" };
     await ctx.runMutation(internal.commerce.staff.recordReturnShipment, { returnId: args.returnId, idempotencyKey, provider: provider.name, created });
     return { status: "created" };
   },
@@ -248,10 +261,11 @@ export const fulfillmentJob = internalQuery({
   handler: async (ctx, args) => {
     await requireStaff(ctx, "fulfillment");
     const f = await ctx.db.get(args.fulfillmentId);
+    if (f && f.status !== "pending" && f.providerRef !== undefined) return { alreadySubmitted: true as const };
     if (!f || f.status !== "pending") throw new ConvexError({ code: "INVALID", message: "Only a pending fulfilment can be submitted" });
     const o = (await ctx.db.get(f.orderId))!;
     if (o.paymentStatus !== "paid" && !(f.kind === "replacement" && o.paymentStatus === "partially_refunded")) throw new ConvexError({ code: "NOT_FULFILLABLE", message: "This order can't be shipped" });
-    return { orderNumber: o.orderNumber, address: o.shippingAddress, items: f.lines.map((l) => ({ ...l, sku: physicalProduct(COMMERCE_CONFIG, l.productId)?.sku ?? l.productId })) };
+    return { alreadySubmitted: false as const, orderNumber: o.orderNumber, address: o.shippingAddress, items: f.lines.map((l) => ({ ...l, sku: physicalProduct(COMMERCE_CONFIG, l.productId)?.sku ?? l.productId })) };
   },
 });
 

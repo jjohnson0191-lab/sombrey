@@ -42,7 +42,7 @@ export const applyPaymentUpdate = internalMutation({
   args: {
     orderId: v.id("commerceOrders"),
     provider: v.string(),
-    event: v.object({ eventId: v.string(), providerRef: v.string(), type: v.string(), amountCents: v.number(), currency: v.string() }),
+    event: v.object({ eventId: v.string(), providerRef: v.string(), type: v.string(), amountCents: v.number(), currency: v.string(), idempotencyKey: v.optional(v.string()) }),
   },
   handler: async (ctx, args) => applyVerifiedPayment(ctx.db, args, COMMERCE_CONFIG, Date.now()),
 });

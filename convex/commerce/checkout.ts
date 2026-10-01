@@ -25,7 +25,7 @@ import { internal } from "../_generated/api";
 import { COMMERCE_CONFIG } from "./config";
 import { orderQuote, shippingAddress } from "./validators";
 import { attachProviderRef, cancelCheckout as cancelCheckoutRecord, createOrderRecord, ownOrder, recordQuote, reservePaymentAttempt, updateAddress } from "./checkoutStore";
-import { computeQuote, type OrderQuote } from "./quotes";
+import { computeQuote, reusableQuote, type OrderQuote } from "./quotes";
 import { providersFor } from "./providers";
 
 async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> {
@@ -78,6 +78,7 @@ export const requestQuote = action({
   args: { orderId: v.id("commerceOrders") },
   handler: async (ctx, args): Promise<ReturnType<typeof publicQuote>> => {
     const draft = await ctx.runQuery(internal.commerce.checkout.draftForQuote, { orderId: args.orderId });
+    if (draft.recentQuote) return publicQuote(draft.recentQuote as OrderQuote);
     const quote = await computeQuote(draft, providersFor(COMMERCE_CONFIG), COMMERCE_CONFIG, Date.now(), crypto.randomUUID(), COMMERCE_CONFIG.version);
     await ctx.runMutation(internal.commerce.checkout.storeQuote, { orderId: args.orderId, quote });
     return publicQuote(quote);
@@ -119,7 +120,7 @@ export const draftForQuote = internalQuery({
     if (o.paymentStatus !== "awaiting_payment" || o.cancelledAt !== undefined || o.paymentAttempt !== undefined) {
       throw new ConvexError({ code: "INVALID", message: "This order can't be re-quoted" });
     }
-    return { lines: o.lines, currency: o.currency, subtotalCents: o.subtotalCents, shippingAddress: o.shippingAddress };
+    return { lines: o.lines, currency: o.currency, subtotalCents: o.subtotalCents, shippingAddress: o.shippingAddress, recentQuote: reusableQuote(o.quote, Date.now(), COMMERCE_CONFIG) };
   },
 });
 

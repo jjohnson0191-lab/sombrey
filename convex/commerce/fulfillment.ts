@@ -259,3 +259,46 @@ export function refundAmountFor(order: { lines: OrderLine[] }, returned: Fulfill
 }
 
 export { RETURN_TRANSITIONS };
+
+// ─── 6I: provider data is untrusted until normalized ────────────────────────
+// A provider adapter's output is parsed here before it reaches a mutation, so
+// one malformed event or response is skipped/refused on its own, never stored
+// half-filled and never allowed to fail a whole batch.
+
+const str = (u: unknown, max: number): string | undefined => (typeof u === "string" && u.trim() && u.length <= max ? u.trim() : undefined);
+
+/** A provider's shipment event, or null if it's malformed. Unknown `type`s pass
+ * through (they're recorded as unknown_status, never applied). */
+export function normalizeProviderShipmentEvent(raw: unknown): {
+  eventId: string; providerRef: string; type: string; providerStatus: string; occurredAt: number;
+  trackingNumber?: string; trackingUrl?: string; estimatedDeliveryAt?: number;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const eventId = str(r.eventId, 200), providerRef = str(r.providerRef, 120), type = str(r.type, 40);
+  if (!eventId || !providerRef || !type || !validTime(r.occurredAt)) return null;
+  return {
+    eventId, providerRef, type, providerStatus: typeof r.providerStatus === "string" ? r.providerStatus.slice(0, 120) : "", occurredAt: r.occurredAt,
+    ...(typeof r.trackingNumber === "string" && TRACKING.test(r.trackingNumber) ? { trackingNumber: r.trackingNumber } : {}),
+    ...(safeTrackingUrl(r.trackingUrl) ? { trackingUrl: safeTrackingUrl(r.trackingUrl) } : {}),
+    ...(validTime(r.estimatedDeliveryAt) ? { estimatedDeliveryAt: r.estimatedDeliveryAt } : {}),
+  };
+}
+
+/** A provider's "shipment created" response, or null if it's malformed. */
+export function normalizeCreatedShipment(raw: unknown): {
+  ok: true; providerRef: string; carrier: string; service: string;
+  trackingNumber?: string; trackingUrl?: string; estimatedDeliveryAt?: number; location?: string;
+} | null {
+  if (!raw || typeof raw !== "object" || (raw as { ok?: unknown }).ok !== true) return null;
+  const r = raw as Record<string, unknown>;
+  const providerRef = str(r.providerRef, 120), carrier = str(r.carrier, 60), service = str(r.service, 60);
+  if (!providerRef || !carrier || !service) return null;
+  return {
+    ok: true, providerRef, carrier, service,
+    ...(typeof r.trackingNumber === "string" && TRACKING.test(r.trackingNumber) ? { trackingNumber: r.trackingNumber } : {}),
+    ...(safeTrackingUrl(r.trackingUrl) ? { trackingUrl: safeTrackingUrl(r.trackingUrl) } : {}),
+    ...(validTime(r.estimatedDeliveryAt) ? { estimatedDeliveryAt: r.estimatedDeliveryAt } : {}),
+    ...(str(r.location, 60) ? { location: str(r.location, 60) } : {}),
+  };
+}

@@ -213,8 +213,11 @@ async function readyToPay(db: MemoryDb) {
   assert.ok(r.kind === "new");
   return { orderId, total: quote.totalCents! };
 }
-const pay = (db: MemoryDb, orderId: unknown, over: Partial<{ eventId: string; type: string; amountCents: number; currency: string; providerRef: string }> = {}, provider = "test-pay") =>
-  db.serial(() => applyVerifiedPayment(db as never, { orderId: orderId as never, provider, event: { eventId: "evt-1", providerRef: "pi_1", type: "paid", amountCents: 22330, currency: "USD", ...over } }, C, NOW + 2 * MIN));
+// A verified provider event echoes the attempt's idempotency key (6I: that is how
+// it's bound to its attempt before the provider's reference is recorded).
+const attemptKey = (db: MemoryDb, orderId: unknown) => (db.rows("commerceOrders").find((o) => o._id === orderId)?.paymentAttempt as { idempotencyKey?: string } | undefined)?.idempotencyKey;
+const pay = (db: MemoryDb, orderId: unknown, over: Partial<{ eventId: string; type: string; amountCents: number; currency: string; providerRef: string; idempotencyKey: string }> = {}, provider = "test-pay") =>
+  db.serial(() => applyVerifiedPayment(db as never, { orderId: orderId as never, provider, event: { eventId: "evt-1", providerRef: "pi_1", type: "paid", amountCents: 22330, currency: "USD", idempotencyKey: attemptKey(db, orderId), ...over } }, C, NOW + 2 * MIN));
 
 test("a verified 'paid' for exactly the quoted total marks the order paid — once — and creates NO Band ownership", async () => {
   const db = new MemoryDb();
@@ -242,6 +245,8 @@ test("payment events that don't match the frozen attempt are rejected and record
     [{ eventId: "e3", currency: "LKR" }, "amount_mismatch"],
     [{ eventId: "e4", type: "teleported" }, "unknown_event_type"],
     [{ eventId: "e5" }, "not_this_payment", "other-provider"],
+    // 6I: before the provider's reference is recorded, an event must carry this attempt's key.
+    [{ eventId: "e5b", idempotencyKey: "someone-elses-attempt" }, "not_this_payment"],
   ];
   for (const [over, reason, provider] of cases) assert.deepEqual(await pay(db, orderId, over, provider), { outcome: "rejected", reason }, reason);
   assert.equal(order(db, orderId).paymentStatus, "awaiting_payment");

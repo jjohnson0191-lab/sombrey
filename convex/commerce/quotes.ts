@@ -17,7 +17,7 @@
 //
 // Pure — tested in tests/commerce/checkout.test.ts.
 
-import type { CommerceConfig } from "./config.ts";
+import { physicalProduct, type CommerceConfig } from "./config.ts";
 import { orderTotal, type FulfillmentStatus, type OrderLine, type PaymentStatus, type ReturnStatus, type ShippingAddress } from "./orders.ts";
 import type { ProviderQuote, ProviderRefusal, Providers, QuoteLine } from "./providers.ts";
 
@@ -52,11 +52,12 @@ type DraftForQuote = { lines: OrderLine[]; currency: string; subtotalCents: numb
  * Band's price, currency or availability changed, the customer starts again —
  * nothing is silently re-priced and no draft is charged at an old price. */
 export function draftStillCurrent(d: DraftForQuote, config: CommerceConfig): boolean {
-  const band = config.products.band;
-  if (!band.active || d.currency !== config.currency) return false;
-  return d.lines.every((l) => l.productId === band.id && l.unitPriceCents === band.priceCents && l.currency === band.currency
-    && Number.isInteger(l.quantity) && l.quantity >= 1 && l.quantity <= band.maxQuantityPerOrder)
-    && d.subtotalCents === d.lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0);
+  if (d.currency !== config.currency) return false;
+  return d.lines.every((l) => {
+    const p = physicalProduct(config, l.productId);
+    return !!p && p.active && l.unitPriceCents === p.priceCents && l.currency === p.currency
+      && Number.isInteger(l.quantity) && l.quantity >= 1 && l.quantity <= p.maxQuantityPerOrder;
+  }) && d.subtotalCents === d.lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0);
 }
 
 function component(r: ProviderQuote | ProviderRefusal, provider: string, currency: string): ComponentQuote {
@@ -68,7 +69,7 @@ function component(r: ProviderQuote | ProviderRefusal, provider: string, currenc
 
 /** Quotes a draft. Providers that throw are treated as errors, not as zero. */
 export async function computeQuote(d: DraftForQuote, providers: Providers, config: CommerceConfig, now: number, quoteId: string, configVersion: string): Promise<OrderQuote> {
-  const lines: QuoteLine[] = d.lines.map((l) => ({ productId: l.productId, sku: config.products.band.sku, quantity: l.quantity, unitPriceCents: l.unitPriceCents }));
+  const lines: QuoteLine[] = d.lines.map((l) => ({ productId: l.productId, sku: physicalProduct(config, l.productId)?.sku ?? l.productId, quantity: l.quantity, unitPriceCents: l.unitPriceCents }));
   const destination = { countryCode: d.shippingAddress.countryCode, region: d.shippingAddress.region, postalCode: d.shippingAddress.postalCode, city: d.shippingAddress.city };
   const expiries = [now + config.checkout.quoteTtlMinutes * 60_000];
   let shipping: ComponentQuote = { status: "unavailable", reason: "provider_not_configured" };
@@ -90,6 +91,16 @@ export async function computeQuote(d: DraftForQuote, providers: Providers, confi
     quoteId, complete: totalCents !== null, subtotalCents: d.subtotalCents, shipping, tax, totalCents,
     currency: d.currency, configVersion, createdAt: now, expiresAt: Math.min(...expiries),
   };
+}
+
+/** 6I: a quote made in the last few seconds is returned again rather than
+ * asking the shipping/tax providers anew — a double tap or a retry loop can't
+ * flood the providers (or the analytics) with identical requests. The address
+ * and lines can't have changed: changing either drops the stored quote. */
+export const QUOTE_REUSE_MS = 10_000;
+export function reusableQuote(q: OrderQuote | undefined | null, now: number, config: CommerceConfig): OrderQuote | null {
+  if (!q || q.configVersion !== config.version) return null;
+  return now >= q.createdAt && now - q.createdAt < QUOTE_REUSE_MS && now < q.expiresAt ? q : null;
 }
 
 /** A quote payment may start against. */

@@ -12,7 +12,7 @@
 //
 // Pure — tested in tests/commerce/orders.test.ts.
 
-import { isSupportedCountry, type CommerceConfig } from "./config.ts";
+import { isSupportedCountry, physicalProduct, type CommerceConfig } from "./config.ts";
 
 export type PaymentStatus = "awaiting_payment" | "authorized" | "paid" | "failed" | "cancelled" | "refunded" | "partially_refunded";
 export type FulfillmentStatus = "unfulfilled" | "processing" | "shipped" | "delivered" | "delivery_failed" | "cancelled";
@@ -106,17 +106,19 @@ export function validateAddress(a: ShippingAddress, config: CommerceConfig): str
 export function buildOrderDraft(config: CommerceConfig, request: { items: Array<{ productId: string; quantity: number }>; shippingAddress: ShippingAddress }):
   { ok: true; draft: OrderDraft } | { ok: false; error: string } {
   if (!request.items.length) return { ok: false, error: "An order needs at least one item" };
-  const band = config.products.band;
   const lines: OrderLine[] = [];
   const seen = new Set<string>();
   for (const item of request.items) {
     if (seen.has(item.productId)) return { ok: false, error: "Duplicate product in order" };
     seen.add(item.productId);
     if (item.productId === config.products.membership.id) return { ok: false, error: "Subscriptions are purchased through the App Store, not in a physical order" };
-    if (item.productId !== band.id) return { ok: false, error: "Unknown product" };
-    if (!band.active) return { ok: false, error: "That product isn't available" };
-    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > band.maxQuantityPerOrder) return { ok: false, error: `Quantity must be 1–${band.maxQuantityPerOrder}` };
-    lines.push({ productId: band.id, productType: "physical", displayName: band.displayName, unitPriceCents: band.priceCents, quantity: item.quantity, currency: band.currency });
+    // 6I: any configured physical product (the Band today; future hardware is config).
+    const p = physicalProduct(config, item.productId);
+    if (!p) return { ok: false, error: "Unknown product" };
+    if (!p.active) return { ok: false, error: "That product isn't available" };
+    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > p.maxQuantityPerOrder) return { ok: false, error: `Quantity must be 1–${p.maxQuantityPerOrder}` };
+    if (p.currency !== config.currency) return { ok: false, error: "That product isn't sold in the store currency" };
+    lines.push({ productId: p.id, productType: "physical", displayName: p.displayName, unitPriceCents: p.priceCents, quantity: item.quantity, currency: p.currency });
   }
   const addressProblem = validateAddress(request.shippingAddress, config);
   if (addressProblem) return { ok: false, error: addressProblem };

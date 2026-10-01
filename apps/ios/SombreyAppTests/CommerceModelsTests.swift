@@ -100,6 +100,18 @@ struct CommerceModelsTests {
         #expect(RestoreCopy.message(.failed(.storeUnavailable)).contains("isn't available"))
     }
 
+    /// 6I: a failed refresh never erases loaded data and never presents it as current.
+    @Test func failedRefreshKeepsWhatWasLoadedAndSaysSo() {
+        #expect(LoadPresentation.of(hasValue: false, isEmpty: true, failed: false) == .loading)
+        #expect(LoadPresentation.of(hasValue: false, isEmpty: true, failed: true) == .unavailable)
+        #expect(LoadPresentation.of(hasValue: true, isEmpty: true, failed: false) == .empty)
+        #expect(LoadPresentation.of(hasValue: true, isEmpty: false, failed: false) == .current)
+        #expect(LoadPresentation.of(hasValue: true, isEmpty: false, failed: true) == .lastLoaded, "loaded orders stay on screen after an error")
+        #expect(LoadPresentation.of(hasValue: true, isEmpty: true, failed: true) == .lastLoaded)
+        #expect(CommerceUnavailable.lastLoadedOrders.contains("last loaded"))
+        #expect(CommerceUnavailable.lastConfirmed.contains("last confirmed"))
+    }
+
     @Test func cancelledMembershipStaysActiveUntilItEnds() {
         let cancelled = ServerEntitlements.Membership(status: "active", source: "app_store", autoRenew: false, renewsOrEndsAt: 1_790_000_000_000)
         #expect(AccessCopy.membershipLine(cancelled).hasPrefix("Active · ends"))

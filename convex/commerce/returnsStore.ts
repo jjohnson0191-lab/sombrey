@@ -65,7 +65,12 @@ export async function requestReturn(db: Db, userId: Id<"users">, args: {
 }, config: CommerceConfig, now: number): Promise<{ returnId: Id<"commerceReturns">; created: boolean }> {
   if (!KEY.test(args.requestKey)) throw fail("INVALID", "Invalid return request");
   const existing = await db.query("commerceReturns").withIndex("by_user_and_request_key", (q) => q.eq("userId", userId).eq("requestKey", args.requestKey)).first();
-  if (existing) return { returnId: existing._id, created: false };
+  if (existing) {
+    // 6I: the same key must mean the same request.
+    const sameLines = !args.lines || (args.lines.length === existing.lines.length && args.lines.every((l) => existing.lines.some((x) => x.productId === l.productId && x.quantity === l.quantity)));
+    if (existing.orderId !== args.orderId || existing.reason !== args.reason || !sameLines) throw fail("CONFLICT", "That return request was already used for a different return");
+    return { returnId: existing._id, created: false };
+  }
   if (!(RETURN_REASONS as readonly string[]).includes(args.reason)) throw fail("INVALID", "Choose a reason");
   const e = await returnOptions(db, userId, args.orderId, config, now);
   if (!e.eligible) throw fail("NOT_ELIGIBLE", `Not eligible for return: ${e.reason}`);

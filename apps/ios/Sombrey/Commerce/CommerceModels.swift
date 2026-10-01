@@ -267,4 +267,24 @@ enum CommerceUnavailable {
     static let orders = "Order status unavailable."
     static let checkout = "Checkout unavailable."
     static let activation = "Activation unavailable."
+    /// 6I: the server answered earlier this session but can't be reached now.
+    static let lastConfirmed = "Couldn't refresh. Showing your last confirmed status."
+    static let lastLoadedOrders = "Couldn't refresh. Showing your orders as last loaded."
+}
+
+/// 6I: what a server-backed screen shows while loading or after a failure.
+/// A failure never erases what was already loaded, and never presents it as
+/// current: it's shown with a "couldn't refresh" notice.
+enum LoadPresentation: Equatable, Sendable {
+    case loading
+    case unavailable
+    case empty
+    case current
+    case lastLoaded
+
+    static func of(hasValue: Bool, isEmpty: Bool, failed: Bool) -> LoadPresentation {
+        if failed { return hasValue ? .lastLoaded : .unavailable }
+        guard hasValue else { return .loading }
+        return isEmpty ? .empty : .current
+    }
 }

@@ -30,11 +30,11 @@ type Device = Doc<"commerceDevices">;
 type Actor = "staff" | "customer" | "system";
 const fail = (code: string, message: string) => new ConvexError({ code, message });
 
-async function event(db: Db, config: CommerceConfig, name: CommerceEventName, userId: Id<"users"> | undefined, productId: string, now: number, source?: string, orderId?: Id<"commerceOrders">) {
-  const problem = validateEvent({ name, platform: "backend", productId, ...(source ? { source } : {}) }, "server", knownProductIds(config));
+async function event(db: Db, config: CommerceConfig, name: CommerceEventName, userId: Id<"users"> | undefined, productId: string | undefined, now: number, source?: string, orderId?: Id<"commerceOrders">) {
+  const problem = validateEvent({ name, platform: "backend", ...(productId ? { productId } : {}), ...(source ? { source } : {}) }, "server", knownProductIds(config));
   if (problem) throw fail("INVALID", problem);
   await db.insert("commerceEvents", {
-    name, ...(userId ? { userId } : {}), at: now, origin: "server", platform: "backend", productId,
+    name, ...(userId ? { userId } : {}), at: now, origin: "server", platform: "backend", ...(productId ? { productId } : {}),
     ...(source ? { source } : {}), ...(orderId ? { orderId } : {}), configVersion: config.version,
   });
 }
@@ -164,7 +164,8 @@ async function activate(db: Db, d: Device, userId: Id<"users">, by: "customer" |
 export async function activateWithCode(db: Db, userId: Id<"users">, codeHash: string, config: CommerceConfig, now: number): Promise<ActivationResult> {
   const record = async (r: ActivationResult) => {
     await db.insert("commerceActivationAttempts", { userId, at: now, outcome: r.ok ? "succeeded" : "failed", ...(r.ok ? {} : { reason: r.reason }) });
-    if (!r.ok && r.reason !== "too_many_attempts") await event(db, config, "device_activation_failed", userId, config.products.band.id, now, r.reason);
+    // (The product isn't known when the code matched nothing — no product is assumed.)
+    if (!r.ok && r.reason !== "too_many_attempts") await event(db, config, "device_activation_failed", userId, undefined, now, r.reason);
     return r;
   };
   if (await recentFailures(db, userId, now) >= config.devices.activationAttemptsPerHour) return { ok: false, reason: "too_many_attempts" };
@@ -207,7 +208,8 @@ export async function endOwnershipForReturn(db: Db, orderId: Id<"commerceOrders"
     if (d.orderId !== orderId) throw fail("INVALID", "That device isn't from this order");
     if (d.status === "returned") continue;
     if (d.status === "activated") await endOwnership(db, d, "returned", "staff", now, "physical_return");
-    if (d.status !== "activated" && d.status !== "assigned") throw fail("INVALID", `A ${d.status} device can't be returned`);
+    // 6I: a replaced unit can come back too (its ownership already ended as "replaced").
+    if (d.status !== "activated" && d.status !== "assigned" && d.status !== "replaced") throw fail("INVALID", `A ${d.status} device can't be returned`);
     await moveDevice(db, d, "returned", "staff", now, { endedAt: now, activationCodeHash: undefined }, "physical_return");
     await event(db, config, "device_returned", d.ownerUserId, d.productId, now, undefined, orderId);
   }

@@ -16,6 +16,9 @@ import ConvexMobile
 @MainActor
 final class EntitlementStore {
     private(set) var state: EntitlementState
+    /// 6I: the last refresh failed while an earlier answer from this session is
+    /// still shown — screens say so rather than presenting it as current.
+    private(set) var refreshFailed = false
     let enforced: Bool
 
     private var cancellable: AnyCancellable?
@@ -40,6 +43,7 @@ final class EntitlementStore {
     func refresh() {
         guard enforced else { return }
         if entitlements == nil { state = .checking }
+        refreshFailed = false
         cancellable = ConvexClientProvider.client
             .subscribe(to: "commerce/access:myEntitlements", with: nil, yielding: ServerEntitlements.self)
             // Convex delivers on its own thread; this class is main-actor
@@ -50,12 +54,13 @@ final class EntitlementStore {
                     guard let self, case .failure(let error) = completion else { return }
                     CommerceDiagnostics.error("entitlements unavailable: \(String(describing: type(of: error)))")
                     // Keep this session's last answer; without one, say so.
-                    if self.entitlements == nil { self.state = .unavailable }
+                    if self.entitlements == nil { self.state = .unavailable } else { self.refreshFailed = true }
                 },
                 receiveValue: { [weak self] value in
                     guard let self else { return }
                     if self.entitlements?.state != value.state { CommerceDiagnostics.log("entitlement state: \(value.state)") }
                     self.state = .ready(value)
+                    self.refreshFailed = false
                 }
             )
     }
@@ -64,6 +69,7 @@ final class EntitlementStore {
     func reset() {
         cancellable = nil
         reportedLocked.removeAll()
+        refreshFailed = false
         state = enforced ? .checking : .notEnforced
     }
 
