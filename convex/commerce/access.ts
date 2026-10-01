@@ -86,7 +86,7 @@ export const myOrders = query({
       subtotalCents: o.subtotalCents, shippingCents: o.shippingCents, taxCents: o.taxCents, totalCents: o.totalCents,
       paymentStatus: o.paymentStatus, fulfillmentStatus: o.fulfillmentStatus, returnStatus: o.returnStatus,
       shippingAddress: o.shippingAddress,
-      shipments: o.shipments.map(({ carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt }) => ({ carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt })),
+      // 6F: shipments and tracking live in commerce/orderTracking:orderTracking.
       deliveredAt: o.deliveredAt ?? null,
     }));
   },

@@ -41,9 +41,12 @@ export const FULFILLMENT_TRANSITIONS: Record<FulfillmentStatus, FulfillmentStatu
 
 export const RETURN_TRANSITIONS: Record<ReturnStatus, ReturnStatus[]> = {
   none: ["requested"],
-  requested: ["approved", "rejected"],
-  approved: ["received", "rejected"],
-  received: ["refunded"],
+  // 6F: "none" again = the customer cancelled a return before it was received
+  // (the return record keeps that history); a received item that fails
+  // inspection is rejected.
+  requested: ["approved", "rejected", "none"],
+  approved: ["received", "rejected", "none"],
+  received: ["refunded", "rejected"],
   rejected: [],
   refunded: [],
 };

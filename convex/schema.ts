@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import {
-  commerceEventName, fulfillmentStatus, orderLine, orderQuote, ownershipStatus, paymentAttempt, paymentStatus, returnStatus, subscriptionHistoryEvent,
+  commerceEventName, fulfillmentLine, fulfillmentRecordStatus, fulfillmentStatus, inspectionCondition, orderLine, orderQuote, ownershipStatus, paymentAttempt, paymentStatus, returnReason, returnRecordStatus, returnStatus, shipmentStatus, subscriptionHistoryEvent,
   shipment, shippingAddress, subscriptionStatus,
 } from "./commerce/validators";
 import { v } from "convex/values";
@@ -634,10 +634,111 @@ export default defineSchema({
     quote: v.optional(orderQuote),
     paymentAttempt: v.optional(paymentAttempt),
     cancelledAt: v.optional(v.number()),
+    // Phase 6F: refunds the payment provider has CONFIRMED (sum, minor units) —
+    // never more than was captured.
+    refundedCents: v.optional(v.number()),
   }).index("by_user", ["userId"])
     .index("by_order_number", ["orderNumber"])
     .index("by_payment_status", ["paymentStatus"])
     .index("by_user_and_request_key", ["userId", "checkoutRequestKey"]),
+
+  // ─── Phase 6F: fulfilment, shipments, returns (convex/commerce/fulfillment.ts) ──
+  // References, not copies: the destination stays on the order. No ownership,
+  // activation or pairing is ever written by these (Phase 6G).
+
+  // One unit of work to send an order's goods: the original, or a replacement
+  // (which never changes the order's own delivery or payment).
+  commerceFulfillments: defineTable({
+    orderId: v.id("commerceOrders"),
+    userId: v.id("users"),
+    kind: v.union(v.literal("original"), v.literal("replacement")),
+    replacesFulfillmentId: v.optional(v.id("commerceFulfillments")),
+    lines: v.array(fulfillmentLine),               // which order lines (product id + quantity)
+    status: fulfillmentRecordStatus,
+    idempotencyKey: v.string(),                    // same key → same fulfilment
+    provider: v.optional(v.string()),
+    providerRef: v.optional(v.string()),
+    location: v.optional(v.string()),              // provider's warehouse code, if any
+    failure: v.optional(v.object({ reason: v.string(), at: v.number() })),
+    createdAt: v.number(),
+    submittedAt: v.optional(v.number()),
+    shippedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_order", ["orderId"])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_status", ["status"]),
+
+  // One physical package (outbound, or a customer's return).
+  commerceShipments: defineTable({
+    orderId: v.id("commerceOrders"),
+    userId: v.id("users"),
+    fulfillmentId: v.optional(v.id("commerceFulfillments")),
+    returnId: v.optional(v.id("commerceReturns")),
+    direction: v.union(v.literal("outbound"), v.literal("return")),
+    provider: v.string(),
+    providerRef: v.string(),
+    idempotencyKey: v.string(),
+    carrier: v.string(),
+    service: v.string(),
+    destinationCountry: v.string(),
+    status: shipmentStatus,
+    trackingNumber: v.optional(v.string()),       // only as issued by the provider
+    trackingUrl: v.optional(v.string()),          // https only
+    estimatedDeliveryAt: v.optional(v.number()),  // only as given by the provider
+    shippedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),          // the carrier's delivery time
+    lastEventAt: v.optional(v.number()),          // the carrier's time of the last applied event
+    lastProviderStatus: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_order", ["orderId"])
+    .index("by_fulfillment", ["fulfillmentId"])
+    .index("by_provider_ref", ["provider", "providerRef"])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_status", ["status"]),
+
+  // Every verified carrier event, once, with what it did (applied / stale / …).
+  commerceShipmentEvents: defineTable({
+    provider: v.string(),
+    eventId: v.string(),
+    shipmentId: v.optional(v.id("commerceShipments")),
+    type: v.string(),
+    providerStatus: v.string(),
+    occurredAt: v.number(),
+    receivedAt: v.number(),
+    outcome: v.union(v.literal("applied"), v.literal("stale"), v.literal("after_terminal"), v.literal("unknown_status"), v.literal("invalid"), v.literal("unknown_shipment")),
+    reason: v.optional(v.string()),
+  }).index("by_provider_event", ["provider", "eventId"]),
+
+  // A customer return. Its detail lives here; it rolls up into the order's 6A returnStatus.
+  commerceReturns: defineTable({
+    orderId: v.id("commerceOrders"),
+    userId: v.id("users"),
+    requestKey: v.string(),                        // the customer's key: double taps → same return
+    status: returnRecordStatus,
+    lines: v.array(fulfillmentLine),
+    reason: returnReason,
+    customerAttestedUnused: v.boolean(),           // the customer's statement — checked at inspection
+    inspection: v.optional(v.object({ condition: inspectionCondition, at: v.number(), byUserId: v.id("users") })),
+    rejection: v.optional(v.object({ reason: v.string(), at: v.number(), byUserId: v.id("users") })),
+    refund: v.optional(v.object({
+      amountCents: v.number(),                     // computed by the server from the order's snapshot prices
+      currency: v.string(),
+      approvedAt: v.number(),
+      approvedByUserId: v.id("users"),
+      idempotencyKey: v.string(),
+      requestedAt: v.optional(v.number()),         // asked of the payment provider
+      providerRefundRef: v.optional(v.string()),
+      completedAt: v.optional(v.number()),         // the provider's VERIFIED refund event
+    })),
+    history: v.array(v.object({ status: returnRecordStatus, at: v.number(), by: v.union(v.literal("customer"), v.literal("staff"), v.literal("provider")) })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_order", ["orderId"])
+    .index("by_user_and_request_key", ["userId", "requestKey"])
+    .index("by_status", ["status"]),
 
   // Phase 6E: every VERIFIED payment-provider event, once, by the provider's
   // event id — duplicate webhooks change nothing. No card data, no payload.

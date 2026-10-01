@@ -5,8 +5,12 @@
 //
 //   ShippingQuoteProvider  a real carrier/fulfilment rate for a destination
 //   TaxQuoteProvider       jurisdiction-aware tax for the destination
-//   PaymentProvider        a payment session (Apple Pay / Google Pay / card)
-//                          and VERIFIED webhooks — the only way an order is paid
+//   PaymentProvider        a payment session (Apple Pay / Google Pay / card),
+//                          refunds (6F), and VERIFIED webhooks — the only way an
+//                          order is paid or refunded
+//   FulfillmentProvider    (6F) warehouse/label/carrier: create and cancel
+//                          shipments (outbound and return), tracking, and
+//                          VERIFIED, normalized carrier events
 //
 // NONE IS CHOSEN (docs/COMMERCE_6E.md §7). `providersFor` returns null for each,
 // and the checkout says "unavailable" instead of inventing a rate, a tax or a
@@ -17,6 +21,8 @@
 // these interfaces registered in `providersFor`, after the decision is made.
 
 import type { CommerceConfig } from "./config.ts";
+import type { ShippingAddress } from "./orders.ts";
+import type { CarrierEvent } from "./fulfillment.ts";
 
 export type QuoteDestination = { countryCode: string; region?: string; postalCode?: string; city: string };
 export type QuoteLine = { productId: string; sku: string; quantity: number; unitPriceCents: number };
@@ -71,18 +77,57 @@ export interface PaymentProvider {
   /** Verifies a webhook's signature and returns the event — or null for
    * anything unsigned, forged or malformed. Nothing else may mark an order paid. */
   verifyWebhook(rawBody: string, headers: Record<string, string>): Promise<VerifiedPaymentEvent | null>;
+  /** 6F: asks the provider to refund part or all of a captured payment. A
+   * request only — the order is refunded when the provider's VERIFIED refund
+   * event arrives. The same idempotency key never refunds twice. */
+  refund(req: { providerRef: string; amountCents: number; currency: string; idempotencyKey: string }): Promise<{ ok: true; refundRef: string } | ProviderRefusal>;
+}
+
+/** A carrier event the provider verified (signature) and mapped onto Sombrey's
+ * normalized types; `providerRef` identifies the shipment at the provider. */
+export type ProviderShipmentEvent = CarrierEvent & { providerRef: string };
+
+export type CreatedShipment = {
+  ok: true;
+  providerRef: string;
+  carrier: string;
+  service: string;
+  /** Only what the provider actually issued — absent until it does. */
+  trackingNumber?: string;
+  trackingUrl?: string;
+  estimatedDeliveryAt?: number;
+  /** The provider's warehouse/location code, if it has one. */
+  location?: string;
+};
+
+export interface FulfillmentProvider {
+  readonly name: string;
+  /** Creates (or, for the same idempotency key, returns) one shipment.
+   * outbound: warehouse → `address`; return: `address` → the provider's return location. */
+  createShipment(req: {
+    idempotencyKey: string; orderNumber: string; direction: "outbound" | "return"; address: ShippingAddress;
+    items: Array<{ productId: string; sku: string; quantity: number }>;
+  }): Promise<CreatedShipment | ProviderRefusal>;
+  /** Only before the carrier has the parcel. */
+  cancelShipment(providerRef: string): Promise<{ ok: true } | ProviderRefusal>;
+  /** The provider's current events for a shipment (polling / recovery after missed webhooks). */
+  getTracking(providerRef: string): Promise<ProviderShipmentEvent[] | ProviderRefusal>;
+  /** Verifies a webhook's signature, then normalizes its events — null for
+   * anything unsigned, forged or malformed. */
+  verifyWebhook(rawBody: string, headers: Record<string, string>): Promise<ProviderShipmentEvent[] | null>;
 }
 
 export type Providers = {
   shipping: ShippingQuoteProvider | null;
   tax: TaxQuoteProvider | null;
   payment: PaymentProvider | null;
+  fulfillment: FulfillmentProvider | null;
 };
 
 /** The providers this configuration uses. Today: none of them. */
 export function providersFor(config: CommerceConfig): Providers {
   // When a provider is chosen, its config value names it and its
   // implementation is returned here. Until then nothing is invented.
-  void config.checkout.provider; void config.checkout.shippingQuoteProvider; void config.checkout.taxQuoteProvider;
-  return { shipping: null, tax: null, payment: null };
+  void config.checkout.provider; void config.checkout.shippingQuoteProvider; void config.checkout.taxQuoteProvider; void config.fulfillment.provider;
+  return { shipping: null, tax: null, payment: null, fulfillment: null };
 }

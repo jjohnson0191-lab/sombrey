@@ -25,6 +25,7 @@ import type { CommerceConfig } from "./config.ts";
 import { PAYMENT_TRANSITIONS, buildOrderDraft, canTransition, formatOrderNumber, validateAddress, type PaymentStatus, type ShippingAddress } from "./orders.ts";
 import { draftStillCurrent, quoteUsable, type OrderQuote } from "./quotes.ts";
 import { validateEvent, type CommerceEventName } from "./events.ts";
+import { completeRefund } from "./returnsStore.ts";
 
 type Db = MutationCtx["db"];
 type Order = Doc<"commerceOrders">;
@@ -186,8 +187,19 @@ export async function applyVerifiedPayment(db: Db, args: {
   if (!a || a.provider !== args.provider || (a.providerRef !== undefined && a.providerRef !== e.providerRef)) return record("rejected", "not_this_payment");
   if (!Number.isSafeInteger(e.amountCents) || e.amountCents < 0 || e.currency !== a.currency) return record("rejected", "amount_mismatch");
   if ((to === "authorized" || to === "paid") && (e.amountCents !== a.amountCents || e.amountCents !== o.totalCents)) return record("rejected", "amount_mismatch");
-  if (to === "partially_refunded" && !(e.amountCents > 0 && e.amountCents < a.amountCents)) return record("rejected", "amount_mismatch");
-  if (to === "refunded" && e.amountCents !== a.amountCents) return record("rejected", "amount_mismatch");
+  // 6F: a refund event carries the amount refunded BY THAT EVENT. Refunds add up
+  // and can never exceed what was captured; "refunded" means fully refunded.
+  if (to === "partially_refunded" || to === "refunded") {
+    const already = o.refundedCents ?? 0;
+    const after = already + e.amountCents;
+    if (e.amountCents <= 0 || after > a.amountCents) return record("rejected", "amount_mismatch");
+    if (to === "partially_refunded" && after === a.amountCents) return record("rejected", "amount_mismatch");
+    if (to === "refunded" && after !== a.amountCents) return record("rejected", "amount_mismatch");
+    if (o.paymentStatus !== to && !canTransition(PAYMENT_TRANSITIONS, o.paymentStatus, to)) return record("rejected", "invalid_transition");
+    await db.patch(o._id, { paymentStatus: to, refundedCents: after, updatedAt: now });
+    await completeRefund(db, o._id, e.amountCents, config, now);
+    return record("applied");
+  }
   if (o.paymentStatus === to) return record("unchanged");
   if (!canTransition(PAYMENT_TRANSITIONS, o.paymentStatus, to)) return record("rejected", "invalid_transition");
   await db.patch(o._id, {

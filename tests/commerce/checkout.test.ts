@@ -36,8 +36,8 @@ const tax = (amountCents = 830): TaxQuoteProvider => ({
   name: "test-tax",
   async quote(req) { return { ok: true, amountCents: req.shippingCents >= 0 ? amountCents : -1, currency: "USD", reference: "tax-ref", detail: "LK" }; },
 });
-const none: Providers = { shipping: null, tax: null, payment: null };
-const full: Providers = { shipping: shipping(), tax: tax(), payment: null };
+const none: Providers = { shipping: null, tax: null, payment: null, fulfillment: null };
+const full: Providers = { shipping: shipping(), tax: tax(), payment: null, fulfillment: null };
 
 async function draft(db: MemoryDb, user = ALICE, key = KEY, quantity = 2) {
   return db.serial(() => createOrderRecord(db as never, { userId: user, items: [{ productId: "sombrey_band", quantity }], shippingAddress: address(), checkoutRequestKey: key }, C, NOW, rnd));
@@ -74,7 +74,7 @@ test("no inventory is invented: stock isn't tracked, and nothing reports it", ()
 });
 
 test("no provider is chosen: none is invented, and the boundary has no Apple In-App Purchase", () => {
-  assert.deepEqual(providersFor(C), { shipping: null, tax: null, payment: null });
+  assert.deepEqual(providersFor(C), { shipping: null, tax: null, payment: null, fulfillment: null });
   const providers = readFileSync(join(import.meta.dirname, "../../convex/commerce/providers.ts"), "utf8");
   assert.ok(!/stripe|adyen|paddle|shopify|braintree|storekit/i.test(providers.replace(/\/\/.*$/gm, "")), "no vendor is hard-wired");
 });
@@ -260,7 +260,10 @@ test("state integrity: paid never silently becomes unpaid; refunds are controlle
   assert.deepEqual(await pay(db, orderId, { eventId: "f4", type: "cancelled" }), { outcome: "rejected", reason: "invalid_transition" }, "paid can't become cancelled");
   assert.deepEqual(await pay(db, orderId, { eventId: "f5", type: "refunded", amountCents: 100 }), { outcome: "rejected", reason: "amount_mismatch" }, "a full refund is the full amount");
   assert.equal((await pay(db, orderId, { eventId: "f6", type: "partially_refunded", amountCents: 1000 })).outcome, "applied");
-  assert.equal((await pay(db, orderId, { eventId: "f7", type: "refunded" })).outcome, "applied");
+  // 6F: refund events carry the amount refunded by THAT event; the total can't exceed what was captured.
+  assert.deepEqual(await pay(db, orderId, { eventId: "f6b", type: "refunded", amountCents: 22330 }), { outcome: "rejected", reason: "amount_mismatch" }, "no over-refund");
+  assert.equal((await pay(db, orderId, { eventId: "f7", type: "refunded", amountCents: 21330 })).outcome, "applied");
+  assert.equal(order(db, orderId).refundedCents, 22330);
   assert.deepEqual(await pay(db, orderId, { eventId: "f8", type: "paid" }), { outcome: "rejected", reason: "invalid_transition" }, "refunded is final");
   assert.equal(orderStage(order(db, orderId) as never, NOW), "refunded");
 });

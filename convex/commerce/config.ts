@@ -45,6 +45,12 @@ export type PhysicalProduct = {
   sku: string;
   /** The hardware generation sold under this SKU (customer-facing name: "Sombrey Band V1"). */
   hardwareGeneration: string;
+  /** Phase 6F: how it ships and whether it may be returned — per product, so
+   * future hardware can differ. `requiresActivation` is for 6G (informational
+   * here: fulfilment never activates or assigns ownership). */
+  fulfillmentProfile: "parcel";
+  returnable: boolean;
+  requiresActivation: boolean;
   displayName: string;
   description: string;
   priceCents: number;
@@ -85,6 +91,8 @@ export type CommerceConfig = {
   };
   tax: { paidBy: "customer"; /** Not set: no tax rate is invented. */ rates: null };
   returns: {
+    /** Phase 6F: the return window counts from the carrier-confirmed delivery. */
+    clockStartsAt: "delivery";
     windowDays: number;
     /** Only these conditions are eligible (e.g. "unused"). */
     eligibleConditions: string[];
@@ -109,6 +117,14 @@ export type CommerceConfig = {
     /** Open (unpaid, uncancelled) checkouts one account may hold at once. */
     maxOpenCheckoutsPerUser: number;
   };
+  /** Phase 6F: the fulfilment/logistics provider (warehouse, labels, tracking)
+   * — undecided. null = nothing can be submitted, shipped or tracked; no
+   * tracking number, status or date is ever invented. */
+  fulfillment: {
+    provider: null;
+    /** Staff view: a shipment with no carrier update for this long is flagged. */
+    stalledTrackingAfterHours: number;
+  };
   /** Phase 6E: no inventory source exists. null = stock is NOT tracked — the
    * app must never show stock levels ("In stock", "Only 3 left"). */
   inventory: { provider: null };
@@ -127,7 +143,7 @@ export type CommerceConfig = {
 
 /** PROVISIONAL — SUBJECT TO CHANGE. Launch assumptions, 2026-10. */
 export const COMMERCE_CONFIG: CommerceConfig = {
-  version: "2026-10-provisional.3",
+  version: "2026-10-provisional.4",
   provisional: true,
   currency: "USD",
   products: {
@@ -137,6 +153,9 @@ export const COMMERCE_CONFIG: CommerceConfig = {
       category: "physical_band",
       sku: "SOMBREY_BAND_V1",
       hardwareGeneration: "V1",
+      fulfillmentProfile: "parcel",
+      returnable: true,
+      requiresActivation: true,
       displayName: "Sombrey Band",
       description: "The Sombrey wearable band.",
       priceCents: 100_00,
@@ -162,7 +181,7 @@ export const COMMERCE_CONFIG: CommerceConfig = {
   },
   shipping: { countries: ["US", "GB", "AE", "CA", "AU", "LK"], paidBy: "customer", rateTable: null },
   tax: { paidBy: "customer", rates: null },
-  returns: { windowDays: 30, eligibleConditions: ["unused"], subscriptionRefunds: "none_offered" },
+  returns: { clockStartsAt: "delivery", windowDays: 30, eligibleConditions: ["unused"], subscriptionRefunds: "none_offered" },
   subscriptionPolicy: { startsWhen: "purchase_agreed", cancellable: "any_time_by_customer" },
   checkout: {
     methods: ["apple_pay", "google_pay", "card"],
@@ -172,6 +191,7 @@ export const COMMERCE_CONFIG: CommerceConfig = {
     quoteTtlMinutes: 15,
     maxOpenCheckoutsPerUser: 3,
   },
+  fulfillment: { provider: null, stalledTrackingAfterHours: 72 },
   inventory: { provider: null },
   capabilityMatrix: {
     none: [],
@@ -242,6 +262,8 @@ export function validateCommerceConfig(c: CommerceConfig): string[] {
   if (!Number.isInteger(c.returns.windowDays) || c.returns.windowDays < 0 || c.returns.windowDays > 365) p.push("returns: windowDays 0–365");
   if (!c.returns.eligibleConditions.length) p.push("returns: at least one eligible condition");
   if (!c.checkout.methods.length) p.push("checkout: at least one payment method");
+  if (!Number.isInteger(c.fulfillment.stalledTrackingAfterHours) || c.fulfillment.stalledTrackingAfterHours < 12 || c.fulfillment.stalledTrackingAfterHours > 720) p.push("fulfillment: stalledTrackingAfterHours 12–720");
+  if (c.returns.clockStartsAt !== "delivery") p.push("returns: the window counts from delivery");
   if (!Number.isInteger(c.checkout.quoteTtlMinutes) || c.checkout.quoteTtlMinutes < 1 || c.checkout.quoteTtlMinutes > 60) p.push("checkout: quoteTtlMinutes 1–60");
   if (!Number.isInteger(c.checkout.maxOpenCheckoutsPerUser) || c.checkout.maxOpenCheckoutsPerUser < 1 || c.checkout.maxOpenCheckoutsPerUser > 10) p.push("checkout: maxOpenCheckoutsPerUser 1–10");
   if (!/^[A-Z0-9_]{3,40}$/.test(c.products.band.sku)) p.push("band: sku must be UPPER_SNAKE");
@@ -267,6 +289,18 @@ export function validateCommerceConfig(c: CommerceConfig): string[] {
     if (!both.has(cap)) p.push(`capabilityMatrix.band_owner_subscriber: must include ${cap}`);
   }
   return p;
+}
+
+/** Phase 6F: the physical product with this id (one today: the Band). Every
+ * fulfilment/return rule looks products up here, so future hardware is a
+ * config entry, not a code change. */
+export function physicalProduct(c: CommerceConfig, productId: string): PhysicalProduct | undefined {
+  return [c.products.band].find((p) => p.id === productId);
+}
+
+/** Every product id the commerce events may name. */
+export function knownProductIds(c: CommerceConfig): string[] {
+  return [c.products.band.id, c.products.membership.id];
 }
 
 /** Whether a country is a configured shipping destination. */

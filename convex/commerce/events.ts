@@ -42,6 +42,17 @@ export const COMMERCE_EVENTS = {
   // provider event only.
   band_quote_requested: "server",
   band_payment_started: "server",
+  // 6F: fulfilment and returns — product + country only (never an address, a
+  // tracking number or a name). Product-agnostic names, for future hardware.
+  // (6A's band_order_completed / band_returned stay in the catalogue for
+  // compatibility; 6F records shipment_delivered / return_received instead.)
+  fulfillment_created: "server",
+  shipment_created: "server",
+  shipment_delivered: "server",
+  delivery_exception: "server",
+  return_requested: "server",
+  return_received: "server",
+  refund_completed: "server",
 } as const satisfies Record<string, "client" | "server">;
 
 export type CommerceEventName = keyof typeof COMMERCE_EVENTS;

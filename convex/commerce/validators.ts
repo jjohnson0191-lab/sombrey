@@ -54,6 +54,8 @@ export const commerceEventName = v.union(
   v.literal("band_returned"), v.literal("subscription_activated"), v.literal("subscription_renewed"),
   v.literal("subscription_cancelled"), v.literal("subscription_expired"),
   v.literal("band_quote_requested"), v.literal("band_payment_started"),
+  v.literal("fulfillment_created"), v.literal("shipment_created"), v.literal("shipment_delivered"), v.literal("delivery_exception"),
+  v.literal("return_requested"), v.literal("return_received"), v.literal("refund_completed"),
 );
 // Phase 6C: what a subscription history row records (appStoreRules.ts HISTORY_EVENTS).
 export const subscriptionHistoryEvent = v.union(
@@ -95,3 +97,12 @@ export const paymentAttempt = v.object({
   providerRef: v.optional(v.string()), // the provider's session/payment id
   startedAt: v.number(),
 });
+
+// Phase 6F: fulfilment, shipments, returns (fulfillment.ts holds the rules).
+const lit = <T extends string>(xs: readonly T[]) => v.union(...(xs.map((x) => v.literal(x)) as [ReturnType<typeof v.literal<T>>, ReturnType<typeof v.literal<T>>, ...ReturnType<typeof v.literal<T>>[]]));
+export const fulfillmentRecordStatus = lit(["pending", "submitted", "shipped", "delivered", "failed", "cancelled"] as const);
+export const shipmentStatus = lit(["label_created", "picked_up", "in_transit", "out_for_delivery", "delivered", "exception", "returned_to_sender", "cancelled"] as const);
+export const returnRecordStatus = lit(["requested", "authorized", "in_transit", "received", "refund_approved", "refunded", "rejected", "cancelled"] as const);
+export const returnReason = lit(["changed_mind", "not_as_expected", "fit_or_comfort", "arrived_damaged", "other"] as const);
+export const inspectionCondition = lit(["unused", "used", "damaged", "incomplete"] as const);
+export const fulfillmentLine = v.object({ productId: v.string(), quantity: v.number() });

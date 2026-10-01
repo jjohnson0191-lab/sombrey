@@ -2,35 +2,19 @@
 // callable by other backend code (a verified payment-provider webhook, the
 // App Store server-notification handler, an owner tool) — never by a client.
 // Phase 6C calls the subscription ones from commerce/appStore.ts after Apple's
-// signatures are verified; 6E's applyPaymentUpdate is called only after a
-// payment provider verified its webhook (no provider is integrated yet);
-// fulfilment (6F) and activation (6G) will call the rest. Each one enforces the domain's transition rules, so even
+// signatures are verified; 6E's applyPaymentUpdate and 6F's applyShipmentEvent
+// are called only after a provider verified its webhook (none is integrated
+// yet). Staff fulfilment/return actions are role-checked in commerce/staff.ts. Each one enforces the domain's transition rules, so even
 // trusted code can't mark an unpaid order delivered or re-price an order.
 
 import { ConvexError, v } from "convex/values";
 import { internalMutation } from "../_generated/server";
-import type { MutationCtx } from "../_generated/server";
-import type { Doc, Id } from "../_generated/dataModel";
 import { COMMERCE_CONFIG } from "./config";
-import { FULFILLMENT_TRANSITIONS, RETURN_TRANSITIONS, canTransition, returnEligibility } from "./orders";
 import { applyVerifiedPayment, createOrderRecord } from "./checkoutStore";
-import { OWNED_STATUSES, transitionOwnership, type OwnershipStatus } from "./ownership";
-import { validateEvent, type CommerceEventName } from "./events";
+import { applyShipmentEvent as applyShipmentEventRecord } from "./fulfillmentStore";
+import { OWNED_STATUSES, transitionOwnership } from "./ownership";
 import { applyNotification, linkAccountToken, writeVerifiedSubscription, type StoreConfig } from "./subscriptionStore";
-import { fulfillmentStatus, returnStatus, shipment, shippingAddress, subscriptionHistoryEvent as historyEvent, subscriptionStatus } from "./validators";
-
-async function serverEvent(ctx: MutationCtx, name: CommerceEventName, userId: Id<"users">, extra: { productId?: string; countryCode?: string; amountCents?: number; currency?: string; orderId?: Id<"commerceOrders"> } = {}) {
-  const { orderId, ...rest } = extra;
-  const problem = validateEvent({ name, platform: "backend", ...rest }, "server", [COMMERCE_CONFIG.products.band.id, COMMERCE_CONFIG.products.membership.id]);
-  if (problem) throw new ConvexError({ code: "INVALID", message: problem });
-  await ctx.db.insert("commerceEvents", { name, userId, at: Date.now(), origin: "server", platform: "backend", ...rest, ...(orderId ? { orderId } : {}), configVersion: COMMERCE_CONFIG.version });
-}
-
-async function getOrder(ctx: MutationCtx, orderId: Id<"commerceOrders">): Promise<Doc<"commerceOrders">> {
-  const o = await ctx.db.get(orderId);
-  if (!o) throw new ConvexError({ code: "NOT_FOUND", message: "Order not found" });
-  return o;
-}
+import { shippingAddress, subscriptionHistoryEvent as historyEvent, subscriptionStatus } from "./validators";
 
 /** A priced order for a user, awaiting payment — for trusted flows (staff,
  * support). Customers use commerce/checkout:startBandCheckout. Both go through
@@ -63,52 +47,20 @@ export const applyPaymentUpdate = internalMutation({
   handler: async (ctx, args) => applyVerifiedPayment(ctx.db, args, COMMERCE_CONFIG, Date.now()),
 });
 
-async function moveOwnershipForOrder(ctx: MutationCtx, orderId: Id<"commerceOrders">, to: OwnershipStatus, by: "system" | "provider" | "staff") {
-  const now = Date.now();
-  for (const r of await ctx.db.query("bandOwnership").withIndex("by_order", (q) => q.eq("orderId", orderId)).collect()) {
-    const t = transitionOwnership(r, to, now, by);
-    if (t.ok) await ctx.db.patch(r._id, { status: t.record.status, history: t.record.history, updatedAt: now });
-  }
-}
-
-/** Fulfilment progress (from the fulfilment/carrier flow). */
-export const updateFulfillment = internalMutation({
-  args: { orderId: v.id("commerceOrders"), to: fulfillmentStatus, shipment: v.optional(shipment) },
-  handler: async (ctx, args) => {
-    const o = await getOrder(ctx, args.orderId);
-    if (o.fulfillmentStatus === args.to && !args.shipment) return { changed: false };
-    if (o.fulfillmentStatus !== args.to && !canTransition(FULFILLMENT_TRANSITIONS, o.fulfillmentStatus, args.to)) {
-      throw new ConvexError({ code: "INVALID", message: `Fulfilment can't go from ${o.fulfillmentStatus} to ${args.to}` });
-    }
-    if (args.to !== "cancelled" && args.to !== "unfulfilled" && o.paymentStatus !== "paid") throw new ConvexError({ code: "INVALID", message: "Unpaid orders aren't fulfilled" });
-    const now = Date.now();
-    const shipments = args.shipment ? [...o.shipments.filter((s) => s.trackingNumber !== args.shipment!.trackingNumber), args.shipment] : o.shipments;
-    await ctx.db.patch(o._id, { fulfillmentStatus: args.to, shipments, updatedAt: now, ...(args.to === "delivered" ? { deliveredAt: now } : {}) });
-    const ownershipStep: Partial<Record<string, OwnershipStatus>> = { processing: "processing", shipped: "shipped", delivered: "delivered", cancelled: "cancelled" };
-    const step = ownershipStep[args.to];
-    if (step) await moveOwnershipForOrder(ctx, o._id, step, "provider");
-    if (args.to === "delivered") await serverEvent(ctx, "band_order_completed", o.userId, { productId: o.lines[0]?.productId, countryCode: o.shippingAddress.countryCode, orderId: o._id });
-    return { changed: true };
+/** A VERIFIED carrier event (Phase 6F) — called only after the fulfilment
+ * provider's verifyWebhook accepted the signature (or from its getTracking
+ * during recovery). Applied once per (provider, event id), by the carrier's own
+ * timestamps; stale and post-delivery events are recorded, never applied.
+ * Shipping or delivering never creates Band ownership (Phase 6G). */
+export const applyShipmentEvent = internalMutation({
+  args: {
+    provider: v.string(),
+    event: v.object({
+      eventId: v.string(), providerRef: v.string(), type: v.string(), providerStatus: v.string(), occurredAt: v.number(),
+      trackingNumber: v.optional(v.string()), trackingUrl: v.optional(v.string()), estimatedDeliveryAt: v.optional(v.number()),
+    }),
   },
-});
-
-/** Return progress. A request is checked against the policy the order was SOLD under. */
-export const updateReturn = internalMutation({
-  args: { orderId: v.id("commerceOrders"), to: returnStatus, condition: v.optional(v.string()) },
-  handler: async (ctx, args) => {
-    const o = await getOrder(ctx, args.orderId);
-    if (!canTransition(RETURN_TRANSITIONS, o.returnStatus, args.to)) throw new ConvexError({ code: "INVALID", message: `Return can't go from ${o.returnStatus} to ${args.to}` });
-    if (args.to === "requested") {
-      const e = returnEligibility(o, o.returnPolicy, args.condition ?? "", Date.now());
-      if (!e.ok) throw new ConvexError({ code: "INVALID", message: `Not eligible for return: ${e.reason}` });
-    }
-    await ctx.db.patch(o._id, { returnStatus: args.to, ...(args.condition ? { returnCondition: args.condition } : {}), updatedAt: Date.now() });
-    if (args.to === "received") {
-      await moveOwnershipForOrder(ctx, o._id, "returned", "staff");
-      await serverEvent(ctx, "band_returned", o.userId, { productId: o.lines[0]?.productId, countryCode: o.shippingAddress.countryCode, orderId: o._id });
-    }
-    return { changed: true };
-  },
+  handler: async (ctx, args) => applyShipmentEventRecord(ctx.db, args, COMMERCE_CONFIG, Date.now()),
 });
 
 /** An audited Band ownership grant (Phase 6D) — a replacement, a tester, or a

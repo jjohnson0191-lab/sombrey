@@ -10,9 +10,10 @@
 // The ORDER STAGE is a read model over 6A's three state machines (payment,
 // fulfilment, return — orders.ts), which stay the only source of truth:
 //   draft → quote_ready → payment_pending → paid → fulfillment_pending →
-//   shipped → delivered → return_* → refunded   (+ cancelled, payment_failed)
-// 6E moves orders only up to "paid" (via verified provider events). Shipment,
-// tracking and delivery are Phase 6F; ownership and activation are 6G.
+//   shipped → delivered → return_requested → return_authorized →
+//   return_in_transit → return_received → refunded  (+ cancelled, payment_failed,
+//   delivery_failed). 6E moves orders up to "paid"; 6F (fulfillment.ts) moves
+//   fulfilment, delivery and returns; ownership and activation are 6G.
 //
 // Pure — tested in tests/commerce/checkout.test.ts.
 
@@ -99,17 +100,19 @@ export function quoteUsable(q: OrderQuote | undefined | null, now: number): q is
 export type OrderStage =
   | "draft" | "quote_ready" | "payment_pending" | "paid" | "payment_failed" | "cancelled"
   | "fulfillment_pending" | "shipped" | "delivered" | "delivery_failed"
-  | "return_requested" | "return_approved" | "return_received" | "refunded";
+  | "return_requested" | "return_authorized" | "return_in_transit" | "return_received" | "refunded";
 
 export function orderStage(o: {
   paymentStatus: PaymentStatus; fulfillmentStatus: FulfillmentStatus; returnStatus: ReturnStatus;
   quote?: OrderQuote | null; paymentAttempt?: { startedAt: number } | null;
+  /** 6F: the active return's own status, when there is one (finer than returnStatus). */
+  activeReturn?: string | null;
 }, now: number): OrderStage {
   if (o.paymentStatus === "refunded" || o.returnStatus === "refunded") return "refunded";
   if (o.paymentStatus === "cancelled") return "cancelled";
   if (o.paymentStatus === "failed") return "payment_failed";
   if (o.returnStatus === "received") return "return_received";
-  if (o.returnStatus === "approved") return "return_approved";
+  if (o.returnStatus === "approved") return o.activeReturn === "in_transit" ? "return_in_transit" : "return_authorized";
   if (o.returnStatus === "requested") return "return_requested";
   if (o.paymentStatus === "paid" || o.paymentStatus === "partially_refunded") {
     if (o.fulfillmentStatus === "delivered") return "delivered";
