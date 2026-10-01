@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { hasRole, getUserRoles, primaryRole } from "./lib/roles.js";
+import { releaseDevicesOnAccountDeletion } from "./commerce/deviceStore";
 
 const ROLE_VALIDATOR = v.union(
   v.literal("client"),
@@ -1148,6 +1149,9 @@ export const deleteSelfAccount = mutation({
     // commerceSubscriptionHistory are financial records — retained, like
     // storeOrders (see above). Band ownership state is deleted; commerce
     // events keep only their counts (the account link is removed).
+    // Phase 6G: devices this account activated are deactivated first (never left
+    // "activated" to a deleted account); the unit's own record and history stay.
+    await releaseDevicesOnAccountDeletion(ctx.db, userId, Date.now());
     await purgeDocs(ctx, await ctx.db.query("bandOwnership").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
     // Phase 6C: the App Store account-token link is removed (the subscription
     // record, a financial record, keeps its own copy).

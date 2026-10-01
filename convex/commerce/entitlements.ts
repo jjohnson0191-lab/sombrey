@@ -2,11 +2,13 @@
 //
 // "What is this user allowed to access?" — answered from facts, never from a
 // user-editable flag:
-//   • Band ownership   — ownership records (orders; audited staff grants,
-//                        including Bands paired before commerce existed —
-//                        "legacy_pairing" records are created only by the
-//                        internal grant, never by the app). A Bluetooth
-//                        pairing ALONE counts only if the config says so (6D: no).
+//   • Band ownership   — ownership records: 6G ACTIVATION of a registered
+//                        physical device (active, of a Band product); audited
+//                        staff grants, including Bands paired before commerce
+//                        existed ("legacy_pairing" — created only by the
+//                        internal grant, never by the app). A Bluetooth pairing
+//                        ALONE counts only if the config says so (6D: no); a
+//                        linked pairing never counts by itself either.
 //   • subscription     — VERIFIED App Store records (subscriptionState.ts)
 //   • legacy access    — the existing hasPremiumAccess() paths (GOAT WALK web
 //                        Premium via Hercules, coaching tiers, admin grants,
@@ -22,10 +24,12 @@
 
 import type { Capability, CommerceConfig, CommercialState, FeatureId } from "./config.ts";
 import { ownsBand, type OwnershipRecord } from "./ownership.ts";
+import { isBandProduct } from "./devices.ts";
 import { grantsAccess, type SubscriptionRecord, type SubscriptionStatus } from "./subscriptionState.ts";
 
 export type EntitlementInput = {
-  ownership: Array<Pick<OwnershipRecord, "status" | "source">>;
+  /** 6G: activation records carry the product of the device they own. */
+  ownership: Array<Pick<OwnershipRecord, "status" | "source"> & { productId?: string }>;
   subscriptions: SubscriptionRecord[];
   /** The existing premium paths (lib/roles.ts hasPremiumAccess). */
   legacyPremium: boolean;
@@ -114,6 +118,8 @@ export function computeEntitlements(input: EntitlementInput, config: CommerceCon
   const bandSources: string[] = [];
   if (ownsBand(input.ownership.filter((r) => r.source === "order"), { countLegacyPairing: false })) bandSources.push("order");
   if (ownsBand(input.ownership.filter((r) => r.source === "staff_grant"), { countLegacyPairing: false })) bandSources.push("staff_grant");
+  // 6G: an activated physical device — only while that ownership is active, and only for a Band product.
+  if (ownsBand(input.ownership.filter((r) => r.source === "activation" && isBandProduct(config, r.productId)), { countLegacyPairing: false })) bandSources.push("activation");
   // An audited legacy_pairing record always counts; a bare pairing only if the config says so.
   if (ownsBand(input.ownership.filter((r) => r.source === "legacy_pairing"), { countLegacyPairing: true })
     || (config.pairedDeviceCountsAsBandOwnership && input.pairedDevices > 0)) {

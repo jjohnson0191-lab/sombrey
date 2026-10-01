@@ -59,9 +59,9 @@ test("ownership: ordered ≠ owned ≠ connected; activation isn't possible unti
     const t = transitionOwnership(cur, to, 3, "provider");
     assert.ok(t.ok); if (t.ok) cur = t.record;
   }
-  assert.deepEqual(Object.keys(ACTIVATION_METHODS), [], "no activation mechanism chosen (Phase 6G)");
+  assert.deepEqual(Object.keys(ACTIVATION_METHODS), ["activation_code"], "6G: the one activation mechanism");
   const act = transitionOwnership(cur, "activated", 4, "system", { method: "device_code" });
-  assert.deepEqual(act, { ok: false, error: "No activation method is available yet" });
+  assert.deepEqual(act, { ok: false, error: "No activation method is available yet" }, "an unregistered method still can't activate");
   const ret = transitionOwnership(cur, "returned", 5, "staff");
   assert.ok(ret.ok && ret.record.history.map((h) => h.status).join(">") === "purchased>processing>shipped>delivered>returned");
   assert.ok(!OWNED_STATUSES.includes("returned"));

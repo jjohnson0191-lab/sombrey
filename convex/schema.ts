@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import {
-  commerceEventName, fulfillmentLine, fulfillmentRecordStatus, fulfillmentStatus, inspectionCondition, orderLine, orderQuote, ownershipStatus, paymentAttempt, paymentStatus, returnReason, returnRecordStatus, returnStatus, shipmentStatus, subscriptionHistoryEvent,
+  commerceEventName, deviceStatus, fulfillmentLine, fulfillmentRecordStatus, fulfillmentStatus, hardwareIdKind, inspectionCondition, orderLine, orderQuote, ownershipStatus, paymentAttempt, paymentStatus, returnReason, returnRecordStatus, returnStatus, shipmentStatus, subscriptionHistoryEvent,
   shipment, shippingAddress, subscriptionStatus,
 } from "./commerce/validators";
 import { v } from "convex/values";
@@ -721,6 +721,7 @@ export default defineSchema({
     lines: v.array(fulfillmentLine),
     reason: returnReason,
     customerAttestedUnused: v.boolean(),           // the customer's statement — checked at inspection
+    deviceIds: v.optional(v.array(v.id("commerceDevices"))),  // 6G: the physical units staff received back
     inspection: v.optional(v.object({ condition: inspectionCondition, at: v.number(), byUserId: v.id("users") })),
     rejection: v.optional(v.object({ reason: v.string(), at: v.number(), byUserId: v.id("users") })),
     refund: v.optional(v.object({
@@ -842,19 +843,70 @@ export default defineSchema({
   // G69/QCBandSDK pairing, which a record can reference via activation.deviceRef).
   bandOwnership: defineTable({
     userId: v.id("users"),
-    source: v.union(v.literal("order"), v.literal("legacy_pairing"), v.literal("staff_grant")),
+    source: v.union(v.literal("order"), v.literal("legacy_pairing"), v.literal("staff_grant"), v.literal("activation")),
     orderId: v.optional(v.id("commerceOrders")),
+    // Phase 6G: the physical device this ownership is of, and its product.
+    deviceId: v.optional(v.id("commerceDevices")),
+    productId: v.optional(v.string()),
     status: ownershipStatus,
     history: v.array(v.object({
       status: ownershipStatus,
       at: v.number(),
-      by: v.union(v.literal("system"), v.literal("provider"), v.literal("staff")),
+      by: v.union(v.literal("system"), v.literal("provider"), v.literal("staff"), v.literal("customer")),
+      reason: v.optional(v.string()),
     })),
     activation: v.optional(v.object({ method: v.string(), deviceRef: v.optional(v.string()), activatedAt: v.number() })),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"])
-    .index("by_order", ["orderId"]),
+    .index("by_order", ["orderId"])
+    .index("by_device", ["deviceId"]),
+
+  // Phase 6G: one row per PHYSICAL unit (convex/commerce/devices.ts). Identified
+  // by a hardware identifier the product exposes (Band V1: MAC) — never its
+  // Bluetooth name or an iPhone's peripheral id. Registered and assigned by
+  // staff; activated by the customer with the one-time code packed with it
+  // (only its SHA-256 is stored). Never deleted; history kept.
+  commerceDevices: defineTable({
+    productId: v.string(),
+    generation: v.string(),
+    hardwareRevision: v.optional(v.string()),
+    hardwareIdKind,
+    hardwareId: v.string(),                     // canonical; sensitive — never in analytics or customer APIs
+    status: deviceStatus,
+    activationCodeHash: v.optional(v.string()),
+    activationCodeIssuedAt: v.optional(v.number()),
+    activationCodeUsedAt: v.optional(v.number()),
+    orderId: v.optional(v.id("commerceOrders")),
+    fulfillmentId: v.optional(v.id("commerceFulfillments")),
+    replacesDeviceId: v.optional(v.id("commerceDevices")),
+    ownerUserId: v.optional(v.id("users")),
+    currentOwnershipId: v.optional(v.id("bandOwnership")),
+    activatedAt: v.optional(v.number()),
+    endedAt: v.optional(v.number()),
+    registeredByUserId: v.id("users"),
+    history: v.array(v.object({
+      status: deviceStatus,
+      at: v.number(),
+      by: v.union(v.literal("staff"), v.literal("customer"), v.literal("system")),
+      reason: v.optional(v.string()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_hardware_id", ["hardwareIdKind", "hardwareId"])
+    .index("by_activation_code_hash", ["activationCodeHash"])
+    .index("by_fulfillment", ["fulfillmentId"])
+    .index("by_order", ["orderId"])
+    .index("by_owner", ["ownerUserId"])
+    .index("by_status", ["status"]),
+
+  // Phase 6G: activation attempts (for limiting code guessing). No code stored.
+  commerceActivationAttempts: defineTable({
+    userId: v.id("users"),
+    at: v.number(),
+    outcome: v.union(v.literal("succeeded"), v.literal("failed")),
+    reason: v.optional(v.string()),
+  }).index("by_user_and_at", ["userId", "at"]),
 
   // Append-only commercial events (convex/commerce/events.ts): a closed
   // catalogue, minimal data, for measurement — nothing acts on them.
@@ -1562,7 +1614,11 @@ export default defineSchema({
   // re-pairs a different physical band doesn't blend the two histories.
   wearableDevices: defineTable({
     userId: v.id("users"),
-    deviceId: v.string(),                  // CBPeripheral.identifier.uuidString
+    deviceId: v.string(),                  // CBPeripheral.identifier.uuidString — a per-iPhone CONNECTION id, not a physical identity
+    // Phase 6G: the physical device this pairing was linked to (only ever a
+    // device the same user owns; linking grants nothing).
+    physicalDeviceId: v.optional(v.id("commerceDevices")),
+    linkedAt: v.optional(v.number()),
     model: v.optional(v.string()),
     nickname: v.optional(v.string()),
     firmwareVersion: v.optional(v.string()),

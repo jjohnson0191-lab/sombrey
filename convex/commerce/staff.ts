@@ -25,11 +25,11 @@ import { approveRefund as approveRefundRecord, authorizeReturn as authorizeRetur
 import { providersFor } from "./providers";
 import { orderStage } from "./quotes";
 
-async function requireStaff(ctx: QueryCtx | MutationCtx, level: StaffLevel): Promise<Doc<"users">> {
+export async function requireStaff(ctx: QueryCtx | MutationCtx, level: StaffLevel): Promise<Doc<"users">> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new ConvexError({ code: "UNAUTHENTICATED", message: "Not logged in" });
   const user = await ctx.db.query("users").withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier)).unique();
-  if (!user || !staffMay(user, level)) throw new ConvexError({ code: "FORBIDDEN", message: level === "money" ? "Owner or Admin access required" : "Staff access required" });
+  if (!user || !staffMay(user, level)) throw new ConvexError({ code: "FORBIDDEN", message: level === "fulfillment" ? "Staff access required" : "Owner or Admin access required" });
   return user;
 }
 
@@ -186,10 +186,10 @@ export const rejectReturn = mutation({
 
 /** The item arrived and was inspected ("unused" is decided here, by a person). */
 export const receiveReturn = mutation({
-  args: { returnId: v.id("commerceReturns"), condition: inspectionCondition },
+  args: { returnId: v.id("commerceReturns"), condition: inspectionCondition, deviceIds: v.optional(v.array(v.id("commerceDevices"))) },
   handler: async (ctx, args) => {
     const staff = await requireStaff(ctx, "fulfillment");
-    return await receiveReturnRecord(ctx.db, staff._id, args.returnId, args.condition, COMMERCE_CONFIG, Date.now());
+    return await receiveReturnRecord(ctx.db, staff._id, args.returnId, args.condition, COMMERCE_CONFIG, Date.now(), args.deviceIds ?? []);
   },
 });
 
@@ -239,7 +239,7 @@ export const issueRefund = action({
 // ─── Internal steps of the actions above (the caller's identity carries through) ──
 
 export const checkStaff = internalQuery({
-  args: { level: v.union(v.literal("fulfillment"), v.literal("money")) },
+  args: { level: v.union(v.literal("fulfillment"), v.literal("money"), v.literal("device_admin")) },
   handler: async (ctx, args) => { await requireStaff(ctx, args.level); return null; },
 });
 

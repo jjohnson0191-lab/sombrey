@@ -11,10 +11,10 @@ const CONVEX = join(import.meta.dirname, "../../convex");
 const read = (p: string) => readFileSync(join(CONVEX, p), "utf8");
 const exported = (src: string, kind: string) => [...src.matchAll(new RegExp(`export const (\\w+) = ${kind}\\(`, "g"))].map((m) => m[1]);
 const PROTECTED = ["commerceOrders", "commerceSubscriptions", "commerceSubscriptionHistory", "bandOwnership", "commerceAppStoreNotifications", "commerceAppAccountTokens", "commercePaymentEvents",
-  "commerceFulfillments", "commerceShipments", "commerceShipmentEvents", "commerceReturns"];
+  "commerceFulfillments", "commerceShipments", "commerceShipmentEvents", "commerceReturns", "commerceDevices", "commerceActivationAttempts"];
 /** The only files allowed to write protected rows: the internal functions and
  * (6C) the shared subscription writer they — and only they — call. */
-const TRUSTED_WRITERS = ["commerce/internal.ts", "commerce/subscriptionStore.ts", "commerce/checkoutStore.ts", "commerce/fulfillmentStore.ts", "commerce/returnsStore.ts"];
+const TRUSTED_WRITERS = ["commerce/internal.ts", "commerce/subscriptionStore.ts", "commerce/checkoutStore.ts", "commerce/fulfillmentStore.ts", "commerce/returnsStore.ts", "commerce/deviceStore.ts"];
 
 function allConvexFiles(dir = CONVEX, rel = ""): string[] {
   return readdirSync(join(dir), { withFileTypes: true }).flatMap((d) => {
@@ -65,6 +65,8 @@ test("nothing outside the trusted module writes orders, subscriptions or ownersh
     // 6F: fulfilment/return writers are reachable only through role-checked staff
     // functions, the customer's own-order API, verified internal events, and each other.
     if (/from "[^"]*fulfillmentStore(\.ts)?"/.test(src)) assert.ok(["commerce/staff.ts", "commerce/internal.ts", "commerce/returnsStore.ts"].includes(file), `${file} imports the fulfilment writer`);
+    // 6G: the device/ownership writer — staff device ops, the customer's own devices, returns, account deletion.
+    if (/from "[^"]*deviceStore(\.ts)?"/.test(src)) assert.ok(["commerce/staffDevices.ts", "commerce/myDevices.ts", "commerce/returnsStore.ts", "users.ts"].includes(file), `${file} imports the device writer`);
     if (/from "[^"]*returnsStore(\.ts)?"/.test(src)) assert.ok(["commerce/staff.ts", "commerce/orderTracking.ts", "commerce/checkoutStore.ts"].includes(file), `${file} imports the returns writer`);
     // Only the read side may import the store module, and only its token link / row mapper.
     if (/from "[^"]*subscriptionStore(\.ts)?"/.test(src)) {

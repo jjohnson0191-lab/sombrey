@@ -10,7 +10,8 @@
 //
 // "Unused" (the 30-day policy's condition) is the customer's statement at
 // request time and a STAFF INSPECTION on receipt — there is no automatic usage
-// detection. Returns never touch Band ownership, activation or pairing (6G).
+// detection. Phase 6G: the physical units named at receipt stop being owned —
+// at receipt or at the verified refund (config); a request never ends ownership.
 //
 // Tested against an in-memory database in tests/commerce/fulfillment.test.ts.
 
@@ -24,6 +25,7 @@ import {
 } from "./fulfillment.ts";
 import { RETURN_TRANSITIONS, canTransition } from "./orders.ts";
 import { serverEvent, KEY } from "./fulfillmentStore.ts";
+import { endOwnershipForReturn, validateReturnedDevices } from "./deviceStore.ts";
 
 type Db = MutationCtx["db"];
 type Return = Doc<"commerceReturns">;
@@ -107,11 +109,16 @@ export async function rejectReturn(db: Db, staffUserId: Id<"users">, returnId: I
   return { changed: true };
 }
 
-/** Staff received the item and inspected it. */
-export async function receiveReturn(db: Db, staffUserId: Id<"users">, returnId: Id<"commerceReturns">, condition: InspectionCondition, config: CommerceConfig, now: number) {
+/** Staff received the item and inspected it. 6G: `deviceIds` are the physical
+ * units that came back; their ownership ends now or when the refund is verified
+ * (config.devices.ownershipEndsOnReturnAt). A return REQUEST never ends ownership. */
+export async function receiveReturn(db: Db, staffUserId: Id<"users">, returnId: Id<"commerceReturns">, condition: InspectionCondition, config: CommerceConfig, now: number,
+  deviceIds: Id<"commerceDevices">[] = []) {
   const r = await returnOf(db, returnId);
   if (r.status === "received") return { changed: false };
-  const order = await move(db, r, "received", "staff", now, { inspection: { condition, at: now, byUserId: staffUserId } });
+  if (deviceIds.length) await validateReturnedDevices(db, r.orderId, r.lines, deviceIds);
+  const order = await move(db, r, "received", "staff", now, { inspection: { condition, at: now, byUserId: staffUserId }, ...(deviceIds.length ? { deviceIds } : {}) });
+  if (deviceIds.length && config.devices.ownershipEndsOnReturnAt === "received") await endOwnershipForReturn(db, r.orderId, deviceIds, config, now);
   await serverEvent(db, config, "return_received", order, now, { productId: r.lines[0]?.productId, source: condition });
   return { changed: true };
 }
@@ -151,6 +158,7 @@ export async function completeRefund(db: Db, orderId: Id<"commerceOrders">, amou
     .find((x) => x.status === "refund_approved" && x.refund?.amountCents === amountCents);
   if (!r?.refund) return { linked: false };
   const order = await move(db, r, "refunded", "provider", now, { refund: { ...r.refund, completedAt: now } });
+  if (r.deviceIds?.length && config.devices.ownershipEndsOnReturnAt === "refunded") await endOwnershipForReturn(db, orderId, r.deviceIds, config, now);
   await serverEvent(db, config, "refund_completed", order, now, { productId: r.lines[0]?.productId, amountCents, currency: r.refund.currency });
   return { linked: true };
 }

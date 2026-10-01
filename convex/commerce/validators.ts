@@ -47,6 +47,7 @@ export const subscriptionStatus = v.union(
 export const ownershipStatus = v.union(
   v.literal("purchased"), v.literal("processing"), v.literal("shipped"), v.literal("delivered"),
   v.literal("activated"), v.literal("connected"), v.literal("disconnected"), v.literal("returned"), v.literal("cancelled"),
+  v.literal("replaced"), v.literal("deactivated"),
 );
 export const commerceEventName = v.union(
   v.literal("product_viewed"), v.literal("band_purchase_initiated"), v.literal("band_checkout_abandoned"),
@@ -56,6 +57,8 @@ export const commerceEventName = v.union(
   v.literal("band_quote_requested"), v.literal("band_payment_started"),
   v.literal("fulfillment_created"), v.literal("shipment_created"), v.literal("shipment_delivered"), v.literal("delivery_exception"),
   v.literal("return_requested"), v.literal("return_received"), v.literal("refund_completed"),
+  v.literal("device_activation_completed"), v.literal("device_activation_failed"), v.literal("device_paired"),
+  v.literal("device_replaced"), v.literal("device_deactivated"), v.literal("device_returned"),
 );
 // Phase 6C: what a subscription history row records (appStoreRules.ts HISTORY_EVENTS).
 export const subscriptionHistoryEvent = v.union(
@@ -106,3 +109,7 @@ export const returnRecordStatus = lit(["requested", "authorized", "in_transit", 
 export const returnReason = lit(["changed_mind", "not_as_expected", "fit_or_comfort", "arrived_damaged", "other"] as const);
 export const inspectionCondition = lit(["unused", "used", "damaged", "incomplete"] as const);
 export const fulfillmentLine = v.object({ productId: v.string(), quantity: v.number() });
+
+// Phase 6G: physical devices (devices.ts holds the rules).
+export const deviceStatus = lit(["registered", "assigned", "activated", "replaced", "returned", "deactivated", "retired"] as const);
+export const hardwareIdKind = lit(["mac", "serial", "vendor_id"] as const);

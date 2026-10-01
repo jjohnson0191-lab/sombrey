@@ -17,9 +17,17 @@ export class MemoryDb {
     return {
       withIndex: (_name: string, f: (q: unknown) => unknown) => {
         const eqs: Array<[string, unknown]> = [];
-        const q = { eq: (field: string, value: unknown) => { eqs.push([field, value]); return q; } };
+        const ranges: Array<(r: Row) => boolean> = [];
+        const cmp = (field: string, test: (a: number, b: number) => boolean, value: number) => { ranges.push((r) => typeof r[field] === "number" && test(r[field] as number, value)); return q; };
+        const q = {
+          eq: (field: string, value: unknown) => { eqs.push([field, value]); return q; },
+          gt: (field: string, value: number) => cmp(field, (a, b) => a > b, value),
+          gte: (field: string, value: number) => cmp(field, (a, b) => a >= b, value),
+          lt: (field: string, value: number) => cmp(field, (a, b) => a < b, value),
+          lte: (field: string, value: number) => cmp(field, (a, b) => a <= b, value),
+        };
         f(q);
-        const match = () => all().filter((r) => eqs.every(([k, v]) => r[k] === v));
+        const match = () => all().filter((r) => eqs.every(([k, v]) => r[k] === v) && ranges.every((t) => t(r)));
         return {
           unique: async () => {
             const m = match();
@@ -42,6 +50,10 @@ export class MemoryDb {
     const row = this.get(id);
     if (!row) throw new Error(`no row ${id}`);
     for (const [k, v] of Object.entries(fields)) if (v === undefined) delete row[k]; else row[k] = structuredClone(v);
+  }
+  async delete(id: string) {
+    const table = id.split(":")[0];
+    this.tables.set(table, this.rows(table).filter((r) => r._id !== id));
   }
   get(id: string): Row | null {
     const table = id.split(":")[0];

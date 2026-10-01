@@ -1,50 +1,56 @@
 // Sombrey commerce — Phase 6A: Band ownership (pure rules).
 //
-// Ordering a Band and having a Band are different things. An ownership record
-// follows a Band from purchase to activation and connection — or to a return.
-// A paid order never means a device has connected. How a Band is ACTIVATED
-// (device code, QR, serial, Bluetooth-first, …) is undecided: activation goes
-// through the ACTIVATION_METHODS registry, which is empty, so no activation
-// mechanism exists until Phase 6G registers one. The existing G69/QCBandSDK
-// pairing (wearableDevices) is untouched; a pairing can later be LINKED to an
-// ownership record (`deviceRef`) without restructuring anything.
+// Ordering a Band and having a Band are different things.
+// Phase 6G: ownership of a PHYSICAL device (commerceDevices) starts only by
+// ACTIVATION — a one-time code that came in the box ("activation_code") —
+// never from payment, shipping, delivery, Bluetooth discovery or pairing. It
+// ends as replaced, returned or deactivated; the record is never deleted, so
+// the history stays auditable. Pairing (wearableDevices) is separate: a pairing
+// may be LINKED to a device its user already owns, and grants nothing.
+// The 6A order-flavoured statuses (purchased…connected) remain only for older
+// records; 6E stopped creating order ownership.
 //
 // Pure — tested in tests/commerce/ownership.test.ts.
 
 export type OwnershipStatus =
   | "purchased" | "processing" | "shipped" | "delivered"
   | "activated" | "connected" | "disconnected"
-  | "returned" | "cancelled";
+  | "returned" | "cancelled"
+  | "replaced" | "deactivated";   // 6G
 
 export type OwnershipSource =
   | "order"           // a Sombrey commerce order (commerceOrders)
   | "legacy_pairing"  // a Band paired before commerce existed — recorded ONLY by the audited internal grant (6D)
-  | "staff_grant";    // granted by an owner/admin (audited) — e.g. replacements, testers
+  | "staff_grant"     // granted by an owner/admin (audited) — e.g. testers
+  | "activation";     // 6G: the customer activated a registered physical device (commerceDevices)
 
 export const OWNERSHIP_TRANSITIONS: Record<OwnershipStatus, OwnershipStatus[]> = {
   purchased: ["processing", "cancelled"],
   processing: ["shipped", "cancelled"],
   shipped: ["delivered", "returned"],
   delivered: ["activated", "returned"],
-  activated: ["connected", "returned"],
+  activated: ["connected", "returned", "replaced", "deactivated"],
   connected: ["disconnected", "returned"],
   disconnected: ["connected", "returned"],
   returned: [],
   cancelled: [],
+  replaced: [],
+  deactivated: [],
 };
 
 /** Statuses in which the user owns (or is receiving) a Band — PROVISIONAL:
  * includes purchased-but-undelivered, since the user has paid for it. */
 export const OWNED_STATUSES: readonly OwnershipStatus[] = ["purchased", "processing", "shipped", "delivered", "activated", "connected", "disconnected"];
 
-/** Activation mechanisms available — EMPTY until Phase 6G decides one. Each
- * entry will say how a physical Band is proven to belong to this account. */
-export const ACTIVATION_METHODS: Readonly<Record<string, { description: string }>> = {};
+/** How a physical Band is proven to belong to an account (Phase 6G). */
+export const ACTIVATION_METHODS: Readonly<Record<string, { description: string }>> = {
+  activation_code: { description: "A one-time code generated when the device was registered and packed with it; possession of the box is the proof. The server stores only its SHA-256." },
+};
 
 export type OwnershipRecord = {
   status: OwnershipStatus;
   source: OwnershipSource;
-  history: Array<{ status: OwnershipStatus; at: number; by: "system" | "provider" | "staff" }>;
+  history: Array<{ status: OwnershipStatus; at: number; by: "system" | "provider" | "staff" | "customer"; reason?: string }>;
   activation?: { method: string; deviceRef?: string; activatedAt: number };
 };
 

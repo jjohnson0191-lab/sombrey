@@ -27,7 +27,7 @@ export async function entitlementsFor(ctx: QueryCtx | MutationCtx, user: Doc<"us
   const subscriptions = await ctx.db.query("commerceSubscriptions").withIndex("by_user", (q) => q.eq("userId", user._id)).collect();
   const paired = await ctx.db.query("wearableDevices").withIndex("by_user", (q) => q.eq("userId", user._id)).take(10);
   return computeEntitlements({
-    ownership: ownership.map((o) => ({ status: o.status, source: o.source })),
+    ownership: ownership.map((o) => ({ status: o.status, source: o.source, ...(o.productId ? { productId: o.productId } : {}) })),
     subscriptions: subscriptions.map(toSubscriptionRecord),
     legacyPremium: hasPremiumAccess(user),
     pairedDevices: paired.length,

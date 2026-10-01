@@ -53,6 +53,14 @@ export const COMMERCE_EVENTS = {
   return_requested: "server",
   return_received: "server",
   refund_completed: "server",
+  // 6G: device lifecycle — product (+ a reason code as source) only; never a
+  // MAC, serial, device id or code.
+  device_activation_completed: "server",
+  device_activation_failed: "server",
+  device_paired: "server",
+  device_replaced: "server",
+  device_deactivated: "server",
+  device_returned: "server",
 } as const satisfies Record<string, "client" | "server">;
 
 export type CommerceEventName = keyof typeof COMMERCE_EVENTS;

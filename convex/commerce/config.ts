@@ -51,6 +51,9 @@ export type PhysicalProduct = {
   fulfillmentProfile: "parcel";
   returnable: boolean;
   requiresActivation: boolean;
+  /** Phase 6G: the hardware identifiers this product actually exposes (evidence:
+   * docs/COMMERCE_6G.md §4). The Band V1: its MAC only — no serial number API. */
+  identityKinds: Array<"mac" | "serial" | "vendor_id">;
   displayName: string;
   description: string;
   priceCents: number;
@@ -125,6 +128,18 @@ export type CommerceConfig = {
     /** Staff view: a shipment with no carrier update for this long is flagged. */
     stalledTrackingAfterHours: number;
   };
+  /** Phase 6G: physical devices, activation and ownership. */
+  devices: {
+    /** Activation needs the device's fulfilment to be carrier-delivered (no
+     * provider yet → no delivery → customers can't self-activate; staff can
+     * hand over in person). */
+    activationRequiresDelivery: boolean;
+    /** When a returned device stops being owned: when staff receive it, or when
+     * the refund is verified. Return REQUESTED never ends ownership. */
+    ownershipEndsOnReturnAt: "received" | "refunded";
+    /** Failed activation attempts per account per hour (code guessing). */
+    activationAttemptsPerHour: number;
+  };
   /** Phase 6E: no inventory source exists. null = stock is NOT tracked — the
    * app must never show stock levels ("In stock", "Only 3 left"). */
   inventory: { provider: null };
@@ -143,7 +158,7 @@ export type CommerceConfig = {
 
 /** PROVISIONAL — SUBJECT TO CHANGE. Launch assumptions, 2026-10. */
 export const COMMERCE_CONFIG: CommerceConfig = {
-  version: "2026-10-provisional.4",
+  version: "2026-10-provisional.5",
   provisional: true,
   currency: "USD",
   products: {
@@ -156,6 +171,7 @@ export const COMMERCE_CONFIG: CommerceConfig = {
       fulfillmentProfile: "parcel",
       returnable: true,
       requiresActivation: true,
+      identityKinds: ["mac"],
       displayName: "Sombrey Band",
       description: "The Sombrey wearable band.",
       priceCents: 100_00,
@@ -192,6 +208,7 @@ export const COMMERCE_CONFIG: CommerceConfig = {
     maxOpenCheckoutsPerUser: 3,
   },
   fulfillment: { provider: null, stalledTrackingAfterHours: 72 },
+  devices: { activationRequiresDelivery: true, ownershipEndsOnReturnAt: "received", activationAttemptsPerHour: 10 },
   inventory: { provider: null },
   capabilityMatrix: {
     none: [],
@@ -264,6 +281,8 @@ export function validateCommerceConfig(c: CommerceConfig): string[] {
   if (!c.checkout.methods.length) p.push("checkout: at least one payment method");
   if (!Number.isInteger(c.fulfillment.stalledTrackingAfterHours) || c.fulfillment.stalledTrackingAfterHours < 12 || c.fulfillment.stalledTrackingAfterHours > 720) p.push("fulfillment: stalledTrackingAfterHours 12–720");
   if (c.returns.clockStartsAt !== "delivery") p.push("returns: the window counts from delivery");
+  if (!Number.isInteger(c.devices.activationAttemptsPerHour) || c.devices.activationAttemptsPerHour < 3 || c.devices.activationAttemptsPerHour > 50) p.push("devices: activationAttemptsPerHour 3–50");
+  if (c.products.band.requiresActivation && !c.products.band.identityKinds.length) p.push("band: a product that needs activation needs at least one hardware identifier");
   if (!Number.isInteger(c.checkout.quoteTtlMinutes) || c.checkout.quoteTtlMinutes < 1 || c.checkout.quoteTtlMinutes > 60) p.push("checkout: quoteTtlMinutes 1–60");
   if (!Number.isInteger(c.checkout.maxOpenCheckoutsPerUser) || c.checkout.maxOpenCheckoutsPerUser < 1 || c.checkout.maxOpenCheckoutsPerUser > 10) p.push("checkout: maxOpenCheckoutsPerUser 1–10");
   if (!/^[A-Z0-9_]{3,40}$/.test(c.products.band.sku)) p.push("band: sku must be UPPER_SNAKE");
